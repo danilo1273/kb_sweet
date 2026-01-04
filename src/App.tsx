@@ -3,6 +3,7 @@ import { useEffect, useState, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { supabase } from '@/supabaseClient';
 import { Toaster } from '@/components/ui/toaster';
+import { Button } from '@/components/ui/button';
 import Login from '@/pages/Login';
 import Dashboard from '@/pages/Dashboard';
 import Profile from '@/pages/Profile';
@@ -13,7 +14,7 @@ import Purchases from '@/pages/Purchases';
 import PlaceholderPage from '@/pages/PlaceholderPage';
 import { Sidebar } from '@/components/Sidebar';
 import { Session } from '@supabase/supabase-js';
-import { Loader2, ShoppingCart, Package, BookOpen, DollarSign, ClipboardList } from 'lucide-react';
+import { Loader2, ShoppingCart, Menu } from 'lucide-react';
 
 const AdminUsers = lazy(() => import('@/pages/AdminUsers'));
 
@@ -69,16 +70,38 @@ function App() {
 }
 
 function ProtectedLayout({ session }: { session: Session | null }) {
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+
     if (!session) {
         return <Navigate to="/login" />;
     }
 
     return (
         <div className="flex h-screen bg-zinc-50 w-full overflow-hidden">
-            <Sidebar />
-            <main className="flex-1 overflow-y-auto w-full">
-                <Outlet />
-            </main>
+            <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+            <div className="flex flex-1 flex-col overflow-hidden">
+                {/* Mobile Header */}
+                <header className="flex h-16 items-center border-b bg-white px-4 lg:hidden">
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setSidebarOpen(true)}
+                        className="mr-4"
+                    >
+                        <Menu className="h-6 w-6" />
+                        <span className="sr-only">Abrir menu</span>
+                    </Button>
+                    <div className="flex items-center gap-2">
+                        <img src="/logo.png" alt="Logo" className="h-8" />
+                        <span className="font-bold text-zinc-900 border-l pl-2 border-zinc-200">KB Sweet</span>
+                    </div>
+                </header>
+
+                <main className="flex-1 overflow-y-auto w-full">
+                    <Outlet />
+                </main>
+            </div>
         </div>
     );
 }

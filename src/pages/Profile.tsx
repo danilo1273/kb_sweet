@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
-import { User, Loader2, Upload } from "lucide-react";
+import { User, Loader2, Upload, LogOut } from "lucide-react";
 
 export default function Profile() {
     const [loading, setLoading] = useState(true);
@@ -132,7 +132,17 @@ export default function Profile() {
 
     return (
         <div className="flex-1 p-8 min-h-screen bg-zinc-50 dark:bg-zinc-950">
-            <h2 className="text-3xl font-bold tracking-tight mb-6">Configurações de Conta</h2>
+            <div className="flex items-center justify-between mb-6">
+                <h2 className="text-3xl font-bold tracking-tight">Configurações de Conta</h2>
+                <Button
+                    variant="destructive"
+                    onClick={() => supabase.auth.signOut()}
+                    className="gap-2"
+                >
+                    <LogOut className="h-4 w-4" />
+                    Sair do Sistema
+                </Button>
+            </div>
 
             <Tabs defaultValue="account" className="w-full max-w-2xl">
                 <TabsList className="grid w-full grid-cols-2">
