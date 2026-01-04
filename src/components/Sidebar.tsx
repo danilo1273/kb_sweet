@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
+import { APP_VERSION } from '@/version';
 import { useEffect, useState } from "react";
 
 interface SidebarProps {
@@ -46,19 +47,23 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         await supabase.auth.signOut();
     };
 
-    const navItems = [
-        { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-        { name: "Vendas", href: "/sales", icon: ShoppingCart },
-        { name: "Estoque", href: "/inventory", icon: Package },
-        { name: "Receitas", href: "/recipes", icon: BookOpen },
-        { name: "Financeiro", href: "/financial", icon: DollarSign },
-        { name: "Compras", href: "/purchases", icon: ClipboardList },
-        { name: "Perfis", href: "/profile", icon: User },
+    const allNavItems = [
+        { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: [] }, // Todos
+        { name: "Estoque", href: "/inventory", icon: Package, roles: ['admin', 'buyer', 'approver', 'seller'] },
+        { name: "Receitas", href: "/recipes", icon: BookOpen, roles: ['admin', 'confeiteiro', 'buyer', 'seller'] },
+        // Vendas - Placeholder para seller/admin
+        { name: "Vendas", href: "/sales", icon: ShoppingCart, roles: ['admin', 'seller'] },
+        { name: "Compras", href: "/purchases", icon: ClipboardList, roles: ['admin', 'buyer', 'approver'] },
+        { name: "Financeiro", href: "/financial", icon: DollarSign, roles: ['admin', 'financial'] }, // Apenas Admin ou Financeiro se houver
+        { name: "Usuários", href: "/admin", icon: User, roles: ['admin'] },
+        { name: "Perfis", href: "/profile", icon: User, roles: [] }, // Todos
     ];
 
-    if (roles.includes('admin')) {
-        navItems.push({ name: "Usuários", href: "/admin", icon: User });
-    }
+    const navItems = allNavItems.filter(item => {
+        if (item.roles.length === 0) return true;
+        // Se o usuário tiver pelo menos uma role permitida
+        return item.roles.some(r => roles.includes(r));
+    });
 
     return (
         <>
@@ -108,15 +113,18 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                     })}
                 </nav>
 
-                <div className="border-t border-zinc-800 p-4">
+                <div className="p-4 border-t border-zinc-800">
                     <Button
                         variant="ghost"
-                        className="w-full justify-start gap-3 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                        className="w-full justify-start text-zinc-400 hover:text-white hover:bg-zinc-800"
                         onClick={handleLogout}
                     >
-                        <LogOut className="h-5 w-5" />
+                        <LogOut className="mr-2 h-4 w-4" />
                         Sair
                     </Button>
+                    <div className="mt-2 text-center text-xs text-zinc-600">
+                        v{APP_VERSION}
+                    </div>
                 </div>
             </div>
         </>

@@ -3,10 +3,10 @@ import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
-import { Loader2, Plus, Shield, Pencil } from "lucide-react";
+import { Loader2, Plus, Shield, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { createClient } from "@supabase/supabase-js";
 
@@ -20,13 +20,16 @@ interface Profile {
     email?: string;
 }
 
-const AVAILABLE_ROLES = [
-    { id: 'admin', label: 'Administrador' },
-    { id: 'manager', label: 'Gerente' },
-    { id: 'sales', label: 'Vendedor' },
-    { id: 'stock', label: 'Estoquista' },
-    { id: 'client', label: 'Cliente' },
-];
+// Mapeamento de Roles para Labels amigáveis
+const ROLE_LABELS: Record<string, string> = {
+    admin: 'Administrador (Geral)',
+    buyer: 'Compras (Lançar)',
+    seller: 'Vendas (Vendedor)',
+    approver: 'Aprovador (Estoque/Compras)',
+    financial: 'Financeiro (Contas)'
+};
+
+const AVAILABLE_ROLES = ['admin', 'buyer', 'seller', 'approver', 'financial'];
 
 export default function AdminUsers() {
     const [users, setUsers] = useState<Profile[]>([]);
@@ -44,6 +47,10 @@ export default function AdminUsers() {
     // Editar Roles State
     const [editingUser, setEditingUser] = useState<Profile | null>(null);
     const [editingRoles, setEditingRoles] = useState<string[]>([]);
+    const [editingName, setEditingName] = useState("");
+    const [editingEmail, setEditingEmail] = useState("");
+    const [editingPassword, setEditingPassword] = useState("");
+    const [isSaving, setIsSaving] = useState(false);
     const [isEditRoleOpen, setIsEditRoleOpen] = useState(false);
 
     useEffect(() => {
@@ -105,13 +112,15 @@ export default function AdminUsers() {
             if (authData.user) {
                 const { error: profileError } = await supabase
                     .from('profiles')
-                    .update({
+                    .upsert([{
+                        id: authData.user.id,
                         roles: newUserRoles,
                         role: newUserRoles[0], // Compatibilidade
                         status: 'active',
-                        full_name: newUserName
-                    })
-                    .eq('id', authData.user.id);
+                        full_name: newUserName,
+                        email: newUserEmail // Garantir email no perfil se a coluna existir
+                    }])
+                    .select();
 
                 if (profileError) console.warn("Profile update warning:", profileError);
             }
@@ -134,26 +143,77 @@ export default function AdminUsers() {
     function openEditRoles(user: Profile) {
         setEditingUser(user);
         setEditingRoles(user.roles || []);
+        setEditingName(user.full_name || "");
+        setEditingEmail(user.email || "");
+        setEditingPassword("");
         setIsEditRoleOpen(true);
     }
 
-    async function saveRoles() {
+    async function handleSaveRoles() {
         if (!editingUser) return;
-
-        const { error } = await supabase
-            .from('profiles')
-            .update({
+        setIsSaving(true);
+        try {
+            // 1. Atualizar Roles e Nome no Perfil
+            const updates: any = {
                 roles: editingRoles,
-                role: editingRoles.length > 0 ? editingRoles[0] : null // Compatibilidade
-            })
-            .eq('id', editingUser.id);
+                role: editingRoles.length > 0 ? editingRoles[0] : null, // legacy compat
+                full_name: editingName
+            };
 
-        if (error) {
-            toast({ variant: 'destructive', title: 'Erro ao salvar permissões' });
-        } else {
-            toast({ title: 'Permissões atualizadas' });
+            const { error } = await supabase
+                .from('profiles')
+                .update(updates)
+                .eq('id', editingUser.id);
+
+            if (error) throw error;
+
+            // 2. Atualizar Senha (Se fornecida) via RPC
+            if (editingPassword && editingPassword.trim() !== "") {
+                const { error: rpcError } = await supabase.rpc('admin_update_password', {
+                    target_user_id: editingUser.id,
+                    new_password: editingPassword
+                });
+                if (rpcError) throw rpcError;
+                toast({ title: "Senha atualizada com sucesso!" });
+            }
+
+            toast({ title: "Usuário atualizado com sucesso!" });
             setIsEditRoleOpen(false);
             fetchUsers();
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Erro ao atualizar", description: error.message });
+        } finally {
+            setIsSaving(false);
+        }
+    }
+
+    async function handleDeleteUser() {
+        if (!editingUser) return;
+        if (!confirm("TEM CERTEZA? Esta ação não pode ser desfeita e apagará todo o histórico deste usuário.")) return;
+
+        setIsSaving(true);
+        try {
+            // Tenta via RPC (Hard Delete completo)
+            const { error } = await supabase.rpc('admin_delete_user', {
+                target_user_id: editingUser.id
+            });
+            if (error) throw error;
+
+            toast({ title: "Usuário excluído permanentemente." });
+            setIsEditRoleOpen(false);
+            fetchUsers();
+        } catch (error: any) {
+            console.warn("RPC falhou, tentando soft delete via profile", error);
+            const { error: profileError } = await supabase.from('profiles').delete().eq('id', editingUser.id);
+            if (profileError) {
+                toast({ variant: "destructive", title: "Erro ao excluir", description: profileError.message });
+            } else {
+                toast({ title: "Perfil excluído (Soft Delete)." });
+                setIsEditRoleOpen(false);
+                fetchUsers();
+            }
+        } finally {
+            setIsSaving(false);
         }
     }
 
@@ -182,6 +242,7 @@ export default function AdminUsers() {
                     <TableHeader>
                         <TableRow>
                             <TableHead>Nome</TableHead>
+                            <TableHead>Email</TableHead>
                             <TableHead>ID (Ref)</TableHead>
                             <TableHead>Funções (Roles)</TableHead>
                             <TableHead>Status</TableHead>
@@ -190,7 +251,7 @@ export default function AdminUsers() {
                     </TableHeader>
                     <TableBody>
                         {loading ? (
-                            <TableRow><TableCell colSpan={5} className="text-center"><Loader2 className="animate-spin mx-auto" /></TableCell></TableRow>
+                            <TableRow><TableCell colSpan={6} className="text-center"><Loader2 className="animate-spin mx-auto" /></TableCell></TableRow>
                         ) : users.map(u => (
                             <TableRow key={u.id}>
                                 <TableCell className="font-medium">
@@ -198,17 +259,17 @@ export default function AdminUsers() {
                                         <span>{u.full_name || 'Sem nome'}</span>
                                     </div>
                                 </TableCell>
+                                <TableCell>{u.email || '-'}</TableCell>
                                 <TableCell className="font-mono text-xs text-muted-foreground">{u.id.substring(0, 8)}...</TableCell>
                                 <TableCell>
                                     <div className="flex flex-wrap gap-1">
-                                        {(u.roles || []).map(r => (
-                                            <Badge key={r} variant="outline" className="text-xs">
-                                                {AVAILABLE_ROLES.find(ar => ar.id === r)?.label || r}
-                                            </Badge>
-                                        ))}
-                                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 rounded-full" onClick={() => openEditRoles(u)}>
-                                            <Pencil className="h-3 w-3" />
-                                        </Button>
+                                        {(u.roles || [])
+                                            .filter(r => r !== 'pending' || (u.roles || []).length === 1) // Esconde 'pending' se tiver outros cargos
+                                            .map(r => (
+                                                <Badge key={r} variant="outline" className="text-xs">
+                                                    {ROLE_LABELS[r] || r}
+                                                </Badge>
+                                            ))}
                                     </div>
                                 </TableCell>
                                 <TableCell>
@@ -217,9 +278,14 @@ export default function AdminUsers() {
                                     </Badge>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                    <Button variant="ghost" size="icon" title="Em breve: Bloquear">
-                                        <Shield className="h-4 w-4 text-zinc-400" />
-                                    </Button>
+                                    <div className="flex justify-end gap-1">
+                                        <Button variant="ghost" size="icon" onClick={() => openEditRoles(u)} title="Editar Usuário">
+                                            <Pencil className="h-4 w-4" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" title="Em breve: Bloquear">
+                                            <Shield className="h-4 w-4 text-zinc-400" />
+                                        </Button>
+                                    </div>
                                 </TableCell>
                             </TableRow>
                         ))}
@@ -251,16 +317,16 @@ export default function AdminUsers() {
                             <Label>Funções</Label>
                             <div className="flex flex-col gap-2 border p-3 rounded-md">
                                 {AVAILABLE_ROLES.map(role => (
-                                    <div key={role.id} className="flex items-center gap-2">
+                                    <div key={role} className="flex items-center gap-2">
                                         <input
                                             type="checkbox"
-                                            id={`new-${role.id}`}
+                                            id={`new-${role}`}
                                             className="h-4 w-4 rounded border-gray-300"
-                                            checked={newUserRoles.includes(role.id)}
-                                            onChange={() => toggleRole(role.id, newUserRoles, setNewUserRoles)}
+                                            checked={newUserRoles.includes(role)}
+                                            onChange={() => toggleRole(role, newUserRoles, setNewUserRoles)}
                                         />
-                                        <label htmlFor={`new-${role.id}`} className="text-sm font-medium cursor-pointer">
-                                            {role.label}
+                                        <label htmlFor={`new-${role}`} className="text-sm font-medium cursor-pointer">
+                                            {ROLE_LABELS[role] || role}
                                         </label>
                                     </div>
                                 ))}
@@ -280,29 +346,66 @@ export default function AdminUsers() {
             <Dialog open={isEditRoleOpen} onOpenChange={setIsEditRoleOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Editar Funções</DialogTitle>
-                        <DialogDescription>Selecione as funções para {editingUser?.full_name}</DialogDescription>
+                        <DialogTitle>Editar Usuário</DialogTitle>
+                        <DialogDescription>Gerencie dados, senha e permissões de {editingUser?.full_name}</DialogDescription>
                     </DialogHeader>
-                    <div className="py-4">
-                        <div className="flex flex-col gap-2 border p-3 rounded-md">
-                            {AVAILABLE_ROLES.map(role => (
-                                <div key={role.id} className="flex items-center gap-2">
-                                    <input
-                                        type="checkbox"
-                                        id={`edit-${role.id}`}
-                                        className="h-4 w-4 rounded border-gray-300"
-                                        checked={editingRoles.includes(role.id)}
-                                        onChange={() => toggleRole(role.id, editingRoles, setEditingRoles)}
-                                    />
-                                    <label htmlFor={`edit-${role.id}`} className="text-sm font-medium cursor-pointer">
-                                        {role.label}
-                                    </label>
-                                </div>
-                            ))}
+                    <div className="py-4 space-y-4">
+                        <div className="grid gap-2">
+                            <Label>Nome Completo</Label>
+                            <Input value={editingName} onChange={e => setEditingName(e.target.value)} />
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label>Email (Login)</Label>
+                            <Input value={editingEmail} onChange={e => setEditingEmail(e.target.value)} />
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label>Email (Login)</Label>
+                            <Input value={editingEmail} onChange={e => setEditingEmail(e.target.value)} />
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label>Alterar Senha (Opcional)</Label>
+                            <Input
+                                type="password"
+                                placeholder="Digite para alterar a senha..."
+                                value={editingPassword}
+                                onChange={e => setEditingPassword(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label>Funções</Label>
+                            <div className="flex flex-col gap-2 border p-3 rounded-md">
+                                {AVAILABLE_ROLES.map(role => (
+                                    <div key={role} className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            id={`edit-${role}`}
+                                            className="h-4 w-4 rounded border-gray-300"
+                                            checked={editingRoles.includes(role)}
+                                            onChange={() => toggleRole(role, editingRoles, setEditingRoles)}
+                                        />
+                                        <label htmlFor={`edit-${role}`} className="text-sm font-medium cursor-pointer">
+                                            {ROLE_LABELS[role] || role}
+                                        </label>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="pt-4 border-t">
+                            <Button variant="destructive" onClick={handleDeleteUser} className="w-full gap-2" disabled={isSaving}>
+                                <Trash2 className="h-4 w-4" /> Excluir Usuário
+                            </Button>
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button onClick={saveRoles}>Salvar Alterações</Button>
+                        <Button onClick={handleSaveRoles} disabled={isSaving}>
+                            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Salvar Alterações
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
