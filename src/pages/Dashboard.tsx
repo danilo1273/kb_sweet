@@ -8,15 +8,25 @@ import { Activity, Package, DollarSign } from "lucide-react";
 
 export default function Dashboard() {
     const [user, setUser] = useState<User | null>(null);
+    const [userName, setUserName] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        async function getUser() {
+        async function getUserProfile() {
             const { data: { user } } = await supabase.auth.getUser();
             setUser(user);
+
+            if (user) {
+                const { data } = await supabase
+                    .from('profiles')
+                    .select('full_name')
+                    .eq('id', user.id)
+                    .single();
+                setUserName(data?.full_name || user.email);
+            }
             setLoading(false);
         }
-        getUser();
+        getUserProfile();
     }, []);
 
     return (
@@ -31,7 +41,7 @@ export default function Dashboard() {
                 <Card className="bg-white border-zinc-200 shadow-sm">
                     <CardHeader>
                         <CardTitle className="text-2xl font-bold text-zinc-800">
-                            Bem-vindo, {user?.email || "Confeiteiro"}!
+                            Bem-vindo, {userName?.split(' ')[0] || user?.email || "Confeiteiro"}!
                         </CardTitle>
                     </CardHeader>
                 </Card>
