@@ -212,23 +212,23 @@ export default function Purchases() {
 
     return (
         <div className="flex-1 p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
-            <div className="flex items-center justify-between">
-                <div>
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="text-center md:text-left">
                     <h2 className="text-3xl font-bold tracking-tight">Compras e Entradas</h2>
                     <p className="text-zinc-500">Registre compras, valores e fornecedores.</p>
                 </div>
-                <div className="flex gap-2">
-                    <Button onClick={() => { setNewProduct({ unit: 'un', category: 'Ingrediente' }); setIsProductDialogOpen(true); }} variant="outline" className="border-zinc-800 text-zinc-900">
+                <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                    <Button onClick={() => { setNewProduct({ unit: 'un', category: 'Ingrediente' }); setIsProductDialogOpen(true); }} variant="outline" className="border-zinc-800 text-zinc-900 w-full md:w-auto">
                         <PackagePlus className="mr-2 h-4 w-4" /> Novo Produto
                     </Button>
-                    <Button onClick={() => { setCurrentPurchase({ unit: 'un', destination: 'danilo' }); setIsPurchaseDialogOpen(true); }} className="bg-zinc-900 text-white">
+                    <Button onClick={() => { setCurrentPurchase({ unit: 'un', destination: 'danilo' }); setIsPurchaseDialogOpen(true); }} className="bg-zinc-900 text-white w-full md:w-auto">
                         <Plus className="mr-2 h-4 w-4" /> Nova Compra
                     </Button>
                 </div>
             </div>
 
-            <div className="rounded-md border bg-white shadow-sm overflow-hidden">
-                <Table>
+            <div className="rounded-md border bg-white shadow-sm overflow-x-auto">
+                <Table className="min-w-[800px]">
                     <TableHeader>
                         <TableRow>
                             <TableHead>Data</TableHead>
