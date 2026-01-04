@@ -1,0 +1,86 @@
+
+import { useEffect, useState, Suspense, lazy } from 'react';
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { supabase } from '@/supabaseClient';
+import { Toaster } from '@/components/ui/toaster';
+import Login from '@/pages/Login';
+import Dashboard from '@/pages/Dashboard';
+import Profile from '@/pages/Profile';
+import Inventory from '@/pages/Inventory';
+import Recipes from '@/pages/Recipes';
+import Financial from '@/pages/Financial';
+import Purchases from '@/pages/Purchases';
+import PlaceholderPage from '@/pages/PlaceholderPage';
+import { Sidebar } from '@/components/Sidebar';
+import { Session } from '@supabase/supabase-js';
+import { Loader2, ShoppingCart, Package, BookOpen, DollarSign, ClipboardList } from 'lucide-react';
+
+const AdminUsers = lazy(() => import('@/pages/AdminUsers'));
+
+function App() {
+    const [session, setSession] = useState<Session | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setSession(session);
+            setLoading(false);
+        });
+
+        const {
+            data: { subscription },
+        } = supabase.auth.onAuthStateChange((_event, session) => {
+            setSession(session);
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    if (loading) {
+        return <div className="h-screen w-full flex items-center justify-center bg-zinc-50"><Loader2 className="animate-spin h-8 w-8 text-zinc-400" /></div>;
+    }
+
+    return (
+        <>
+            <Routes>
+                <Route path="/login" element={!session ? <Login /> : <Navigate to="/dashboard" />} />
+
+                <Route element={<ProtectedLayout session={session} />}>
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/profile" element={<Profile />} />
+
+                    <Route path="/sales" element={<PlaceholderPage title="Vendas" icon={ShoppingCart} description="PDV e Registro de Vendas." />} />
+                    <Route path="/inventory" element={<Inventory />} />
+                    <Route path="/recipes" element={<Recipes />} />
+                    <Route path="/financial" element={<Financial />} />
+                    <Route path="/purchases" element={<Purchases />} />
+                    <Route path="/admin" element={
+                        <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
+                            <AdminUsers />
+                        </Suspense>
+                    } />
+
+                    <Route path="/" element={<Navigate to="/dashboard" />} />
+                </Route>
+            </Routes>
+            <Toaster />
+        </>
+    );
+}
+
+function ProtectedLayout({ session }: { session: Session | null }) {
+    if (!session) {
+        return <Navigate to="/login" />;
+    }
+
+    return (
+        <div className="flex h-screen bg-zinc-50 w-full overflow-hidden">
+            <Sidebar />
+            <main className="flex-1 overflow-y-auto w-full">
+                <Outlet />
+            </main>
+        </div>
+    );
+}
+
+export default App;
