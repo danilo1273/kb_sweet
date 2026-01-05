@@ -8,7 +8,8 @@ import {
     DollarSign,
     ClipboardList,
     LogOut,
-    X
+    X,
+    Factory
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/supabaseClient";
@@ -51,9 +52,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: [] }, // Todos
         { name: "Estoque", href: "/inventory", icon: Package, roles: ['admin', 'buyer', 'approver', 'seller'] },
         { name: "Receitas", href: "/recipes", icon: BookOpen, roles: ['admin', 'confeiteiro', 'buyer', 'seller'] },
+        { name: "Produção", href: "/production", icon: Factory, roles: ['admin', 'buyer', 'approver'] },
         // Vendas - Placeholder para seller/admin
         { name: "Vendas", href: "/sales", icon: ShoppingCart, roles: ['admin', 'seller'] },
-        { name: "Compras", href: "/purchases", icon: ClipboardList, roles: ['admin', 'buyer', 'approver'] },
+        { name: "Compras", href: "/purchases", icon: ClipboardList, roles: ['admin', 'buyer', 'approver', 'financial'] },
         { name: "Financeiro", href: "/financial", icon: DollarSign, roles: ['admin', 'financial'] }, // Apenas Admin ou Financeiro se houver
         { name: "Usuários", href: "/admin", icon: User, roles: ['admin'] },
         { name: "Perfis", href: "/profile", icon: User, roles: [] }, // Todos

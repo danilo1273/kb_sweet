@@ -10,6 +10,7 @@ import Inventory from '@/pages/Inventory';
 import Recipes from '@/pages/Recipes';
 import Financial from '@/pages/Financial';
 import Purchases from '@/pages/Purchases';
+import Production from '@/pages/Production';
 import PlaceholderPage from '@/pages/PlaceholderPage';
 import { Sidebar } from '@/components/Sidebar';
 import { UserProfileHeader } from '@/components/UserProfileHeader';
@@ -54,7 +55,9 @@ function App() {
                     <Route path="/inventory" element={<Inventory />} />
                     <Route path="/recipes" element={<Recipes />} />
                     <Route path="/financial" element={<Financial />} />
+                    <Route path="/financial" element={<Financial />} />
                     <Route path="/purchases" element={<Purchases />} />
+                    <Route path="/production" element={<Production />} />
                     <Route path="/admin" element={
                         <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
                             <AdminUsers />
