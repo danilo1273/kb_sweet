@@ -9,31 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 
-interface FinancialMovement {
-    id: string;
-    description: string;
-    amount: number;
-    type: 'income' | 'expense';
-    status: 'pending' | 'paid';
-    due_date: string;
-    payment_date: string | null;
-    created_at: string;
-    related_purchase_id?: string;
-    // Enriched fields
-    detail_supplier?: string;
-    detail_buyer?: string;
-    detail_order_nickname?: string;
-    detail_order_id?: string;
-}
+import { FinancialMovement, BatchGroup } from "@/types";
+import { calculateTotalPending, calculateTotalPaid } from "@/lib/financialUtils";
 
-interface BatchGroup {
-    order_id: string;
-    order_nickname: string;
-    supplier_name: string;
-    movements: FinancialMovement[];
-    total_pending: number;
-    total_paid: number;
-}
+// Interfaces moved to src/types.ts
 
 export default function Financial() {
     const [movements, setMovements] = useState<FinancialMovement[]>([]);
@@ -45,6 +24,7 @@ export default function Financial() {
     // Filters
     const [filterBuyer, setFilterBuyer] = useState<string>('all');
     const [filterSupplier, setFilterSupplier] = useState<string>('all');
+    const [filterStatus, setFilterStatus] = useState<string>('all');
     const [availableBuyers, setAvailableBuyers] = useState<string[]>([]);
     const [availableSuppliers, setAvailableSuppliers] = useState<string[]>([]);
 
@@ -156,10 +136,14 @@ export default function Financial() {
                         supplier_name: m.detail_supplier || '-',
                         movements: [],
                         total_pending: 0,
-                        total_paid: 0
+                        total_paid: 0,
+                        buyer_name: m.detail_buyer
                     };
                 }
                 grouped[m.detail_order_id].movements.push(m);
+                // Keep buyer_name if not set, or if it's "Desconhecido" and we found a better one? 
+                // Simple approach: First one wins, usually consistent per order.
+
                 if (m.type === 'expense') {
                     if (m.status === 'pending') grouped[m.detail_order_id].total_pending += m.amount;
                     else grouped[m.detail_order_id].total_paid += m.amount;
@@ -179,7 +163,8 @@ export default function Financial() {
                 supplier_name: '-',
                 movements: looseItems,
                 total_pending: loosePending,
-                total_paid: loosePaid
+                total_paid: loosePaid,
+                buyer_name: '-'
             };
         }
 
@@ -215,6 +200,86 @@ export default function Financial() {
         else { toast({ title: "Pagamento estornado" }); fetchMovements(); }
     }
 
+    async function handleBatchPay() {
+        const selectedIds = Object.keys(selectedBatches).filter(id => selectedBatches[id]);
+        if (selectedIds.length === 0) return;
+        if (!confirm(`Confirma a baixa (pagamento) de todos os itens pendentes nos ${selectedIds.length} lotes selecionados?`)) return;
+
+        setLoading(true);
+        try {
+            // Find all pending movements in selected batches
+            const movementsToPay: string[] = [];
+            selectedIds.forEach(batchId => {
+                const batch = batches.find(b => b.order_id === batchId);
+                if (batch) {
+                    batch.movements.forEach(m => {
+                        if (m.type === 'expense' && m.status === 'pending') movementsToPay.push(m.id);
+                    });
+                }
+            });
+
+            if (movementsToPay.length === 0) {
+                toast({ title: "Nada pendente nos lotes selecionados." });
+                setLoading(false);
+                return;
+            }
+
+            const { error } = await supabase
+                .from('financial_movements')
+                .update({ status: 'paid', payment_date: new Date().toISOString() })
+                .in('id', movementsToPay);
+
+            if (error) throw error;
+
+            toast({ title: "Baixa realizada com sucesso!", description: `${movementsToPay.length} lançamentos atualizados.` });
+            setSelectedBatches({}); // Clear selection
+            fetchMovements();
+        } catch (e: any) {
+            toast({ variant: 'destructive', title: "Erro na baixa em lote", description: e.message });
+            setLoading(false);
+        }
+    }
+
+    async function handleBatchReverse() {
+        const selectedIds = Object.keys(selectedBatches).filter(id => selectedBatches[id]);
+        if (selectedIds.length === 0) return;
+        if (!confirm(`Confirma o ESTORNO (cancelar baixa) de todos os itens pagos nos ${selectedIds.length} lotes selecionados?`)) return;
+
+        setLoading(true);
+        try {
+            // Find all paid movements in selected batches
+            const movementsToReverse: string[] = [];
+            selectedIds.forEach(batchId => {
+                const batch = batches.find(b => b.order_id === batchId);
+                if (batch) {
+                    batch.movements.forEach(m => {
+                        if (m.type === 'expense' && m.status === 'paid') movementsToReverse.push(m.id);
+                    });
+                }
+            });
+
+            if (movementsToReverse.length === 0) {
+                toast({ title: "Nada pago nos lotes selecionados para estornar." });
+                setLoading(false);
+                return;
+            }
+
+            const { error } = await supabase
+                .from('financial_movements')
+                .update({ status: 'pending', payment_date: null })
+                .in('id', movementsToReverse);
+
+            if (error) throw error;
+
+            toast({ title: "Estorno realizado com sucesso!", description: `${movementsToReverse.length} lançamentos voltaram para pendente.` });
+            setSelectedBatches({}); // Clear selection
+            fetchMovements();
+        } catch (e: any) {
+            toast({ variant: 'destructive', title: "Erro no estorno em lote", description: e.message });
+            setLoading(false);
+        }
+    }
+
     // --- Derived State ---
     const filteredBatches = batches.filter(batch => {
         // If sorting strictly by batch, we check if *any* movement in batch matches filters?
@@ -230,13 +295,29 @@ export default function Financial() {
             return matchBuyer && matchSupplier;
         });
 
-        return hasMatchingMovement;
+        if (!hasMatchingMovement) return false;
+
+        // Status Filter (Batch level consideration)
+        // If filter is 'pending', show batch if it has ANY pending item? Or if the whole batch is pending?
+        // Usually, "Pending" view wants to see things to pay. "Paid" view wants to see history.
+        if (filterStatus === 'pending') {
+            return batch.total_pending > 0;
+        }
+        if (filterStatus === 'paid') {
+            return batch.total_pending === 0; // Fully paid
+        }
+
+        return true;
     });
 
     // Calculate Subtotal from SELECTED batches
     const selectedBatchesTotal = batches
         .filter(b => selectedBatches[b.order_id])
         .reduce((acc, b) => acc + b.total_pending, 0);
+
+    // Check if selection has pending or paid items to show appropriate buttons
+    const selectionHasPending = batches.some(b => selectedBatches[b.order_id] && b.total_pending > 0);
+    const selectionHasPaid = batches.some(b => selectedBatches[b.order_id] && b.total_paid > 0);
 
     const toggleBatchSelection = (id: string, checked: boolean) => {
         setSelectedBatches(prev => ({ ...prev, [id]: checked }));
@@ -246,8 +327,31 @@ export default function Financial() {
         setExpandedBatches(prev => ({ ...prev, [id]: !prev[id] }));
     }
 
-    const totalPendingGlobal = movements.filter(m => m.type === 'expense' && m.status === 'pending').reduce((acc, curr) => acc + curr.amount, 0);
-    const totalPaidGlobal = movements.filter(m => m.type === 'expense' && m.status === 'paid').reduce((acc, curr) => acc + curr.amount, 0);
+    const totalPendingGlobal = calculateTotalPending(movements);
+    const totalPaidGlobal = calculateTotalPaid(movements);
+
+    // Calculate Breakdowns for Selected Batches
+    const selectedBatchesList = batches.filter(b => selectedBatches[b.order_id]);
+
+    // Group selected totals by Supplier
+    const selectedBySupplier: Record<string, number> = {};
+    selectedBatchesList.forEach(b => {
+        const sup = b.supplier_name || 'Outros';
+        const pendingInBatch = b.movements.filter(m => m.type === 'expense' && m.status === 'pending').reduce((acc, c) => acc + Math.abs(c.amount), 0);
+        if (pendingInBatch > 0) {
+            selectedBySupplier[sup] = (selectedBySupplier[sup] || 0) + pendingInBatch;
+        }
+    });
+
+    // Group selected totals by Buyer
+    const selectedByBuyer: Record<string, number> = {};
+    selectedBatchesList.forEach(b => {
+        const buy = b.buyer_name || 'Outros';
+        const pendingInBatch = b.movements.filter(m => m.type === 'expense' && m.status === 'pending').reduce((acc, c) => acc + Math.abs(c.amount), 0);
+        if (pendingInBatch > 0) {
+            selectedByBuyer[buy] = (selectedByBuyer[buy] || 0) + pendingInBatch;
+        }
+    });
 
     return (
         <div className="flex-1 p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
@@ -274,6 +378,14 @@ export default function Financial() {
                     <SelectTrigger className="w-[180px]"><SelectValue placeholder="Fornecedor" /></SelectTrigger>
                     <SelectContent><SelectItem value="all">Todos Fornecedores</SelectItem>{availableSuppliers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
                 </Select>
+                <Select value={filterStatus} onValueChange={setFilterStatus}>
+                    <SelectTrigger className="w-[180px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">Todos Status</SelectItem>
+                        <SelectItem value="pending">Pendentes</SelectItem>
+                        <SelectItem value="paid">Baixados / Pagos</SelectItem>
+                    </SelectContent>
+                </Select>
 
                 {/* Selection Subtotal */}
                 <div className="ml-auto flex items-center gap-4">
@@ -282,6 +394,18 @@ export default function Financial() {
                             <Calculator className="h-4 w-4" />
                             <span>Selecionados: </span>
                             <span className="text-lg font-bold">R$ {Math.abs(selectedBatchesTotal).toFixed(2)}</span>
+
+                            {selectionHasPending && (
+                                <Button size="sm" onClick={handleBatchPay} className="ml-4 h-7 bg-blue-600 hover:bg-blue-700 text-white" title="Baixar itens pendentes da seleção">
+                                    <CheckCircle className="mr-2 h-3 w-3" /> Baixar
+                                </Button>
+                            )}
+
+                            {selectionHasPaid && (
+                                <Button size="sm" variant="destructive" onClick={handleBatchReverse} className="ml-2 h-7" title="Estornar itens pagos da seleção">
+                                    <RotateCcw className="mr-2 h-3 w-3" /> Estornar
+                                </Button>
+                            )}
                         </div>
                     ) : (
                         <div className="text-sm text-zinc-400 italic">Selecione lotes para somar</div>
@@ -309,6 +433,44 @@ export default function Financial() {
                         <div className="text-2xl font-bold text-green-600">R$ {Math.abs(totalPaidGlobal).toFixed(2)}</div>
                     </CardContent>
                 </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Por Fornecedor (Pendente)</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {Object.keys(selectedBySupplier).length === 0 ? (
+                            <span className="text-xs text-muted-foreground whitespace-pre-wrap">Selecione lotes...</span>
+                        ) : (
+                            <div className="space-y-1 max-h-[100px] overflow-y-auto">
+                                {Object.entries(selectedBySupplier).map(([sup, amount]) => (
+                                    <div key={sup} className="flex justify-between text-xs">
+                                        <span>{sup}</span>
+                                        <span className="font-bold text-red-500">R$ {amount.toFixed(2)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Por Comprador (Pendente)</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {Object.keys(selectedByBuyer).length === 0 ? (
+                            <span className="text-xs text-muted-foreground">Selecione lotes...</span>
+                        ) : (
+                            <div className="space-y-1 max-h-[100px] overflow-y-auto">
+                                {Object.entries(selectedByBuyer).map(([buy, amount]) => (
+                                    <div key={buy} className="flex justify-between text-xs">
+                                        <span>{buy}</span>
+                                        <span className="font-bold text-red-500">R$ {amount.toFixed(2)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
             </div>
 
             {/* Batch List */}
@@ -331,6 +493,7 @@ export default function Financial() {
                                             <Layers className="h-4 w-4 text-zinc-400" />
                                             <h3 className="font-semibold text-lg">{batch.order_nickname}</h3>
                                             <Badge variant="outline">{batch.supplier_name}</Badge>
+                                            <Badge variant="secondary" className="bg-zinc-100 text-zinc-600">{batch.buyer_name}</Badge>
                                         </div>
                                         <div className="flex items-center gap-6">
                                             <div className="text-right">

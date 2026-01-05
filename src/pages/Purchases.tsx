@@ -116,9 +116,13 @@ const Purchases = () => {
     const [itemToRequestEdit, setItemToRequestEdit] = useState<PurchaseRequest | null>(null);
     const [isEditItemOpen, setIsEditItemOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<PurchaseRequest | null>(null);
-    const [editedValues, setEditedValues] = useState<{ quantity: number, cost: number, item_name: string }>({ quantity: 0, cost: 0, item_name: '' });
+    const [editedValues, setEditedValues] = useState<{ quantity: number, cost: number, item_name: string, unit: string }>({ quantity: 0, cost: 0, item_name: '', unit: 'un' });
     const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
     const [newProduct, setNewProduct] = useState<Partial<Ingredient>>({ unit: 'un' });
+
+    // New Supplier State
+    const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
+    const [newSupplierName, setNewSupplierName] = useState("");
 
     useEffect(() => {
         fetchData();
@@ -575,7 +579,7 @@ const Purchases = () => {
             });
         }
         setEditingItem(item);
-        setEditedValues({ quantity: item.quantity, cost: item.cost, item_name: item.item_name });
+        setEditedValues({ quantity: item.quantity, cost: item.cost, item_name: item.item_name, unit: item.unit });
         setIsEditItemOpen(true);
     }
 
@@ -595,6 +599,7 @@ const Purchases = () => {
                 quantity: editedValues.quantity,
                 cost: editedValues.cost,
                 item_name: editedValues.item_name,
+                unit: editedValues.unit,
                 status: editingItem.status === 'edit_approved' ? 'pending' : editingItem.status // Volta pra pendente se era edit_approved
             }).eq('id', editingItem.id);
 
@@ -644,6 +649,28 @@ const Purchases = () => {
         }
     }
 
+    async function handleSaveSupplier() {
+        try {
+            if (!newSupplierName.trim()) return toast({ variant: 'destructive', title: "Nome obrigatório" });
+
+            const { data, error } = await supabase.from('suppliers').insert({ name: newSupplierName.trim() }).select().single();
+            if (error) throw error;
+
+            toast({ title: "Fornecedor cadastrado" });
+            setIsSupplierDialogOpen(false);
+            setNewSupplierName("");
+
+            // Refresh suppliers and select the new one if a modal is open
+            await fetchMeta();
+
+            if (isOrderDialogOpen) setNewOrderSupplier(data.id);
+            if (isManageOrderOpen) setManageOrderData(prev => ({ ...prev, supplier_id: data.id }));
+
+        } catch (e: any) {
+            toast({ variant: 'destructive', title: "Erro", description: e.message });
+        }
+    }
+
     async function handleSyncStock() {
         if (!confirm("Recalcular estoque e custos médios? Isso reconstruirá os valores com base apenas nos pedidos 'Aprovados'.")) return;
         setLoading(true);
@@ -671,7 +698,9 @@ const Purchases = () => {
                     const ing = currentIngs.find(i => i.id === id);
                     if (!ing) continue;
 
-                    const factor = (p.unit === ing.purchase_unit) ? (Number(ing.purchase_unit_factor) || 1) : 1;
+                    if (!ing) continue;
+
+                    const factor = (normalizeString(p.unit) === normalizeString(ing.purchase_unit || '')) ? (Number(ing.purchase_unit_factor) || 1) : 1;
                     const convertedQty = Number(p.quantity) * factor;
                     const costVal = Number(p.cost);
 
@@ -884,17 +913,22 @@ const Purchases = () => {
                     <div className="grid gap-4 py-4">
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2"><Label>Fornecedor</Label>
-                                <Select value={newOrderSupplier} onValueChange={(val) => {
-                                    setNewOrderSupplier(val);
-                                    if (val !== 'default') {
-                                        const sup = suppliers.find(s => s.id === val);
-                                        if (sup) setNewOrderNickname(`${sup.name} - ${new Date().toLocaleDateString()}`);
-                                    } else {
-                                        setNewOrderNickname(`Compra - ${new Date().toLocaleDateString()}`);
-                                    }
-                                }}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger> <SelectContent><SelectItem value="default">Vários</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-                                </Select>
+                                <div className="flex gap-2">
+                                    <Select value={newOrderSupplier} onValueChange={(val) => {
+                                        setNewOrderSupplier(val);
+                                        if (val !== 'default') {
+                                            const sup = suppliers.find(s => s.id === val);
+                                            if (sup) setNewOrderNickname(`${sup.name} - ${new Date().toLocaleDateString()}`);
+                                        } else {
+                                            setNewOrderNickname(`Compra - ${new Date().toLocaleDateString()}`);
+                                        }
+                                    }}>
+                                        <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger> <SelectContent><SelectItem value="default">Vários</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                                    </Select>
+                                    <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
+                                        <Plus className="h-4 w-4" />
+                                    </Button>
+                                </div>
                             </div>
                         </div>
                         <div className="space-y-2 px-1">
@@ -971,10 +1005,15 @@ const Purchases = () => {
                         <div className="grid grid-cols-2 gap-4 border-b pb-4">
                             <div className="space-y-2">
                                 <Label>Fornecedor</Label>
-                                <Select value={manageOrderData.supplier_id} onValueChange={(val) => setManageOrderData({ ...manageOrderData, supplier_id: val })}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent><SelectItem value="default">Vários</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-                                </Select>
+                                <div className="flex gap-2">
+                                    <Select value={manageOrderData.supplier_id} onValueChange={(val) => setManageOrderData({ ...manageOrderData, supplier_id: val })}>
+                                        <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                                        <SelectContent><SelectItem value="default">Vários</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                                    </Select>
+                                    <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
+                                        <Plus className="h-4 w-4" />
+                                    </Button>
+                                </div>
                             </div>
                             <div className="space-y-2"><Label>Apelido</Label><Input value={manageOrderData.nickname} onChange={e => setManageOrderData({ ...manageOrderData, nickname: e.target.value })} /></div>
                         </div>
@@ -1109,7 +1148,24 @@ const Purchases = () => {
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
-                                    <Label>Quantidade ({editingItem.unit})</Label>
+                                    <Label>Unidade</Label>
+                                    <Select value={editedValues.unit} onValueChange={(v) => setEditedValues({ ...editedValues, unit: v })}>
+                                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="un">un</SelectItem>
+                                            <SelectItem value="g">g</SelectItem>
+                                            <SelectItem value="ml">ml</SelectItem>
+                                            <SelectItem value="kg">kg</SelectItem>
+                                            <SelectItem value="l">l</SelectItem>
+                                            <SelectItem value="Caixa">Caixa</SelectItem>
+                                            <SelectItem value="Fardo">Fardo</SelectItem>
+                                            <SelectItem value="Pacote">Pacote</SelectItem>
+                                            {/* Add dynamic purchase unit from ingredient if found? Hard to get here without fetching. */}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Quantidade</Label>
                                     <Input type="number" value={editedValues.quantity} onChange={(e) => setEditedValues({ ...editedValues, quantity: Number(e.target.value) })} />
                                 </div>
                                 <div className="space-y-2">
@@ -1200,10 +1256,55 @@ const Purchases = () => {
                                 </Select>
                             </div>
                         </div>
+
+                        <div className="p-3 bg-zinc-50 border rounded-md space-y-4">
+                            <h4 className="text-sm font-medium text-zinc-700">Configuração de Compra (Opcional)</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="text-xs">Unidade de Compra</Label>
+                                    <Input
+                                        placeholder="Ex: Caixa, Fardo"
+                                        value={newProduct.purchase_unit || ''}
+                                        onChange={e => setNewProduct({ ...newProduct, purchase_unit: e.target.value })}
+                                        className="h-8"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-xs">Fator de Conversão</Label>
+                                    <Input
+                                        type="number"
+                                        placeholder="Qtd na compra"
+                                        value={newProduct.purchase_unit_factor || ''}
+                                        onChange={e => setNewProduct({ ...newProduct, purchase_unit_factor: Number(e.target.value) })}
+                                        className="h-8"
+                                    />
+                                </div>
+                            </div>
+                            {newProduct.purchase_unit && newProduct.purchase_unit_factor ? (
+                                <div className="text-[10px] text-zinc-500 text-center">
+                                    1 {newProduct.purchase_unit} = {newProduct.purchase_unit_factor} {newProduct.unit}
+                                </div>
+                            ) : null}
+                        </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsProductDialogOpen(false)}>Cancelar</Button>
                         <Button onClick={handleSaveProduct} disabled={!newProduct.name}>Criar Ingrediente</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal: Create Supplier */}
+            <Dialog open={isSupplierDialogOpen} onOpenChange={setIsSupplierDialogOpen}>
+                <DialogContent>
+                    <DialogHeader><DialogTitle>Novo Fornecedor</DialogTitle></DialogHeader>
+                    <div className="py-4 space-y-4">
+                        <Label>Nome do Fornecedor</Label>
+                        <Input value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)} placeholder="Digite o nome..." />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsSupplierDialogOpen(false)}>Cancelar</Button>
+                        <Button onClick={handleSaveSupplier} disabled={!newSupplierName.trim()}>Salvar</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

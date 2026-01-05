@@ -96,6 +96,8 @@ export default function Inventory() {
 
             const payload = {
                 min_stock: Number(currentIngredient.min_stock || 0),
+                name: currentIngredient.name,
+                // category: currentIngredient.category, // Category not in dialog yet, let's stick to Name as requested "alterar itens" usually refers to correcting typos.
                 unit_weight: Number(currentIngredient.unit_weight || 0),
                 unit_type: currentIngredient.unit_type || 'weight',
                 purchase_unit: currentIngredient.purchase_unit || '',
@@ -225,7 +227,16 @@ export default function Inventory() {
                                     <TableCell className="text-right">{item.stock_adriel}</TableCell>
                                     <TableCell className="text-right text-xs">R$ {item.cost_danilo?.toFixed(2) || '0.00'}</TableCell>
                                     <TableCell className="text-right text-xs">R$ {item.cost_adriel?.toFixed(2) || '0.00'}</TableCell>
-                                    <TableCell className="text-right font-bold">R$ {item.cost?.toFixed(2) || '0.00'}</TableCell>
+                                    <TableCell className="text-right font-bold">
+                                        <div className="flex flex-col items-end">
+                                            <span>R$ {item.cost?.toFixed(2) || '0.00'} <span className="text-[10px] font-normal text-zinc-400">/ {item.unit}</span></span>
+                                            {item.purchase_unit && item.purchase_unit_factor && item.purchase_unit_factor > 1 && (
+                                                <span className="text-[10px] text-zinc-500 font-normal">
+                                                    (R$ {((item.cost || 0) * item.purchase_unit_factor).toFixed(2)} / {item.purchase_unit})
+                                                </span>
+                                            )}
+                                        </div>
+                                    </TableCell>
                                     <TableCell className="text-right space-x-1">
                                         <Button variant="ghost" size="icon" onClick={() => openHistory(item)} title="Histórico de Compras">
                                             <History className="h-4 w-4 text-blue-500" />
@@ -252,85 +263,100 @@ export default function Inventory() {
                     <DialogHeader>
                         <DialogTitle>Editar Ingrediente</DialogTitle>
                     </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                        <div className="p-3 bg-blue-50 text-blue-800 rounded-md text-sm mb-2">
-                            Para nome, categoria ou custo, utilize o cadastro de produtos. Saldo é alterado via Compras. Aqui você define apenas o <strong>Estoque Mínimo</strong>.
-                        </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="name" className="text-right">Nome</Label>
-                            <Input id="name" value={currentIngredient.name || ''} disabled className="col-span-3 bg-zinc-100" />
-                        </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="min_stock" className="text-right">Estoque Mín.</Label>
-                            <Input
-                                id="min_stock"
-                                type="number"
-                                value={currentIngredient.min_stock || 0}
-                                onChange={(e) => setCurrentIngredient({ ...currentIngredient, min_stock: Number(e.target.value) })}
-                                className="col-span-3"
-                            />
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="name">Nome do Ingrediente</Label>
+                            <Input id="name" value={currentIngredient.name || ''} onChange={(e) => setCurrentIngredient({ ...currentIngredient, name: e.target.value })} />
                         </div>
 
-
-
-                        <div className="grid grid-cols-4 items-center gap-4 border-t pt-4">
-                            <div className="col-span-4 text-sm font-medium text-zinc-700 mb-2">Unidade de Compra (Ex: Caixa, Fardo)</div>
-                            <Label htmlFor="purchase_unit" className="text-right text-xs">Un. Compra</Label>
-                            <Input
-                                id="purchase_unit"
-                                value={currentIngredient.purchase_unit || ''}
-                                onChange={(e) => setCurrentIngredient({ ...currentIngredient, purchase_unit: e.target.value })}
-                                className="col-span-3"
-                                placeholder="Ex: Saco, Caixa"
-                            />
-                        </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="purchase_factor" className="text-right text-xs">Fator Conversão</Label>
-                            <Input
-                                id="purchase_factor"
-                                type="number"
-                                value={currentIngredient.purchase_unit_factor || 1}
-                                onChange={(e) => setCurrentIngredient({ ...currentIngredient, purchase_unit_factor: Number(e.target.value) })}
-                                className="col-span-3"
-                                placeholder="Quantas unidades de estoque vem na un. de compra?"
-                            />
-                        </div>
-                        <div className="col-span-4 text-[10px] text-muted-foreground text-center bg-zinc-50 p-1 rounded">
-                            {currentIngredient.purchase_unit ? `1 ${currentIngredient.purchase_unit} = ${currentIngredient.purchase_unit_factor || 1} ${currentIngredient.unit}` : 'Defina uma unidade de compra para conversão'}
-                        </div>
-
-                        <div className="grid grid-cols-4 items-center gap-4 border-t pt-4">
-                            <div className="col-span-4 text-sm font-medium text-zinc-700 mb-2">Conversão de Medida</div>
-                            <Label htmlFor="unit_weight" className="text-right text-xs">Peso/Vol Unit.</Label>
-                            <div className="col-span-3 flex gap-2">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="min_stock">Estoque Mínimo</Label>
                                 <Input
-                                    id="unit_weight"
+                                    id="min_stock"
                                     type="number"
-                                    step="0.01"
-                                    value={currentIngredient.unit_weight || 0}
-                                    onChange={(e) => setCurrentIngredient({ ...currentIngredient, unit_weight: Number(e.target.value) })}
-                                    className="flex-1"
-                                    placeholder="Ex: 395"
+                                    value={currentIngredient.min_stock || 0}
+                                    onChange={(e) => setCurrentIngredient({ ...currentIngredient, min_stock: Number(e.target.value) })}
                                 />
-                                <Select
-                                    value={currentIngredient.unit_type || 'weight'}
-                                    onValueChange={(val) => setCurrentIngredient({ ...currentIngredient, unit_type: val })}
-                                >
-                                    <SelectTrigger className="w-[100px]">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="weight">Gramas (g)</SelectItem>
-                                        <SelectItem value="volume">Mililitros (ml)</SelectItem>
-                                        <SelectItem value="unit">Unidade</SelectItem>
-                                    </SelectContent>
-                                </Select>
                             </div>
-                            <div className="col-span-4 text-xs text-muted-foreground text-right">
-                                {currentIngredient.unit_weight ? `1 ${currentIngredient.unit} = ${currentIngredient.unit_weight} ${currentIngredient.unit_type === 'weight' ? 'g' : currentIngredient.unit_type === 'volume' ? 'ml' : 'un'}` : 'Sem conversão definida'}
+                            <div className="space-y-2">
+                                <Label>Categoria</Label>
+                                <div className="p-2 bg-zinc-100 rounded text-sm text-zinc-600">{currentIngredient.category || '-'}</div>
                             </div>
                         </div>
 
+                        <div className="border bg-zinc-50 p-4 rounded-md space-y-4">
+                            <h4 className="text-sm font-semibold text-zinc-900">Configuração de Compra</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="purchase_unit" className="text-xs">Un. Compra (Ex: Caixa)</Label>
+                                    <Input
+                                        id="purchase_unit"
+                                        value={currentIngredient.purchase_unit || ''}
+                                        onChange={(e) => setCurrentIngredient({ ...currentIngredient, purchase_unit: e.target.value })}
+                                        placeholder="Ex: Caixa"
+                                        className="h-8"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="purchase_factor" className="text-xs">Qtd na Un. Compra</Label>
+                                    <Input
+                                        id="purchase_factor"
+                                        type="number"
+                                        value={currentIngredient.purchase_unit_factor || 1}
+                                        onChange={(e) => setCurrentIngredient({ ...currentIngredient, purchase_unit_factor: Number(e.target.value) })}
+                                        placeholder="Ex: 12"
+                                        className="h-8"
+                                    />
+                                </div>
+                            </div>
+                            {currentIngredient.purchase_unit && (
+                                <div className="text-[11px] text-zinc-500 bg-white p-2 border rounded text-center">
+                                    1 {currentIngredient.purchase_unit} contém <strong>{currentIngredient.purchase_unit_factor || 1} {currentIngredient.unit}</strong>
+                                </div>
+                            )}
+                        </div>
+
+                        {currentIngredient.unit === 'un' && (
+                            <div className="border bg-zinc-50 p-4 rounded-md space-y-4">
+                                <h4 className="text-sm font-semibold text-zinc-900">Conversão de Peso/Volume (Opcional)</h4>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="unit_weight" className="text-xs">Peso/Vol Unitário</Label>
+                                        <Input
+                                            id="unit_weight"
+                                            type="number"
+                                            step="0.01"
+                                            value={currentIngredient.unit_weight || 0}
+                                            onChange={(e) => setCurrentIngredient({ ...currentIngredient, unit_weight: Number(e.target.value) })}
+                                            placeholder="Ex: 395"
+                                            className="h-8"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label className="text-xs">Tipo de Unidade</Label>
+                                        <Select
+                                            value={currentIngredient.unit_type || 'weight'}
+                                            onValueChange={(val) => setCurrentIngredient({ ...currentIngredient, unit_type: val })}
+                                        >
+                                            <SelectTrigger className="h-8 text-xs">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="weight">Gramas (g)</SelectItem>
+                                                <SelectItem value="volume">Mililitros (ml)</SelectItem>
+                                                <SelectItem value="unit">Unidade</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                                {currentIngredient.unit_weight ? (
+                                    <div className="text-[11px] text-zinc-500 bg-white p-2 border rounded text-center">
+                                        1 {currentIngredient.unit} = {currentIngredient.unit_weight} {currentIngredient.unit_type === 'weight' ? 'g' : currentIngredient.unit_type === 'volume' ? 'ml' : 'un'}
+                                    </div>
+                                ) : null}
+                            </div>
+                        )}
                     </div>
                     <DialogFooter>
                         <Button type="submit" onClick={handleSave} disabled={isSaving}>
@@ -381,6 +407,6 @@ export default function Inventory() {
                     </div>
                 </DialogContent>
             </Dialog>
-        </div>
+        </div >
     );
 }
