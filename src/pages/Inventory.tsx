@@ -230,16 +230,23 @@ export default function Inventory() {
                                     <TableCell className="text-right text-xs">R$ {item.cost_adriel?.toFixed(2) || '0.00'}</TableCell>
                                     <TableCell className="text-right font-bold">
                                         <div className="flex flex-col items-end">
-                                            {/* Custo Unitário (Base de Consumo) */}
-                                            <span>
-                                                R$ {item.cost?.toFixed(item.unit === 'g' || item.unit === 'ml' ? 4 : 2) || '0.00'}
-                                                <span className="text-[10px] font-normal text-zinc-400"> / {item.unit}</span>
-                                            </span>
-
-                                            {/* Subtexto: Custo da Embalagem de Compra */}
-                                            {item.purchase_unit && item.purchase_unit_factor && (
-                                                <span className="text-[10px] text-zinc-500 font-normal">
-                                                    (R$ {((item.cost || 0) * item.purchase_unit_factor).toFixed(2)} / {item.purchase_unit_factor} {item.unit})
+                                            {item.purchase_unit && item.purchase_unit_factor ? (
+                                                <>
+                                                    {/* Primary: Purchase Unit Cost (Smart Display) */}
+                                                    <span>
+                                                        R$ {((item.cost || 0) * item.purchase_unit_factor).toFixed(2)}
+                                                        <span className="text-[10px] font-normal text-zinc-400"> / {item.purchase_unit}</span>
+                                                    </span>
+                                                    {/* Secondary: Base Unit Cost */}
+                                                    <span className="text-[10px] text-zinc-500 font-normal">
+                                                        (R$ {(item.cost || 0).toFixed(4)} / {item.unit})
+                                                    </span>
+                                                </>
+                                            ) : (
+                                                /* Fallback: Base Cost Only */
+                                                <span>
+                                                    R$ {item.cost?.toFixed(item.unit === 'g' || item.unit === 'ml' ? 4 : 2) || '0.00'}
+                                                    <span className="text-[10px] font-normal text-zinc-400"> / {item.unit}</span>
                                                 </span>
                                             )}
                                         </div>
@@ -300,7 +307,7 @@ export default function Inventory() {
 
                         <div className="border bg-zinc-50 p-4 rounded-md space-y-4">
                             <div className="flex items-center justify-between">
-                                <h4 className="text-sm font-semibold text-zinc-900">Configuração de Compra (Fator)</h4>
+                                <h4 className="text-sm font-semibold text-zinc-900">Unidade Secundária (Compra)</h4>
                                 {(currentIngredient.unit === 'g' || currentIngredient.unit === 'ml') && (currentIngredient.purchase_unit_factor || 1) === 1 && (
                                     <Badge variant="destructive" className="text-[10px]">Atenção: Fator = 1</Badge>
                                 )}
@@ -308,7 +315,7 @@ export default function Inventory() {
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
-                                    <Label htmlFor="purchase_unit" className="text-xs">Un. Compra</Label>
+                                    <Label htmlFor="purchase_unit" className="text-xs">Unidade de Compra</Label>
                                     <Select
                                         value={currentIngredient.purchase_unit || 'un'}
                                         onValueChange={(val) => setCurrentIngredient({ ...currentIngredient, purchase_unit: val })}
@@ -328,7 +335,7 @@ export default function Inventory() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="purchase_factor" className="text-xs">
-                                        Qtd na Embalagem ({currentIngredient.unit})
+                                        Qtd na Embalagem (Fator)
                                         {(currentIngredient.unit === 'g' || currentIngredient.unit === 'ml') && <span className="text-red-500 ml-1">*</span>}
                                     </Label>
                                     <Input

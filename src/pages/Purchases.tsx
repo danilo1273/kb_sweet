@@ -1266,7 +1266,7 @@ const Purchases = () => {
                         </div>
 
                         <div className="p-3 bg-zinc-50 border rounded-md space-y-4">
-                            <h4 className="text-sm font-medium text-zinc-700">Configuração de Compra (Opcional)</h4>
+                            <h4 className="text-sm font-medium text-zinc-700">Unidade Secundária (Compra)</h4>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label className="text-xs">Unidade de Compra</Label>
@@ -1284,7 +1284,7 @@ const Purchases = () => {
                                     </Select>
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-xs">Fator de Conversão</Label>
+                                    <Label className="text-xs">Qtd na Embalagem (Fator)</Label>
                                     <Input
                                         type="number"
                                         placeholder="Qtd na compra"
