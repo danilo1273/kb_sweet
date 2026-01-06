@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 
 import { FinancialMovement, BatchGroup } from "@/types";
 import { calculateTotalPending, calculateTotalPaid } from "@/lib/financialUtils";
@@ -27,6 +28,8 @@ export default function Financial() {
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [availableBuyers, setAvailableBuyers] = useState<string[]>([]);
     const [availableSuppliers, setAvailableSuppliers] = useState<string[]>([]);
+    const [startDate, setStartDate] = useState<string>('');
+    const [endDate, setEndDate] = useState<string>('');
 
     // Expansion & Selection
     const [expandedBatches, setExpandedBatches] = useState<Record<string, boolean>>({});
@@ -281,34 +284,30 @@ export default function Financial() {
     }
 
     // --- Derived State ---
-    const filteredBatches = batches.filter(batch => {
-        // If sorting strictly by batch, we check if *any* movement in batch matches filters?
-        // Or if the batch's primary supplier matches?
-        // Let's filter the MOVEMENTS inside the batch mainly.
-        // If filters are active, we show batches that contain at least one matching movement.
-
-        if (filterBuyer === 'all' && filterSupplier === 'all') return true;
-
-        const hasMatchingMovement = batch.movements.some(m => {
+    const filteredBatches = batches.map(batch => {
+        const filteredMovements = batch.movements.filter(m => {
             const matchBuyer = filterBuyer === 'all' || m.detail_buyer === filterBuyer;
             const matchSupplier = filterSupplier === 'all' || m.detail_supplier === filterSupplier;
-            return matchBuyer && matchSupplier;
+            const matchStatus = filterStatus === 'all' || m.status === filterStatus;
+
+            // Date Filter
+            let dateMatches = true;
+            if (startDate || endDate) {
+                const refDate = (m.status === 'paid' && m.payment_date) ? m.payment_date : m.due_date;
+                if (!refDate) {
+                    dateMatches = false;
+                } else {
+                    const d = new Date(refDate).toISOString().split('T')[0];
+                    if (startDate && d < startDate) dateMatches = false;
+                    if (endDate && d > endDate) dateMatches = false;
+                }
+            }
+
+            return matchBuyer && matchSupplier && matchStatus && dateMatches;
         });
 
-        if (!hasMatchingMovement) return false;
-
-        // Status Filter (Batch level consideration)
-        // If filter is 'pending', show batch if it has ANY pending item? Or if the whole batch is pending?
-        // Usually, "Pending" view wants to see things to pay. "Paid" view wants to see history.
-        if (filterStatus === 'pending') {
-            return batch.total_pending > 0;
-        }
-        if (filterStatus === 'paid') {
-            return batch.total_pending === 0; // Fully paid
-        }
-
-        return true;
-    });
+        return { ...batch, movements: filteredMovements };
+    }).filter(batch => batch.movements.length > 0);
 
     // Calculate Subtotal from SELECTED batches
     const selectedBatchesTotal = batches
@@ -316,8 +315,8 @@ export default function Financial() {
         .reduce((acc, b) => acc + b.total_pending, 0);
 
     // Check if selection has pending or paid items to show appropriate buttons
-    const selectionHasPending = batches.some(b => selectedBatches[b.order_id] && b.total_pending > 0);
-    const selectionHasPaid = batches.some(b => selectedBatches[b.order_id] && b.total_paid > 0);
+    const selectionHasPending = batches.some(b => selectedBatches[b.order_id] && Math.abs(b.total_pending) > 0.01);
+    const selectionHasPaid = batches.some(b => selectedBatches[b.order_id] && Math.abs(b.total_paid) > 0.01);
 
     const toggleBatchSelection = (id: string, checked: boolean) => {
         setSelectedBatches(prev => ({ ...prev, [id]: checked }));
@@ -386,6 +385,25 @@ export default function Financial() {
                         <SelectItem value="paid">Baixados / Pagos</SelectItem>
                     </SelectContent>
                 </Select>
+
+                {/* Date Range */}
+                <div className="flex items-center gap-2">
+                    <Input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="w-min"
+                        title="Data Inicial"
+                    />
+                    <span className="text-zinc-400">-</span>
+                    <Input
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="w-min"
+                        title="Data Final"
+                    />
+                </div>
 
                 {/* Selection Subtotal */}
                 <div className="ml-auto flex items-center gap-4">

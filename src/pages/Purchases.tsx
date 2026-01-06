@@ -545,9 +545,15 @@ const Purchases = () => {
 
     async function handleAuthorizeEdit(item: PurchaseRequest, approved: boolean) {
         try {
+            if (approved) {
+                // IMMEDIATE STOCK REVERSAL upon authorization
+                await reverseStockAndFinancial(item);
+                await supabase.from('financial_movements').delete().eq('related_purchase_id', item.id);
+            }
+
             const nextStatus = approved ? 'edit_approved' : 'approved';
             await supabase.from('purchase_requests').update({ status: nextStatus }).eq('id', item.id);
-            toast({ title: approved ? "Edição Autorizada" : "Solicitação Negada" });
+            toast({ title: approved ? "Edição Autorizada e Estoque Revertido" : "Solicitação Negada" });
             fetchData();
         } catch (e: any) {
             toast({ variant: 'destructive', title: "Erro", description: e.message });
@@ -557,8 +563,9 @@ const Purchases = () => {
     async function handleSendToApproval(item: PurchaseRequest) {
         if (!confirm("Enviar este item para re-aprovação? Ele será removido do estoque até ser aprovado novamente.")) return;
         try {
-            // Se já estava aprovado, reverte antes de mudar pra pendente
-            if (item.status === 'approved' || item.status === 'edit_approved') {
+            // Se já estava aprovado, reverte antes de mudar pra pendente. 
+            // Se estiver 'edit_approved', JÁ FOI revertido na autorização, então não reverte de novo.
+            if (item.status === 'approved') {
                 await reverseStockAndFinancial(item);
                 await supabase.from('financial_movements').delete().eq('related_purchase_id', item.id);
             }
@@ -589,11 +596,8 @@ const Purchases = () => {
             const oldData = { q: editingItem.quantity, c: editingItem.cost, n: editingItem.item_name };
             const newData = { q: editedValues.quantity, c: editedValues.cost, n: editedValues.item_name };
 
-            // Se o item já estava autorizado para edição (era aprovado antes), reverte o estoque antigo
-            if (editingItem.status === 'edit_approved') {
-                await reverseStockAndFinancial(editingItem);
-                await supabase.from('financial_movements').delete().eq('related_purchase_id', editingItem.id);
-            }
+            // Se o item já estava autorizado para edição (era aprovado antes), o estoque JÁ FOI revertido na autorização.
+            // Apenas salvamos os novos dados.
 
             await supabase.from('purchase_requests').update({
                 quantity: editedValues.quantity,
@@ -925,9 +929,11 @@ const Purchases = () => {
                                     }}>
                                         <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger> <SelectContent><SelectItem value="default">Vários</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
                                     </Select>
-                                    <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
-                                        <Plus className="h-4 w-4" />
-                                    </Button>
+                                    {userRoles.includes('admin') && (
+                                        <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
+                                            <Plus className="h-4 w-4" />
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -1010,9 +1016,11 @@ const Purchases = () => {
                                         <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
                                         <SelectContent><SelectItem value="default">Vários</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
                                     </Select>
-                                    <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
-                                        <Plus className="h-4 w-4" />
-                                    </Button>
+                                    {userRoles.includes('admin') && (
+                                        <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
+                                            <Plus className="h-4 w-4" />
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
                             <div className="space-y-2"><Label>Apelido</Label><Input value={manageOrderData.nickname} onChange={e => setManageOrderData({ ...manageOrderData, nickname: e.target.value })} /></div>
@@ -1262,12 +1270,18 @@ const Purchases = () => {
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label className="text-xs">Unidade de Compra</Label>
-                                    <Input
-                                        placeholder="Ex: Caixa, Fardo"
-                                        value={newProduct.purchase_unit || ''}
-                                        onChange={e => setNewProduct({ ...newProduct, purchase_unit: e.target.value })}
-                                        className="h-8"
-                                    />
+                                    <Select value={newProduct.purchase_unit} onValueChange={v => setNewProduct({ ...newProduct, purchase_unit: v })}>
+                                        <SelectTrigger className="h-8"><SelectValue placeholder="Ex: Caixa" /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="un">Unidade (un)</SelectItem>
+                                            <SelectItem value="cx">Caixa (cx)</SelectItem>
+                                            <SelectItem value="fardo">Fardo</SelectItem>
+                                            <SelectItem value="pct">Pacote (pct)</SelectItem>
+                                            <SelectItem value="lata">Lata</SelectItem>
+                                            <SelectItem value="kg">Quilo (kg)</SelectItem>
+                                            <SelectItem value="l">Litro (l)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
                                 <div className="space-y-2">
                                     <Label className="text-xs">Fator de Conversão</Label>

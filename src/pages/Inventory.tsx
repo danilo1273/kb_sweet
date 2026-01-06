@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -229,10 +230,16 @@ export default function Inventory() {
                                     <TableCell className="text-right text-xs">R$ {item.cost_adriel?.toFixed(2) || '0.00'}</TableCell>
                                     <TableCell className="text-right font-bold">
                                         <div className="flex flex-col items-end">
-                                            <span>R$ {item.cost?.toFixed(2) || '0.00'} <span className="text-[10px] font-normal text-zinc-400">/ {item.unit}</span></span>
-                                            {item.purchase_unit && item.purchase_unit_factor && item.purchase_unit_factor > 1 && (
+                                            {/* Custo Unitário (Base de Consumo) */}
+                                            <span>
+                                                R$ {item.cost?.toFixed(item.unit === 'g' || item.unit === 'ml' ? 4 : 2) || '0.00'}
+                                                <span className="text-[10px] font-normal text-zinc-400"> / {item.unit}</span>
+                                            </span>
+
+                                            {/* Subtexto: Custo da Embalagem de Compra */}
+                                            {item.purchase_unit && item.purchase_unit_factor && (
                                                 <span className="text-[10px] text-zinc-500 font-normal">
-                                                    (R$ {((item.cost || 0) * item.purchase_unit_factor).toFixed(2)} / {item.purchase_unit})
+                                                    (R$ {((item.cost || 0) * item.purchase_unit_factor).toFixed(2)} / {item.purchase_unit_factor} {item.unit})
                                                 </span>
                                             )}
                                         </div>
@@ -266,7 +273,12 @@ export default function Inventory() {
                     <div className="space-y-4">
                         <div className="space-y-2">
                             <Label htmlFor="name">Nome do Ingrediente</Label>
-                            <Input id="name" value={currentIngredient.name || ''} onChange={(e) => setCurrentIngredient({ ...currentIngredient, name: e.target.value })} />
+                            <Input
+                                id="name"
+                                value={currentIngredient.name || ''}
+                                onChange={(e) => setCurrentIngredient({ ...currentIngredient, name: e.target.value })}
+                                disabled={!isAdmin}
+                            />
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
@@ -277,6 +289,7 @@ export default function Inventory() {
                                     type="number"
                                     value={currentIngredient.min_stock || 0}
                                     onChange={(e) => setCurrentIngredient({ ...currentIngredient, min_stock: Number(e.target.value) })}
+                                    disabled={!isAdmin}
                                 />
                             </div>
                             <div className="space-y-2">
@@ -286,33 +299,57 @@ export default function Inventory() {
                         </div>
 
                         <div className="border bg-zinc-50 p-4 rounded-md space-y-4">
-                            <h4 className="text-sm font-semibold text-zinc-900">Configuração de Compra</h4>
+                            <div className="flex items-center justify-between">
+                                <h4 className="text-sm font-semibold text-zinc-900">Configuração de Compra (Fator)</h4>
+                                {(currentIngredient.unit === 'g' || currentIngredient.unit === 'ml') && (currentIngredient.purchase_unit_factor || 1) === 1 && (
+                                    <Badge variant="destructive" className="text-[10px]">Atenção: Fator = 1</Badge>
+                                )}
+                            </div>
+
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
-                                    <Label htmlFor="purchase_unit" className="text-xs">Un. Compra (Ex: Caixa)</Label>
-                                    <Input
-                                        id="purchase_unit"
-                                        value={currentIngredient.purchase_unit || ''}
-                                        onChange={(e) => setCurrentIngredient({ ...currentIngredient, purchase_unit: e.target.value })}
-                                        placeholder="Ex: Caixa"
-                                        className="h-8"
-                                    />
+                                    <Label htmlFor="purchase_unit" className="text-xs">Un. Compra</Label>
+                                    <Select
+                                        value={currentIngredient.purchase_unit || 'un'}
+                                        onValueChange={(val) => setCurrentIngredient({ ...currentIngredient, purchase_unit: val })}
+                                        disabled={!isAdmin}
+                                    >
+                                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="un">Unidade (un)</SelectItem>
+                                            <SelectItem value="cx">Caixa (cx)</SelectItem>
+                                            <SelectItem value="fardo">Fardo</SelectItem>
+                                            <SelectItem value="pct">Pacote (pct)</SelectItem>
+                                            <SelectItem value="lata">Lata</SelectItem>
+                                            <SelectItem value="kg">Quilo (kg)</SelectItem>
+                                            <SelectItem value="l">Litro (l)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="purchase_factor" className="text-xs">Qtd na Un. Compra</Label>
+                                    <Label htmlFor="purchase_factor" className="text-xs">
+                                        Qtd na Embalagem ({currentIngredient.unit})
+                                        {(currentIngredient.unit === 'g' || currentIngredient.unit === 'ml') && <span className="text-red-500 ml-1">*</span>}
+                                    </Label>
                                     <Input
                                         id="purchase_factor"
                                         type="number"
                                         value={currentIngredient.purchase_unit_factor || 1}
                                         onChange={(e) => setCurrentIngredient({ ...currentIngredient, purchase_unit_factor: Number(e.target.value) })}
-                                        placeholder="Ex: 12"
-                                        className="h-8"
+                                        placeholder={currentIngredient.unit === 'g' ? "Ex: 200 (para 200g)" : "Ex: 1000 (para 1L)"}
+                                        className={`h-8 ${(currentIngredient.unit === 'g' || currentIngredient.unit === 'ml') && (currentIngredient.purchase_unit_factor || 1) <= 1 ? "border-red-300 bg-red-50 focus-visible:ring-red-200" : ""}`}
                                     />
                                 </div>
                             </div>
                             {currentIngredient.purchase_unit && (
-                                <div className="text-[11px] text-zinc-500 bg-white p-2 border rounded text-center">
-                                    1 {currentIngredient.purchase_unit} contém <strong>{currentIngredient.purchase_unit_factor || 1} {currentIngredient.unit}</strong>
+                                <div className="text-[11px] text-zinc-500 bg-white p-2 border rounded">
+                                    <p className="font-semibold text-zinc-700 mb-1">Preview de Leitura:</p>
+                                    "Comprei 1 <strong>{currentIngredient.purchase_unit}</strong> que contém <strong>{currentIngredient.purchase_unit_factor || 1} {currentIngredient.unit}</strong>"
+                                </div>
+                            )}
+                            {(currentIngredient.unit === 'g' || currentIngredient.unit === 'ml') && (currentIngredient.purchase_unit_factor || 1) <= 1 && (
+                                <div className="text-[11px] text-red-600 bg-red-50 p-2 border border-red-100 rounded">
+                                    Para itens em <strong>{currentIngredient.unit}</strong>, o fator deve ser a quantidade total da embalagem (ex: 395g). Se deixar 1, o sistema calculará o preço por grama ERRADO.
                                 </div>
                             )}
                         </div>
@@ -359,7 +396,9 @@ export default function Inventory() {
                         )}
                     </div>
                     <DialogFooter>
-                        <Button type="submit" onClick={handleSave} disabled={isSaving}>
+                        {!isAdmin && <span className="text-xs text-red-500 flex items-center mr-auto">Apenas administradores podem editar.</span>}
+                        <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
+                        <Button type="submit" onClick={handleSave} disabled={isSaving || !isAdmin}>
                             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Salvar Alterações
                         </Button>
