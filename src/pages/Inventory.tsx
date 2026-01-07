@@ -247,21 +247,57 @@ export default function Inventory() {
         setSelectedIngName(ingredient.name);
         setHistoryLoading(true);
 
-        const { data, error } = await supabase
-            .from('purchase_requests')
-            .select('*, purchase_orders(id, nickname, suppliers(name), profiles(full_name))')
-            .eq('ingredient_id', ingredient.id)
-            .eq('status', 'approved')
-            .order('created_at', { ascending: false })
-            .limit(10);
+        try {
+            // 1. Fetch Request + Order info (Safe Join for Supplier if possible, else just ID)
+            // Try enabling suppliers(name) join. If it fails, we might need to fetch suppliers manually too.
+            // For now, assuming suppliers FK is standard. Removing profiles FK query which is often problematic.
+            const { data: rawData, error } = await supabase
+                .from('purchase_requests')
+                .select('*, purchase_orders(id, nickname, created_by, suppliers(name))')
+                .eq('ingredient_id', ingredient.id)
+                .eq('status', 'approved')
+                .order('created_at', { ascending: false })
+                .limit(10);
 
-        if (error) {
+            if (error) {
+                console.error("History fetch error:", error);
+                throw error;
+            }
+
+            let enrichedData: PurchaseHistory[] = rawData as any;
+
+            // 2. Manual Profile Fetch (Safest approach for User link)
+            const userIds = new Set<string>();
+            rawData?.forEach((r: any) => {
+                if (r.purchase_orders?.created_by) userIds.add(r.purchase_orders.created_by);
+            });
+
+            if (userIds.size > 0) {
+                const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', Array.from(userIds));
+                const profileMap = new Map(profiles?.map(p => [p.id, p.full_name]) || []);
+
+                enrichedData = rawData.map((r: any) => {
+                    const creatorId = r.purchase_orders?.created_by;
+                    const creatorName = profileMap.get(creatorId);
+                    return {
+                        ...r,
+                        purchase_orders: {
+                            ...r.purchase_orders,
+                            profiles: creatorName ? { full_name: creatorName } : undefined
+                        }
+                    };
+                });
+            }
+
+            setHistoryData(enrichedData);
+
+        } catch (error: any) {
             console.error(error);
-            toast({ variant: 'destructive', title: 'Erro ao carregar histórico' });
-        } else {
-            setHistoryData(data || []);
+            toast({ variant: 'destructive', title: 'Erro ao carregar histórico', description: error.message || "Verifique sua conexão." });
+            setHistoryData([]);
+        } finally {
+            setHistoryLoading(false);
         }
-        setHistoryLoading(false);
     };
 
     return (
