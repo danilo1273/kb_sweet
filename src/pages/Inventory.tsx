@@ -334,15 +334,23 @@ export default function Inventory() {
             <div className="rounded-md border bg-white shadow-sm overflow-hidden">
                 <Table>
                     <TableHeader>
-                        <TableHead>Nome</TableHead>
-                        <TableHead className="w-[80px]">Un.</TableHead>
-                        <TableHead className="text-right bg-blue-50/50">Qtd (D)</TableHead>
-                        <TableHead className="text-right bg-blue-50/50">Médio (D)</TableHead>
-                        <TableHead className="text-right bg-blue-50/50 font-bold">Total (D)</TableHead>
-                        <TableHead className="text-right bg-amber-50/50">Qtd (A)</TableHead>
-                        <TableHead className="text-right bg-amber-50/50">Médio (A)</TableHead>
-                        <TableHead className="text-right bg-amber-50/50 font-bold">Total (A)</TableHead>
-                        <TableHead className="text-right w-[80px]">Ações</TableHead>
+                        <TableRow>
+                            <TableHead rowSpan={2} className="align-bottom">Nome</TableHead>
+                            <TableHead rowSpan={2} className="w-[60px] align-bottom">Un.</TableHead>
+                            <TableHead colSpan={3} className="text-center bg-blue-50/80 text-blue-700 border-b border-blue-100 font-semibold h-8 py-1">Estoque Danilo</TableHead>
+                            <TableHead colSpan={3} className="text-center bg-amber-50/80 text-amber-700 border-b border-amber-100 font-semibold h-8 py-1">Estoque Adriel</TableHead>
+                            <TableHead rowSpan={2} className="text-right w-[80px] align-bottom">Ações</TableHead>
+                        </TableRow>
+                        <TableRow>
+                            {/* Danilo Sub-headers */}
+                            <TableHead className="text-right bg-blue-50/30 h-8 py-1 text-xs">Qtd</TableHead>
+                            <TableHead className="text-right bg-blue-50/30 h-8 py-1 text-xs">Médio</TableHead>
+                            <TableHead className="text-right bg-blue-50/30 h-8 py-1 text-xs font-bold">Total</TableHead>
+                            {/* Adriel Sub-headers */}
+                            <TableHead className="text-right bg-amber-50/30 h-8 py-1 text-xs">Qtd</TableHead>
+                            <TableHead className="text-right bg-amber-50/30 h-8 py-1 text-xs">Médio</TableHead>
+                            <TableHead className="text-right bg-amber-50/30 h-8 py-1 text-xs font-bold">Total</TableHead>
+                        </TableRow>
                     </TableHeader>
                     <TableBody>
                         {loading ? (
