@@ -118,7 +118,7 @@ const Purchases = () => {
     const [itemToRequestEdit, setItemToRequestEdit] = useState<PurchaseRequest | null>(null);
     const [isEditItemOpen, setIsEditItemOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<PurchaseRequest | null>(null);
-    const [editedValues, setEditedValues] = useState<{ quantity: number, cost: number, item_name: string, unit: string, ingredient_id?: string }>({ quantity: 0, cost: 0, item_name: '', unit: 'un' });
+    const [editedValues, setEditedValues] = useState<{ quantity: number, cost: number, item_name: string, unit: string, ingredient_id?: string, destination: 'danilo' | 'adriel' }>({ quantity: 0, cost: 0, item_name: '', unit: 'un', destination: 'danilo' });
     const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
     const [newProduct, setNewProduct] = useState<Partial<Ingredient>>({ unit: 'un' });
 
@@ -602,7 +602,7 @@ const Purchases = () => {
             });
         }
         setEditingItem(item);
-        setEditedValues({ quantity: item.quantity, cost: item.cost, item_name: item.item_name, unit: item.unit, ingredient_id: item.ingredient_id });
+        setEditedValues({ quantity: item.quantity, cost: item.cost, item_name: item.item_name, unit: item.unit, ingredient_id: item.ingredient_id, destination: item.destination || 'danilo' });
         setIsEditItemOpen(true);
     }
 
@@ -621,6 +621,7 @@ const Purchases = () => {
                 item_name: editedValues.item_name,
                 unit: editedValues.unit,
                 ingredient_id: editedValues.ingredient_id,
+                destination: editedValues.destination,
                 status: editingItem.status === 'edit_approved' ? 'pending' : editingItem.status // Volta pra pendente se era edit_approved
             }).eq('id', editingItem.id);
 
@@ -824,9 +825,6 @@ const Purchases = () => {
 
         // Prioridade: Em Edição > Parcial > Pendente > Aprovado > Rejeitado
         const hasEditing = reqs.some(r => ['edit_requested', 'edit_approved'].includes(r.status));
-        const anyApproved = reqs.some(r => r.status === 'approved');
-        const anyRejected = reqs.some(r => r.status === 'rejected');
-        const anyPending = reqs.some(r => r.status === 'pending');
 
         const allApproved = reqs.every(r => r.status === 'approved');
         const allRejected = reqs.every(r => r.status === 'rejected');
@@ -1055,6 +1053,16 @@ const Purchases = () => {
                                     </Select>
                                 </div>
                                 <div className="col-span-1 md:col-span-2">
+                                    <Label className="text-[10px]">Destino</Label>
+                                    <Select value={draftItem.destination} onValueChange={(val: any) => setDraftItem({ ...draftItem, destination: val })}>
+                                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="danilo">Danilo</SelectItem>
+                                            <SelectItem value="adriel">Adriel</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="col-span-2 md:col-span-2">
                                     <Label className="text-[10px]">Marca/Ref</Label>
                                     <Input className="h-8" placeholder="Ex: Marca" value={draftItem.item_name} onChange={e => setDraftItem({ ...draftItem, item_name: e.target.value })} />
                                 </div>
@@ -1175,6 +1183,16 @@ const Purchases = () => {
                                     </Select>
                                 </div>
                                 <div className="col-span-1 md:col-span-2">
+                                    <Label className="text-[10px]">Destino</Label>
+                                    <Select value={newItemDraft.destination} onValueChange={(val: any) => setNewItemDraft({ ...newItemDraft, destination: val })}>
+                                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="danilo">Danilo</SelectItem>
+                                            <SelectItem value="adriel">Adriel</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="col-span-2 md:col-span-2">
                                     <Label className="text-[10px]">Obs/Marca</Label>
                                     <Input className="h-8" value={newItemDraft.item_name} onChange={e => setNewItemDraft({ ...newItemDraft, item_name: e.target.value })} />
                                 </div>
@@ -1264,6 +1282,16 @@ const Purchases = () => {
                                     <Label>Custo Total R$</Label>
                                     <Input type="number" value={editedValues.cost || ''} onChange={(e) => setEditedValues({ ...editedValues, cost: Number(e.target.value) })} />
                                 </div>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Estoque de Destino (Para onde vai?)</Label>
+                                <Select value={editedValues.destination} onValueChange={(v: any) => setEditedValues({ ...editedValues, destination: v })}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="danilo">Danilo</SelectItem>
+                                        <SelectItem value="adriel">Adriel</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
                             {editingItem.status === 'edit_approved' && (
                                 <div className="p-3 bg-orange-50 border border-orange-200 rounded text-xs text-orange-800">
