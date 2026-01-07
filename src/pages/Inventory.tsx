@@ -335,10 +335,11 @@ export default function Inventory() {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead rowSpan={2} className="align-bottom">Nome</TableHead>
+                            <TableHead rowSpan={2} className="align-bottom w-[200px] max-w-[200px]">Nome</TableHead>
                             <TableHead rowSpan={2} className="w-[60px] align-bottom">Un.</TableHead>
                             <TableHead colSpan={3} className="text-center bg-blue-50/80 text-blue-700 border-b border-blue-100 font-semibold h-8 py-1">Estoque Danilo</TableHead>
                             <TableHead colSpan={3} className="text-center bg-amber-50/80 text-amber-700 border-b border-amber-100 font-semibold h-8 py-1">Estoque Adriel</TableHead>
+                            <TableHead colSpan={2} className="text-center bg-zinc-100 text-zinc-700 border-b border-zinc-200 font-semibold h-8 py-1">Total Geral</TableHead>
                             <TableHead rowSpan={2} className="text-right w-[80px] align-bottom">Ações</TableHead>
                         </TableRow>
                         <TableRow>
@@ -350,68 +351,81 @@ export default function Inventory() {
                             <TableHead className="text-right bg-amber-50/30 h-8 py-1 text-xs">Qtd</TableHead>
                             <TableHead className="text-right bg-amber-50/30 h-8 py-1 text-xs">Médio</TableHead>
                             <TableHead className="text-right bg-amber-50/30 h-8 py-1 text-xs font-bold">Total</TableHead>
+                            {/* Total Geral Sub-headers */}
+                            <TableHead className="text-right bg-zinc-50 h-8 py-1 text-xs font-bold">Qtd</TableHead>
+                            <TableHead className="text-right bg-zinc-50 h-8 py-1 text-xs font-bold">Total</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {loading ? (
                             <TableRow>
-                                <TableCell colSpan={8} className="text-center py-10">
+                                <TableCell colSpan={10} className="text-center py-10">
                                     <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                                 </TableCell>
                             </TableRow>
                         ) : filteredIngredients.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
+                                <TableCell colSpan={10} className="text-center py-10 text-muted-foreground">
                                     Nenhum ingrediente encontrado.
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            filteredIngredients.map((item) => (
-                                <TableRow key={item.id}>
-                                    <TableCell className="font-medium">
-                                        {item.name}
-                                        <div className="text-[10px] text-zinc-400 font-normal">{item.category}</div>
-                                    </TableCell>
-                                    <TableCell>{item.unit}</TableCell>
+                            filteredIngredients.map((item) => {
+                                const totalQtd = (item.stock_danilo || 0) + (item.stock_adriel || 0);
+                                const totalVal = ((item.stock_danilo || 0) * (item.cost_danilo || 0)) + ((item.stock_adriel || 0) * (item.cost_adriel || 0));
 
-                                    {/* Danilo Columns */}
-                                    <TableCell className={cn("text-right bg-blue-50/30", item.stock_danilo <= item.min_stock ? "text-red-600 font-bold" : "")}>
-                                        {item.stock_danilo}
-                                    </TableCell>
-                                    <TableCell className="text-right text-xs bg-blue-50/30">
-                                        <div>R$ {item.cost_danilo?.toFixed(2) || '0.00'}</div>
-                                        <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
-                                    </TableCell>
-                                    <TableCell className="text-right text-xs font-bold text-blue-700 bg-blue-50/30">
-                                        R$ {((item.stock_danilo || 0) * (item.cost_danilo || 0)).toFixed(2)}
-                                    </TableCell>
+                                return (
+                                    <TableRow key={item.id}>
+                                        <TableCell className="font-medium max-w-[200px] truncate" title={item.name}>
+                                            {item.name}
+                                            <div className="text-[10px] text-zinc-400 font-normal truncate">{item.category}</div>
+                                        </TableCell>
+                                        <TableCell>{item.unit}</TableCell>
 
-                                    {/* Adriel Columns */}
-                                    <TableCell className="text-right bg-amber-50/30">
-                                        {item.stock_adriel}
-                                    </TableCell>
-                                    <TableCell className="text-right text-xs bg-amber-50/30">
-                                        <div>R$ {item.cost_adriel?.toFixed(2) || '0.00'}</div>
-                                        <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
-                                    </TableCell>
-                                    <TableCell className="text-right text-xs font-bold text-amber-700 bg-amber-50/30">
-                                        R$ {((item.stock_adriel || 0) * (item.cost_adriel || 0)).toFixed(2)}
-                                    </TableCell>
-                                    <TableCell className="text-right space-x-1">
-                                        <Button variant="ghost" size="icon" onClick={() => openHistory(item)} title="Histórico de Compras">
-                                            <History className="h-4 w-4 text-blue-500" />
-                                        </Button>
-                                        <Button variant="ghost" size="icon" onClick={() => openEdit(item)} title="Editar">
-                                            <Edit className="h-4 w-4 text-zinc-500" />
-                                        </Button>
-                                        {isAdmin && (
-                                            <Button variant="ghost" size="icon" onClick={() => handleDelete(item.id)} title="Excluir (Admin)">
-                                                <Trash2 className="h-4 w-4 text-red-500" />
+                                        {/* Danilo Columns */}
+                                        <TableCell className={cn("text-right bg-blue-50/30", item.stock_danilo <= item.min_stock ? "text-red-600 font-bold" : "")}>
+                                            {item.stock_danilo}
+                                        </TableCell>
+                                        <TableCell className="text-right text-xs bg-blue-50/30">
+                                            <div>R$ {item.cost_danilo?.toFixed(2) || '0.00'}</div>
+                                            <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                        </TableCell>
+                                        <TableCell className="text-right text-xs font-bold text-blue-700 bg-blue-50/30">
+                                            R$ {((item.stock_danilo || 0) * (item.cost_danilo || 0)).toFixed(2)}
+                                        </TableCell>
+
+                                        {/* Adriel Columns */}
+                                        <TableCell className="text-right bg-amber-50/30">
+                                            {item.stock_adriel}
+                                        </TableCell>
+                                        <TableCell className="text-right text-xs bg-amber-50/30">
+                                            <div>R$ {item.cost_adriel?.toFixed(2) || '0.00'}</div>
+                                            <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                        </TableCell>
+                                        <TableCell className="text-right text-xs font-bold text-amber-700 bg-amber-50/30">
+                                            R$ {((item.stock_adriel || 0) * (item.cost_adriel || 0)).toFixed(2)}
+                                        </TableCell>
+
+                                        {/* Total Geral Columns */}
+                                        <TableCell className="text-right font-bold bg-zinc-50">{totalQtd}</TableCell>
+                                        <TableCell className="text-right font-bold text-green-700 bg-zinc-50">R$ {totalVal.toFixed(2)}</TableCell>
+
+                                        <TableCell className="text-right space-x-1">
+                                            <Button variant="ghost" size="icon" onClick={() => openHistory(item)} title="Histórico de Compras">
+                                                <History className="h-4 w-4 text-blue-500" />
                                             </Button>
-                                        )}
-                                    </TableCell>
-                                </TableRow>
-                            ))
+                                            <Button variant="ghost" size="icon" onClick={() => openEdit(item)} title="Editar">
+                                                <Edit className="h-4 w-4 text-zinc-500" />
+                                            </Button>
+                                            {isAdmin && (
+                                                <Button variant="ghost" size="icon" onClick={() => handleDelete(item.id)} title="Excluir (Admin)">
+                                                    <Trash2 className="h-4 w-4 text-red-500" />
+                                                </Button>
+                                            )}
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })
                         )}
                     </TableBody>
                 </Table>
