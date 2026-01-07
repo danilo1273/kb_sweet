@@ -26,7 +26,8 @@ const ROLE_LABELS: Record<string, string> = {
     buyer: 'Compras (Lançar)',
     seller: 'Vendas (Vendedor)',
     approver: 'Aprovador (Estoque/Compras)',
-    financial: 'Financeiro (Contas)'
+    financial: 'Financeiro (Contas)',
+    sales: 'Vendas (Vendedor)' // Legacy alias
 };
 
 const AVAILABLE_ROLES = ['admin', 'buyer', 'seller', 'approver', 'financial'];
@@ -40,7 +41,7 @@ export default function AdminUsers() {
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [newUserEmail, setNewUserEmail] = useState("");
     const [newUserPass, setNewUserPass] = useState("");
-    const [newUserRoles, setNewUserRoles] = useState<string[]>(["sales"]);
+    const [newUserRoles, setNewUserRoles] = useState<string[]>(["seller"]);
     const [newUserName, setNewUserName] = useState("");
     const [isCreating, setIsCreating] = useState(false);
 
