@@ -1016,8 +1016,8 @@ const Purchases = () => {
                             <Input value={newOrderNickname} readOnly className="bg-zinc-100 text-zinc-500" />
                         </div>
                         <div className="border rounded p-4 bg-zinc-50 space-y-4">
-                            <div className="grid grid-cols-12 gap-2 items-end">
-                                <div className="col-span-3">
+                            <div className="grid grid-cols-2 md:grid-cols-12 gap-2 items-end">
+                                <div className="col-span-2 md:col-span-3">
                                     <Label className="text-[10px]">Produto</Label>
                                     <div className="flex items-center gap-1">
                                         <Select value={draftItem.ingredient_id || "custom"} onValueChange={(val) => {
@@ -1033,7 +1033,7 @@ const Purchases = () => {
                                         <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setIsProductDialogOpen(true)} title="Cadastrar Novo Ingrediente"><Plus className="h-3 w-3" /></Button>
                                     </div>
                                 </div>
-                                <div className="col-span-2">
+                                <div className="col-span-1 md:col-span-2">
                                     <Label className="text-[10px]">Unid. Selecionada</Label>
                                     <Select
                                         value={draftItem.unit || 'un'}
@@ -1054,19 +1054,19 @@ const Purchases = () => {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <div className="col-span-2">
+                                <div className="col-span-1 md:col-span-2">
                                     <Label className="text-[10px]">Marca/Ref</Label>
                                     <Input className="h-8" placeholder="Ex: Marca" value={draftItem.item_name} onChange={e => setDraftItem({ ...draftItem, item_name: e.target.value })} />
                                 </div>
-                                <div className="col-span-1">
+                                <div className="col-span-1 md:col-span-1">
                                     <Label className="text-[10px]">Qtd</Label>
                                     <Input className="h-8" type="number" placeholder="Qtd" value={draftItem.quantity} onChange={e => setDraftItem({ ...draftItem, quantity: Number(e.target.value) })} />
                                 </div>
-                                <div className="col-span-2">
+                                <div className="col-span-1 md:col-span-2">
                                     <Label className="text-[10px]">Total (R$)</Label>
                                     <Input className="h-8" type="number" placeholder="R$" value={draftItem.cost} onChange={e => setDraftItem({ ...draftItem, cost: Number(e.target.value) })} />
                                 </div>
-                                <div className="col-span-1"><Button onClick={addItemToDraft} size="sm" className="h-8 w-8 p-0"><Plus className="h-4 w-4" /></Button></div>
+                                <div className="col-span-2 md:col-span-1"><Button onClick={addItemToDraft} size="sm" className="h-8 w-full md:w-8 px-2 md:p-0"><Plus className="h-4 w-4 mx-auto" /></Button></div>
                             </div>
                         </div>
                         <div className="max-h-[200px] overflow-auto border bg-white rounded">
@@ -1133,8 +1133,8 @@ const Purchases = () => {
 
                         <div className="pt-4 border-t space-y-3">
                             <h4 className="font-semibold text-sm text-zinc-700">Adicionar Novo Item ao Lote</h4>
-                            <div className="grid grid-cols-12 gap-2 items-end bg-zinc-50 p-3 rounded border">
-                                <div className="col-span-3">
+                            <div className="grid grid-cols-2 md:grid-cols-12 gap-2 items-end bg-zinc-50 p-3 rounded border">
+                                <div className="col-span-2 md:col-span-3">
                                     <Label className="text-[10px]">Produto</Label>
                                     <div className="flex items-center gap-1">
                                         <Select
@@ -1153,7 +1153,7 @@ const Purchases = () => {
                                         <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setIsProductDialogOpen(true)}><Plus className="h-3 w-3" /></Button>
                                     </div>
                                 </div>
-                                <div className="col-span-2">
+                                <div className="col-span-1 md:col-span-2">
                                     <Label className="text-[10px]">Unid. Selecionada</Label>
                                     <Select
                                         value={newItemDraft.unit || 'un'}
@@ -1174,19 +1174,19 @@ const Purchases = () => {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <div className="col-span-2">
+                                <div className="col-span-1 md:col-span-2">
                                     <Label className="text-[10px]">Obs/Marca</Label>
                                     <Input className="h-8" value={newItemDraft.item_name} onChange={e => setNewItemDraft({ ...newItemDraft, item_name: e.target.value })} />
                                 </div>
-                                <div className="col-span-1">
+                                <div className="col-span-1 md:col-span-1">
                                     <Label className="text-[10px]">Qtd</Label>
                                     <Input className="h-8" type="number" value={newItemDraft.quantity} onChange={e => setNewItemDraft({ ...newItemDraft, quantity: Number(e.target.value) })} />
                                 </div>
-                                <div className="col-span-2">
+                                <div className="col-span-1 md:col-span-2">
                                     <Label className="text-[10px]">Total (R$)</Label>
                                     <Input className="h-8" type="number" value={newItemDraft.cost} onChange={e => setNewItemDraft({ ...newItemDraft, cost: Number(e.target.value) })} />
                                 </div>
-                                <div className="col-span-1"><Button onClick={handleAddItemToExistingOrder} size="sm" className="h-8 w-8 p-0" title="Adicionar ao lote"><Plus className="h-4 w-4" /></Button></div>
+                                <div className="col-span-2 md:col-span-1"><Button onClick={handleAddItemToExistingOrder} size="sm" className="h-8 w-full md:w-8 px-2 md:p-0" title="Adicionar ao lote"><Plus className="h-4 w-4 mx-auto" /></Button></div>
                             </div>
                         </div>
                     </div>

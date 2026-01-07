@@ -67,12 +67,17 @@ export default function AdminUsers() {
         if (error) {
             toast({ variant: 'destructive', title: 'Erro ao listar usuários', description: error.message });
         } else {
-            // Normalizar roles
+            // Normalizar roles e migrar 'sales' -> 'seller'
             const normalizedUsers = (data || []).map((u: any) => {
-                let roles = u.roles;
-                if (!roles || !Array.isArray(roles)) {
+                let roles = u.roles || [];
+                if (!Array.isArray(roles) || roles.length === 0) {
                     roles = u.role ? [u.role] : [];
                 }
+                // Normalize legacy 'sales' to 'seller'
+                roles = roles.map((r: string) => r === 'sales' ? 'seller' : r);
+                // Remove duplicates
+                roles = Array.from(new Set(roles));
+
                 return { ...u, roles };
             });
             setUsers(normalizedUsers);
