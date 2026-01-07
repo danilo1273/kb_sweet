@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -31,10 +31,16 @@ interface Ingredient {
 interface PurchaseHistory {
     id: string;
     created_at: string;
-    supplier: string;
+    supplier?: string; // Legacy or direct
     quantity: number;
-    cost: number; // Valor Total
+    cost: number;
     unit: string;
+    purchase_orders?: {
+        id: string;
+        nickname: string;
+        suppliers?: { name: string };
+        profiles?: { full_name: string };
+    };
 }
 
 export default function Inventory() {
@@ -243,7 +249,7 @@ export default function Inventory() {
 
         const { data, error } = await supabase
             .from('purchase_requests')
-            .select('*')
+            .select('*, purchase_orders(id, nickname, suppliers(name), profiles(full_name))')
             .eq('ingredient_id', ingredient.id)
             .eq('status', 'approved')
             .order('created_at', { ascending: false })
@@ -542,27 +548,34 @@ export default function Inventory() {
                     <DialogHeader>
                         <DialogTitle>Histórico de Compras: {selectedIngName}</DialogTitle>
                     </DialogHeader>
-                    <div className="max-h-[60vh] overflow-y-auto">
+                    <div className="border rounded-md overflow-x-auto">
                         <Table>
                             <TableHeader>
                                 <TableRow>
                                     <TableHead>Data</TableHead>
+                                    <TableHead>Lote</TableHead>
                                     <TableHead>Fornecedor</TableHead>
+                                    <TableHead>Comprador</TableHead>
                                     <TableHead>Qtd</TableHead>
-                                    <TableHead>Valor Total</TableHead>
-                                    <TableHead>Valor Unit. (Calc)</TableHead>
+                                    <TableHead>Total</TableHead>
+                                    <TableHead>Unit. (Calc)</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {historyLoading ? (
-                                    <TableRow><TableCell colSpan={5} className="text-center"><Loader2 className="animate-spin mx-auto" /></TableCell></TableRow>
+                                    <TableRow><TableCell colSpan={7} className="text-center"><Loader2 className="animate-spin mx-auto" /></TableCell></TableRow>
                                 ) : historyData.length === 0 ? (
-                                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Nenhuma compra registrada.</TableCell></TableRow>
+                                    <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Nenhuma compra registrada.</TableCell></TableRow>
                                 ) : (
                                     historyData.map(h => (
-                                        <TableRow key={h.id}>
+                                        <TableRow key={h.id} className="whitespace-nowrap">
                                             <TableCell>{new Date(h.created_at).toLocaleDateString()}</TableCell>
-                                            <TableCell>{h.supplier || '-'}</TableCell>
+                                            <TableCell className="text-xs font-medium text-blue-600">
+                                                {h.purchase_orders?.nickname || '-'}
+                                                {/* Future: Add Link/Click to open order */}
+                                            </TableCell>
+                                            <TableCell>{h.purchase_orders?.suppliers?.name || h.supplier || '-'}</TableCell>
+                                            <TableCell>{h.purchase_orders?.profiles?.full_name?.split(' ')[0] || '-'}</TableCell>
                                             <TableCell>{h.quantity} {h.unit}</TableCell>
                                             <TableCell>R$ {h.cost?.toFixed(2)}</TableCell>
                                             <TableCell className="text-muted-foreground text-xs">
