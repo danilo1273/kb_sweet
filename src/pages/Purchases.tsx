@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Loader2, Pencil, Check, X, Trash2, RotateCcw, Clock, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Loader2, Pencil, Check, X, Trash2, RotateCcw, Clock, ChevronDown, ChevronUp, CheckCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
@@ -74,6 +74,8 @@ interface Ingredient {
     purchase_unit?: string;
     purchase_unit_factor?: number;
     category?: string;
+    unit_weight?: number;
+    unit_type?: string;
 }
 
 interface Supplier {
@@ -105,7 +107,7 @@ const Purchases = () => {
     const [newItemDraft, setNewItemDraft] = useState<ItemDraft>({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo' });
 
     // Filter State
-    const [filterStatus, setFilterStatus] = useState<'all' | 'approved' | 'pending' | 'partial' | 'rejected'>('all');
+    const [filterStatus, setFilterStatus] = useState<'all' | 'approved' | 'pending' | 'partial' | 'rejected' | 'editing'>('all');
     const [expandedOrders, setExpandedOrders] = useState<Record<string, boolean>>({});
 
     // Dialogs
@@ -116,7 +118,7 @@ const Purchases = () => {
     const [itemToRequestEdit, setItemToRequestEdit] = useState<PurchaseRequest | null>(null);
     const [isEditItemOpen, setIsEditItemOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<PurchaseRequest | null>(null);
-    const [editedValues, setEditedValues] = useState<{ quantity: number, cost: number, item_name: string, unit: string }>({ quantity: 0, cost: 0, item_name: '', unit: 'un' });
+    const [editedValues, setEditedValues] = useState<{ quantity: number, cost: number, item_name: string, unit: string, ingredient_id?: string }>({ quantity: 0, cost: 0, item_name: '', unit: 'un' });
     const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
     const [newProduct, setNewProduct] = useState<Partial<Ingredient>>({ unit: 'un' });
 
@@ -442,9 +444,23 @@ const Purchases = () => {
                     if (fetchErr) throw new Error("Falha ao buscar dados atuais do ingrediente");
 
                     if (freshIng) {
-                        // Apply factor ONLY if the unit used is the purchase unit
-                        const isPurchaseUnit = item.unit === freshIng.purchase_unit;
-                        const factor = isPurchaseUnit ? (Number(freshIng.purchase_unit_factor) || 1) : 1;
+                        // Updated Conversion Logic (Primary/Secondary + Legacy)
+                        const isPrimary = (item.unit || '').trim().toLowerCase() === (freshIng.unit || '').trim().toLowerCase();
+                        const isSecondary = (item.unit || '').trim().toLowerCase() === (freshIng.unit_type || '').trim().toLowerCase();
+                        const isLegacyPurchase = (item.unit || '').trim().toLowerCase() === (freshIng.purchase_unit || '').trim().toLowerCase();
+
+                        let factor = 1;
+                        if (isPrimary) {
+                            factor = 1;
+                        } else if (isSecondary) {
+                            factor = Number(freshIng.unit_weight) || 1;
+                        } else if (isLegacyPurchase) {
+                            factor = Number(freshIng.purchase_unit_factor) || 1;
+                        } else {
+                            // Fallback: If unit names match roughly (e.g. 'un' vs 'UN')
+                            console.warn(`[Approve] Unit mismatch: Request=${item.unit}, Stock=${freshIng.unit}. Assumed factor 1.`);
+                        }
+
                         const convertedQty = Number(item.quantity) * factor;
 
                         const targetField = item.destination === 'adriel' ? 'stock_adriel' : 'stock_danilo';
@@ -586,7 +602,7 @@ const Purchases = () => {
             });
         }
         setEditingItem(item);
-        setEditedValues({ quantity: item.quantity, cost: item.cost, item_name: item.item_name, unit: item.unit });
+        setEditedValues({ quantity: item.quantity, cost: item.cost, item_name: item.item_name, unit: item.unit, ingredient_id: item.ingredient_id });
         setIsEditItemOpen(true);
     }
 
@@ -604,6 +620,7 @@ const Purchases = () => {
                 cost: editedValues.cost,
                 item_name: editedValues.item_name,
                 unit: editedValues.unit,
+                ingredient_id: editedValues.ingredient_id,
                 status: editingItem.status === 'edit_approved' ? 'pending' : editingItem.status // Volta pra pendente se era edit_approved
             }).eq('id', editingItem.id);
 
@@ -641,15 +658,51 @@ const Purchases = () => {
         setIsHistoryOpen(true);
     }
 
+    async function handleApproveAll(order: PurchaseOrder) {
+        const pending = order.requests.filter(r => r.status === 'pending');
+        if (pending.length === 0) return toast({ title: "Nada pendente para aprovar." });
+
+        if (!confirm(`Confirmar aprovação de todos os ${pending.length} itens pendentes?`)) return;
+
+        setLoading(true);
+        try {
+            // Process sequentially to avoid race conditions on stock updates
+            for (const item of pending) {
+                await handleApproveItem(item, true);
+            }
+            toast({ title: "Todos os itens aprovados!" });
+        } catch (e: any) {
+            toast({ variant: 'destructive', title: "Erro na aprovação em lote", description: e.message });
+        } finally {
+            setLoading(false);
+            fetchData();
+        }
+    }
+
     async function handleSaveProduct() {
         try {
             if (!newProduct.name) return;
-            await supabase.from('ingredients').insert({ ...newProduct, is_active: true });
-            toast({ title: "Produto criado" });
+            const payload = {
+                name: newProduct.name,
+                category: newProduct.category || 'Outros',
+                unit: newProduct.unit || 'UN',
+                unit_weight: Number(newProduct.unit_weight || 1),
+                unit_type: newProduct.unit_type || '',
+                is_active: true,
+                stock_danilo: 0,
+                stock_adriel: 0,
+                // Legacy / Unused in new model
+                purchase_unit: null,
+                purchase_unit_factor: 1
+            };
+
+            await supabase.from('ingredients').insert(payload);
+            toast({ title: "Produto criado com sucesso" });
             setIsProductDialogOpen(false);
+            setNewProduct({ unit: 'UN' }); // Reset clean
             fetchMeta();
         } catch (e: any) {
-            toast({ title: "Erro", description: e.message });
+            toast({ variant: "destructive", title: "Erro", description: e.message });
         }
     }
 
@@ -765,16 +818,33 @@ const Purchases = () => {
         }
     };
 
+    const getOrderStatus = (order: PurchaseOrder) => {
+        const reqs = order.requests || [];
+        if (reqs.length === 0) return { label: 'Vazio', color: 'bg-zinc-100 text-zinc-800 hover:bg-zinc-200', value: 'empty' };
+
+        // Prioridade: Em Edição > Parcial > Pendente > Aprovado > Rejeitado
+        const hasEditing = reqs.some(r => ['edit_requested', 'edit_approved'].includes(r.status));
+        const anyApproved = reqs.some(r => r.status === 'approved');
+        const anyRejected = reqs.some(r => r.status === 'rejected');
+        const anyPending = reqs.some(r => r.status === 'pending');
+
+        const allApproved = reqs.every(r => r.status === 'approved');
+        const allRejected = reqs.every(r => r.status === 'rejected');
+        const allPending = reqs.every(r => r.status === 'pending');
+
+        if (hasEditing) return { label: 'Em Edição', color: 'bg-indigo-100 text-indigo-800 border border-indigo-200', value: 'editing' };
+        if (allApproved) return { label: 'Aprovado', color: 'bg-green-100 text-green-800 border border-green-200', value: 'approved' };
+        if (allRejected) return { label: 'Rejeitado', color: 'bg-red-100 text-red-800 border border-red-200', value: 'rejected' };
+        if (allPending) return { label: 'Pendente', color: 'bg-yellow-100 text-yellow-800 border border-yellow-200', value: 'pending' };
+
+        // Se tem mistura (aprovado + pendente, ou aprovado + rejeitado) -> Parcial
+        return { label: 'Parcial', color: 'bg-orange-100 text-orange-800 border border-orange-200', value: 'partial' };
+    };
+
     const filteredOrders = orders.filter(order => {
+        const status = getOrderStatus(order).value;
         if (filterStatus === 'all') return true;
-        const hasApproved = order.requests.some(r => r.status === 'approved');
-        const hasRejected = order.requests.some(r => r.status === 'rejected');
-        const hasPending = order.requests.some(r => r.status === 'pending');
-        if (filterStatus === 'approved') return !hasPending && hasApproved;
-        if (filterStatus === 'pending') return hasPending;
-        if (filterStatus === 'partial') return hasApproved && (hasPending || hasRejected);
-        if (filterStatus === 'rejected') return !hasPending && !hasApproved && hasRejected;
-        return true;
+        return status === filterStatus;
     });
 
     return (
@@ -793,14 +863,14 @@ const Purchases = () => {
                             <Plus className="mr-2 h-4 w-4" /> Novo Pedido
                         </Button>
                     </div>
-                    <div className="flex bg-zinc-100 p-1 rounded-lg">
-                        {(['all', 'pending', 'approved', 'partial', 'rejected'] as const).map(st => (
+                    <div className="flex bg-zinc-100 p-1 rounded-lg flex-wrap justify-end">
+                        {(['all', 'pending', 'editing', 'approved', 'partial', 'rejected'] as const).map(st => (
                             <button
                                 key={st}
                                 onClick={() => setFilterStatus(st)}
                                 className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${filterStatus === st ? 'bg-white shadow text-black' : 'text-zinc-500 hover:text-zinc-700'}`}
                             >
-                                {st === 'all' ? 'Todos' : st === 'pending' ? 'Pendentes' : st === 'approved' ? 'Aprovados' : st === 'partial' ? 'Parciais' : 'Rejeitados'}
+                                {st === 'all' ? 'Todos' : st === 'pending' ? 'Pendentes' : st === 'editing' ? 'Em Edição' : st === 'approved' ? 'Aprovados' : st === 'partial' ? 'Parciais' : 'Rejeitados'}
                             </button>
                         ))}
                     </div>
@@ -819,6 +889,9 @@ const Purchases = () => {
                                     <div>
                                         <h3 className="font-semibold text-lg flex items-center gap-2">
                                             {order.nickname}
+                                            <Badge variant="outline" className={`text-[10px] font-normal px-2 ${getOrderStatus(order).color}`}>
+                                                {getOrderStatus(order).label}
+                                            </Badge>
                                             <span className="text-xs font-normal text-zinc-400">por {profiles[order.created_by] || '...'}</span>
                                         </h3>
                                         <div className="text-sm text-zinc-500 flex gap-4">
@@ -829,8 +902,11 @@ const Purchases = () => {
                                     </div>
                                 </div>
                                 <div className="flex gap-2 items-center" onClick={e => e.stopPropagation()}>
-                                    {(userRoles.includes('admin') || userRoles.includes('buyer')) && (
+                                    {(userRoles.includes('admin') || userRoles.includes('approver')) && (
                                         <>
+                                            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleApproveAll(order); }} title="Aprovar Lote Pendente" className="text-green-600 hover:bg-green-50">
+                                                <CheckCheck className="h-4 w-4" />
+                                            </Button>
                                             <Button variant="ghost" size="icon" onClick={() => openManageOrder(order)} title="Gerenciar Lote" className="text-blue-500 hover:bg-blue-50">
                                                 <Pencil className="h-4 w-4" />
                                             </Button>
@@ -929,11 +1005,9 @@ const Purchases = () => {
                                     }}>
                                         <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger> <SelectContent><SelectItem value="default">Vários</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
                                     </Select>
-                                    {userRoles.includes('admin') && (
-                                        <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
-                                            <Plus className="h-4 w-4" />
-                                        </Button>
-                                    )}
+                                    <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
+                                        <Plus className="h-4 w-4" />
+                                    </Button>
                                 </div>
                             </div>
                         </div>
@@ -1016,11 +1090,9 @@ const Purchases = () => {
                                         <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
                                         <SelectContent><SelectItem value="default">Vários</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
                                     </Select>
-                                    {userRoles.includes('admin') && (
-                                        <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
-                                            <Plus className="h-4 w-4" />
-                                        </Button>
-                                    )}
+                                    <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
+                                        <Plus className="h-4 w-4" />
+                                    </Button>
                                 </div>
                             </div>
                             <div className="space-y-2"><Label>Apelido</Label><Input value={manageOrderData.nickname} onChange={e => setManageOrderData({ ...manageOrderData, nickname: e.target.value })} /></div>
@@ -1152,12 +1224,24 @@ const Purchases = () => {
                         <div className="py-4 space-y-4">
                             <div className="space-y-2">
                                 <Label>Nome / Marca</Label>
-                                <Input value={editedValues.item_name} onChange={(e) => setEditedValues({ ...editedValues, item_name: e.target.value })} />
+                                <Label>Item (Estoque)</Label>
+                                <Select value={editedValues.ingredient_id || 'custom'} onValueChange={(val) => {
+                                    if (val !== 'custom') {
+                                        const i = ingredients.find(x => x.id === val);
+                                        setEditedValues({ ...editedValues, ingredient_id: val, item_name: i?.name || '', unit: i?.unit || 'un' });
+                                    }
+                                }}>
+                                    <SelectTrigger className="w-full"><SelectValue placeholder="Selecione o produto..." /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="custom" disabled>Selecione um produto da lista</SelectItem>
+                                        {ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label>Unidade</Label>
-                                    <Select value={editedValues.unit} onValueChange={(v) => setEditedValues({ ...editedValues, unit: v })}>
+                                    <Select value={editedValues.unit} onValueChange={(v) => setEditedValues({ ...editedValues, unit: v })} disabled>
                                         <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="un">un</SelectItem>
@@ -1235,75 +1319,114 @@ const Purchases = () => {
 
             {/* Modal: Quick Product Creation */}
             <Dialog open={isProductDialogOpen} onOpenChange={setIsProductDialogOpen}>
-                <DialogContent>
-                    <DialogHeader><DialogTitle>Cadastrar Ingrediente</DialogTitle></DialogHeader>
+                <DialogContent className="overflow-visible">
+                    <DialogHeader><DialogTitle>Cadastrar Novo Produto</DialogTitle></DialogHeader>
                     <div className="py-4 space-y-4">
-                        <div className="space-y-2"><Label>Nome</Label><Input value={newProduct.name || ''} onChange={e => setNewProduct({ ...newProduct, name: e.target.value })} placeholder="Nome do ingrediente" /></div>
+                        <div className="space-y-2">
+                            <Label>Nome do Produto</Label>
+                            <Input value={newProduct.name || ''} onChange={e => setNewProduct({ ...newProduct, name: e.target.value })} placeholder="Ex: Fita de Cetim" />
+                        </div>
+
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label>Unidade de Estoque</Label>
-                                <Select value={newProduct.unit} onValueChange={v => setNewProduct({ ...newProduct, unit: v })}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="g">Grama (g)</SelectItem>
-                                        <SelectItem value="ml">Mililitro (ml)</SelectItem>
-                                        <SelectItem value="un">Unidade (un)</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                <Label>Categoria</Label>
+                                <div className="relative">
+                                    <Input
+                                        list="new-prod-categories"
+                                        value={newProduct.category || ''}
+                                        onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
+                                        placeholder="Selecione ou digite..."
+                                    />
+                                    <datalist id="new-prod-categories">
+                                        <option value="Laticínios" />
+                                        <option value="Secos" />
+                                        <option value="Embalagens" />
+                                        <option value="Outros" />
+                                    </datalist>
+                                </div>
                             </div>
                             <div className="space-y-2">
-                                <Label>Categoria</Label>
-                                <Select value={newProduct.category} onValueChange={v => setNewProduct({ ...newProduct, category: v })}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="Laticínios">Laticínios</SelectItem>
-                                        <SelectItem value="Secos">Secos</SelectItem>
-                                        <SelectItem value="Embalagens">Embalagens</SelectItem>
-                                        <SelectItem value="Outros">Outros</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                <Label>Unidade Principal</Label>
+                                <div className="relative">
+                                    <Input
+                                        list="new-prod-units"
+                                        value={newProduct.unit || ''}
+                                        onChange={(e) => setNewProduct({ ...newProduct, unit: e.target.value })}
+                                        className="uppercase"
+                                        placeholder="Ex: UN"
+                                    />
+                                    <datalist id="new-prod-units">
+                                        <option value="UN" />
+                                        <option value="LATA" />
+                                        <option value="CX" />
+                                        <option value="KG" />
+                                        <option value="L" />
+                                    </datalist>
+                                </div>
                             </div>
                         </div>
 
-                        <div className="p-3 bg-zinc-50 border rounded-md space-y-4">
-                            <h4 className="text-sm font-medium text-zinc-700">Unidade Secundária (Compra)</h4>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label className="text-xs">Unidade de Compra</Label>
-                                    <Select value={newProduct.purchase_unit} onValueChange={v => setNewProduct({ ...newProduct, purchase_unit: v })}>
-                                        <SelectTrigger className="h-8"><SelectValue placeholder="Ex: Caixa" /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="un">Unidade (un)</SelectItem>
-                                            <SelectItem value="cx">Caixa (cx)</SelectItem>
-                                            <SelectItem value="fardo">Fardo</SelectItem>
-                                            <SelectItem value="pct">Pacote (pct)</SelectItem>
-                                            <SelectItem value="lata">Lata</SelectItem>
-                                            <SelectItem value="kg">Quilo (kg)</SelectItem>
-                                            <SelectItem value="l">Litro (l)</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label className="text-xs">Qtd na Embalagem (Fator)</Label>
-                                    <Input
-                                        type="number"
-                                        placeholder="Qtd na compra"
-                                        value={newProduct.purchase_unit_factor || ''}
-                                        onChange={e => setNewProduct({ ...newProduct, purchase_unit_factor: Number(e.target.value) })}
-                                        className="h-8"
-                                    />
-                                </div>
+                        {/* Conversão Opcional */}
+                        <div className="border rounded-md p-3 bg-zinc-50 space-y-3">
+                            <div className="flex items-center space-x-2">
+                                <input
+                                    type="checkbox"
+                                    id="new-prod-conversion"
+                                    className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                                    checked={!!newProduct.unit_type}
+                                    onChange={(e) => {
+                                        if (e.target.checked) {
+                                            setNewProduct({ ...newProduct, unit_weight: 0, unit_type: 'g' });
+                                        } else {
+                                            setNewProduct({ ...newProduct, unit_weight: 1, unit_type: '' });
+                                        }
+                                    }}
+                                />
+                                <Label htmlFor="new-prod-conversion" className="text-sm font-medium cursor-pointer">
+                                    Habilitar conversão secundária (Receita)
+                                </Label>
                             </div>
-                            {newProduct.purchase_unit && newProduct.purchase_unit_factor ? (
-                                <div className="text-[10px] text-zinc-500 text-center">
-                                    1 {newProduct.purchase_unit} = {newProduct.purchase_unit_factor} {newProduct.unit}
+
+                            {(!!newProduct.unit_type) && (
+                                <div className="grid grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2">
+                                    <div className="col-span-1 space-y-1">
+                                        <Label className="text-[10px]">Unid. Secundária</Label>
+                                        <Input
+                                            list="new-prod-sec-units"
+                                            value={newProduct.unit_type || ''}
+                                            onChange={(e) => setNewProduct({ ...newProduct, unit_type: e.target.value })}
+                                            className="h-8 text-xs"
+                                            placeholder="g, ml..."
+                                        />
+                                        <datalist id="new-prod-sec-units">
+                                            <option value="g" />
+                                            <option value="ml" />
+                                            <option value="fatias" />
+                                            <option value="un" />
+                                        </datalist>
+                                    </div>
+                                    <div className="col-span-2 space-y-1">
+                                        <Label className="text-[10px]">Fator de Conversão</Label>
+                                        <Input
+                                            type="number"
+                                            value={newProduct.unit_weight || ''}
+                                            onChange={(e) => setNewProduct({ ...newProduct, unit_weight: Number(e.target.value) })}
+                                            className="h-8 text-xs"
+                                            placeholder="Ex: 395"
+                                        />
+                                    </div>
+                                    <div className="col-span-3">
+                                        <p className="text-[11px] text-zinc-500 bg-white p-2 border rounded text-center italic">
+                                            "1 <strong>{newProduct.unit || '...'}</strong> equivale a <strong>{newProduct.unit_weight || '?'} {newProduct.unit_type || '...'}</strong>"
+                                        </p>
+                                    </div>
                                 </div>
-                            ) : null}
+                            )}
                         </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsProductDialogOpen(false)}>Cancelar</Button>
-                        <Button onClick={handleSaveProduct} disabled={!newProduct.name}>Criar Ingrediente</Button>
+                        <Button onClick={handleSaveProduct} disabled={!newProduct.name}>Criar Produto</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
