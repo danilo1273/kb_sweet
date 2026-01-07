@@ -103,6 +103,7 @@ const Purchases = () => {
 
     // MANAGE ORDER Dialog (New V3.7)
     const [isManageOrderOpen, setIsManageOrderOpen] = useState(false);
+    const [isManageOrderReadOnly, setIsManageOrderReadOnly] = useState(false);
     const [manageOrderData, setManageOrderData] = useState<{ id: string, nickname: string, supplier_id: string, items: PurchaseRequest[] }>({ id: '', nickname: '', supplier_id: '', items: [] });
     const [newItemDraft, setNewItemDraft] = useState<ItemDraft>({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo' });
 
@@ -203,7 +204,7 @@ const Purchases = () => {
             if (openOrderId) {
                 const found = fetchedOrders.find(o => o.id === openOrderId);
                 if (found) {
-                    openManageOrder(found);
+                    openManageOrder(found, true);
                     // Clear param to avoid re-opening on simple refresh if desired, or keep it. Keeping for deep link feeling.
                 } else {
                     // Try fetching single if not in list
@@ -224,7 +225,7 @@ const Purchases = () => {
                         }
 
                         setOrders(prev => [singleOrder, ...prev.filter(p => p.id !== singleOrder.id)]);
-                        openManageOrder(singleOrder);
+                        openManageOrder(singleOrder, true);
                     }
                 }
             }
@@ -237,14 +238,16 @@ const Purchases = () => {
     }
 
     // --- MANAGE ORDER LOGIC ---
-    function openManageOrder(order: PurchaseOrder) {
-        const hasPaidItem = order.requests.some(r => r.financial_status === 'paid');
-        if (hasPaidItem) {
-            return toast({
-                title: "Lote Bloqueado",
-                description: "Este lote contém itens já pagos. Para editar, o Financeiro precisa estornar a baixa primeiro.",
-                variant: "destructive"
-            });
+    function openManageOrder(order: PurchaseOrder, readOnly: boolean = false) {
+        if (!readOnly) {
+            const hasPaidItem = order.requests.some(r => r.financial_status === 'paid');
+            if (hasPaidItem) {
+                return toast({
+                    title: "Lote Bloqueado",
+                    description: "Este lote contém itens já pagos. Para editar, o Financeiro precisa estornar a baixa primeiro.",
+                    variant: "destructive"
+                });
+            }
         }
         setManageOrderData({
             id: order.id,
@@ -252,6 +255,7 @@ const Purchases = () => {
             supplier_id: order.supplier_id || 'default',
             items: order.requests
         });
+        setIsManageOrderReadOnly(readOnly);
         setIsManageOrderOpen(true);
     }
 
@@ -1120,29 +1124,45 @@ const Purchases = () => {
             {/* Modal: MANAGE ORDER */}
             <Dialog open={isManageOrderOpen} onOpenChange={setIsManageOrderOpen}>
                 <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader><DialogTitle>Gerenciar Lote / Pedido</DialogTitle></DialogHeader>
+                    <DialogHeader>
+                        <DialogTitle>{isManageOrderReadOnly ? 'Visualizar Lote / Pedido' : 'Gerenciar Lote / Pedido'}</DialogTitle>
+                    </DialogHeader>
                     <div className="py-4 space-y-6">
                         <div className="grid grid-cols-2 gap-4 border-b pb-4">
                             <div className="space-y-2">
                                 <Label>Fornecedor</Label>
                                 <div className="flex gap-2">
-                                    <Select value={manageOrderData.supplier_id} onValueChange={(val) => setManageOrderData({ ...manageOrderData, supplier_id: val })}>
+                                    <Select
+                                        value={manageOrderData.supplier_id}
+                                        onValueChange={(val) => setManageOrderData({ ...manageOrderData, supplier_id: val })}
+                                        disabled={isManageOrderReadOnly}
+                                    >
                                         <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
                                         <SelectContent><SelectItem value="default">Vários</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
                                     </Select>
-                                    <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
-                                        <Plus className="h-4 w-4" />
-                                    </Button>
+                                    {!isManageOrderReadOnly && (
+                                        <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
+                                            <Plus className="h-4 w-4" />
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
-                            <div className="space-y-2"><Label>Apelido</Label><Input value={manageOrderData.nickname} onChange={e => setManageOrderData({ ...manageOrderData, nickname: e.target.value })} /></div>
+                            <div className="space-y-2">
+                                <Label>Apelido</Label>
+                                <Input
+                                    value={manageOrderData.nickname}
+                                    onChange={e => setManageOrderData({ ...manageOrderData, nickname: e.target.value })}
+                                    readOnly={isManageOrderReadOnly}
+                                    className={isManageOrderReadOnly ? "bg-zinc-100" : ""}
+                                />
+                            </div>
                         </div>
 
                         <div className="space-y-2">
                             <h4 className="font-semibold text-sm text-zinc-700">Itens neste Lote ({manageOrderData.items.length})</h4>
                             <div className="border rounded bg-white overflow-hidden max-h-[300px] overflow-y-auto">
                                 <Table>
-                                    <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qtd</TableHead><TableHead>Custo</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ação</TableHead></TableRow></TableHeader>
+                                    <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qtd</TableHead><TableHead>Custo</TableHead><TableHead>Status</TableHead>{!isManageOrderReadOnly && <TableHead className="text-right">Ação</TableHead>}</TableRow></TableHeader>
                                     <TableBody>
                                         {manageOrderData.items.map(item => (
                                             <TableRow key={item.id}>
@@ -1152,18 +1172,20 @@ const Purchases = () => {
                                                 <TableCell>
                                                     {item.financial_status === 'paid' ? <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge> : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>}
                                                 </TableCell>
-                                                <TableCell className="text-right flex justify-end gap-1">
-                                                    {item.financial_status !== 'paid' && (
-                                                        <>
-                                                            <Button variant="ghost" size="sm" onClick={() => openEditItem(item)} className="h-6 w-6 p-0 text-blue-500">
-                                                                <Pencil className="h-3 w-3" />
-                                                            </Button>
-                                                            <Button variant="ghost" size="sm" onClick={() => handleDeleteItemFromOrder(item.id, item.financial_status)} className="h-6 w-6 p-0 text-red-400">
-                                                                <Trash2 className="h-3 w-3" />
-                                                            </Button>
-                                                        </>
-                                                    )}
-                                                </TableCell>
+                                                {!isManageOrderReadOnly && (
+                                                    <TableCell className="text-right flex justify-end gap-1">
+                                                        {item.financial_status !== 'paid' && (
+                                                            <>
+                                                                <Button variant="ghost" size="sm" onClick={() => openEditItem(item)} className="h-6 w-6 p-0 text-blue-500">
+                                                                    <Pencil className="h-3 w-3" />
+                                                                </Button>
+                                                                <Button variant="ghost" size="sm" onClick={() => handleDeleteItemFromOrder(item.id, item.financial_status)} className="h-6 w-6 p-0 text-red-400">
+                                                                    <Trash2 className="h-3 w-3" />
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                    </TableCell>
+                                                )}
                                             </TableRow>
                                         ))}
                                     </TableBody>
@@ -1171,78 +1193,85 @@ const Purchases = () => {
                             </div>
                         </div>
 
-                        <div className="pt-4 border-t space-y-3">
-                            <h4 className="font-semibold text-sm text-zinc-700">Adicionar Novo Item ao Lote</h4>
-                            <div className="grid grid-cols-2 md:grid-cols-12 gap-2 items-end bg-zinc-50 p-3 rounded border">
-                                <div className="col-span-2 md:col-span-3">
-                                    <Label className="text-[10px]">Produto</Label>
-                                    <div className="flex items-center gap-1">
-                                        <Select
-                                            value={newItemDraft.ingredient_id || 'custom'}
-                                            onValueChange={(val) => {
-                                                if (val === 'custom') setNewItemDraft({ ...newItemDraft, ingredient_id: undefined, item_name: '' });
-                                                else {
-                                                    const i = ingredients.find(x => x.id === val);
-                                                    setNewItemDraft({ ...newItemDraft, ingredient_id: val, item_name: i?.name || '', unit: i?.unit || 'un' });
-                                                }
-                                            }}
-                                        >
-                                            <SelectTrigger className="h-8 flex-1"><SelectValue /></SelectTrigger>
-                                            <SelectContent><SelectItem value="custom">Outro</SelectItem>{ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
-                                        </Select>
-                                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setIsProductDialogOpen(true)}><Plus className="h-3 w-3" /></Button>
+                        {!isManageOrderReadOnly && (
+                            <div className="pt-4 border-t space-y-3">
+                                <h4 className="font-semibold text-sm text-zinc-700">Adicionar Novo Item ao Lote</h4>
+                                <div className="grid grid-cols-2 md:grid-cols-12 gap-2 items-end bg-zinc-50 p-3 rounded border">
+                                    <div className="col-span-2 md:col-span-3">
+                                        <Label className="text-[10px]">Produto</Label>
+                                        <div className="flex items-center gap-1">
+                                            <Select
+                                                value={newItemDraft.ingredient_id || 'custom'}
+                                                onValueChange={(val) => {
+                                                    if (val === 'custom') setNewItemDraft({ ...newItemDraft, ingredient_id: undefined, item_name: '' });
+                                                    else {
+                                                        const i = ingredients.find(x => x.id === val);
+                                                        setNewItemDraft({ ...newItemDraft, ingredient_id: val, item_name: i?.name || '', unit: i?.unit || 'un' });
+                                                    }
+                                                }}
+                                            >
+                                                <SelectTrigger className="h-8 flex-1"><SelectValue /></SelectTrigger>
+                                                <SelectContent><SelectItem value="custom">Outro</SelectItem>{ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+                                            </Select>
+                                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setIsProductDialogOpen(true)}><Plus className="h-3 w-3" /></Button>
+                                        </div>
                                     </div>
+                                    <div className="col-span-1 md:col-span-2">
+                                        <Label className="text-[10px]">Unid. Selecionada</Label>
+                                        <Select
+                                            value={newItemDraft.unit || 'un'}
+                                            onValueChange={(val) => setNewItemDraft({ ...newItemDraft, unit: val })}
+                                        >
+                                            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                {(() => {
+                                                    const ing = ingredients.find(i => i.id === newItemDraft.ingredient_id);
+                                                    if (!ing) return <SelectItem value="un">un</SelectItem>;
+                                                    return (
+                                                        <>
+                                                            <SelectItem value={ing.unit}>Estoque ({ing.unit})</SelectItem>
+                                                            {ing.purchase_unit && <SelectItem value={ing.purchase_unit}>Compra ({ing.purchase_unit})</SelectItem>}
+                                                        </>
+                                                    );
+                                                })()}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="col-span-1 md:col-span-2">
+                                        <Label className="text-[10px]">Destino</Label>
+                                        <Select value={newItemDraft.destination} onValueChange={(val: any) => setNewItemDraft({ ...newItemDraft, destination: val })}>
+                                            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="danilo">Danilo</SelectItem>
+                                                <SelectItem value="adriel">Adriel</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="col-span-2 md:col-span-2">
+                                        <Label className="text-[10px]">Obs/Marca</Label>
+                                        <Input className="h-8" value={newItemDraft.item_name} onChange={e => setNewItemDraft({ ...newItemDraft, item_name: e.target.value })} />
+                                    </div>
+                                    <div className="col-span-1 md:col-span-1">
+                                        <Label className="text-[10px]">Qtd</Label>
+                                        <Input className="h-8" type="number" value={newItemDraft.quantity || ''} onChange={e => setNewItemDraft({ ...newItemDraft, quantity: Number(e.target.value) })} />
+                                    </div>
+                                    <div className="col-span-1 md:col-span-2">
+                                        <Label className="text-[10px]">Total (R$)</Label>
+                                        <Input className="h-8" type="number" value={newItemDraft.cost || ''} onChange={e => setNewItemDraft({ ...newItemDraft, cost: Number(e.target.value) })} />
+                                    </div>
+                                    <div className="col-span-2 md:col-span-1"><Button onClick={handleAddItemToExistingOrder} size="sm" className="h-8 w-full md:w-8 px-2 md:p-0" title="Adicionar ao lote"><Plus className="h-4 w-4 mx-auto" /></Button></div>
                                 </div>
-                                <div className="col-span-1 md:col-span-2">
-                                    <Label className="text-[10px]">Unid. Selecionada</Label>
-                                    <Select
-                                        value={newItemDraft.unit || 'un'}
-                                        onValueChange={(val) => setNewItemDraft({ ...newItemDraft, unit: val })}
-                                    >
-                                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            {(() => {
-                                                const ing = ingredients.find(i => i.id === newItemDraft.ingredient_id);
-                                                if (!ing) return <SelectItem value="un">un</SelectItem>;
-                                                return (
-                                                    <>
-                                                        <SelectItem value={ing.unit}>Estoque ({ing.unit})</SelectItem>
-                                                        {ing.purchase_unit && <SelectItem value={ing.purchase_unit}>Compra ({ing.purchase_unit})</SelectItem>}
-                                                    </>
-                                                );
-                                            })()}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="col-span-1 md:col-span-2">
-                                    <Label className="text-[10px]">Destino</Label>
-                                    <Select value={newItemDraft.destination} onValueChange={(val: any) => setNewItemDraft({ ...newItemDraft, destination: val })}>
-                                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="danilo">Danilo</SelectItem>
-                                            <SelectItem value="adriel">Adriel</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="col-span-2 md:col-span-2">
-                                    <Label className="text-[10px]">Obs/Marca</Label>
-                                    <Input className="h-8" value={newItemDraft.item_name} onChange={e => setNewItemDraft({ ...newItemDraft, item_name: e.target.value })} />
-                                </div>
-                                <div className="col-span-1 md:col-span-1">
-                                    <Label className="text-[10px]">Qtd</Label>
-                                    <Input className="h-8" type="number" value={newItemDraft.quantity || ''} onChange={e => setNewItemDraft({ ...newItemDraft, quantity: Number(e.target.value) })} />
-                                </div>
-                                <div className="col-span-1 md:col-span-2">
-                                    <Label className="text-[10px]">Total (R$)</Label>
-                                    <Input className="h-8" type="number" value={newItemDraft.cost || ''} onChange={e => setNewItemDraft({ ...newItemDraft, cost: Number(e.target.value) })} />
-                                </div>
-                                <div className="col-span-2 md:col-span-1"><Button onClick={handleAddItemToExistingOrder} size="sm" className="h-8 w-full md:w-8 px-2 md:p-0" title="Adicionar ao lote"><Plus className="h-4 w-4 mx-auto" /></Button></div>
                             </div>
-                        </div>
+                        )}
                     </div>
                     <DialogFooter>
+                        {isManageOrderReadOnly && (
+                            <Button variant="secondary" onClick={() => setIsManageOrderReadOnly(false)} className="mr-auto">
+                                Habilitar Edição
+                            </Button>
+                        )}
                         <Button variant="outline" onClick={() => setIsManageOrderOpen(false)}>Fechar</Button>
-                        <Button onClick={saveManageOrderHeader}>Salvar Cabeçalho</Button>
+                        {!isManageOrderReadOnly && <Button onClick={saveManageOrderHeader}>Salvar Cabeçalho</Button>}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
