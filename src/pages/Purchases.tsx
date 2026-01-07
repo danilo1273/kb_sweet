@@ -1265,11 +1265,6 @@ const Purchases = () => {
                         )}
                     </div>
                     <DialogFooter>
-                        {isManageOrderReadOnly && (
-                            <Button variant="secondary" onClick={() => setIsManageOrderReadOnly(false)} className="mr-auto">
-                                Habilitar Edição
-                            </Button>
-                        )}
                         <Button variant="outline" onClick={() => setIsManageOrderOpen(false)}>Fechar</Button>
                         {!isManageOrderReadOnly && <Button onClick={saveManageOrderHeader}>Salvar Cabeçalho</Button>}
                     </DialogFooter>
