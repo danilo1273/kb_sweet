@@ -1060,11 +1060,11 @@ const Purchases = () => {
                                 </div>
                                 <div className="col-span-1 md:col-span-1">
                                     <Label className="text-[10px]">Qtd</Label>
-                                    <Input className="h-8" type="number" placeholder="Qtd" value={draftItem.quantity} onChange={e => setDraftItem({ ...draftItem, quantity: Number(e.target.value) })} />
+                                    <Input className="h-8" type="number" placeholder="Qtd" value={draftItem.quantity || ''} onChange={e => setDraftItem({ ...draftItem, quantity: Number(e.target.value) })} />
                                 </div>
                                 <div className="col-span-1 md:col-span-2">
                                     <Label className="text-[10px]">Total (R$)</Label>
-                                    <Input className="h-8" type="number" placeholder="R$" value={draftItem.cost} onChange={e => setDraftItem({ ...draftItem, cost: Number(e.target.value) })} />
+                                    <Input className="h-8" type="number" placeholder="R$" value={draftItem.cost || ''} onChange={e => setDraftItem({ ...draftItem, cost: Number(e.target.value) })} />
                                 </div>
                                 <div className="col-span-2 md:col-span-1"><Button onClick={addItemToDraft} size="sm" className="h-8 w-full md:w-8 px-2 md:p-0"><Plus className="h-4 w-4 mx-auto" /></Button></div>
                             </div>
@@ -1180,11 +1180,11 @@ const Purchases = () => {
                                 </div>
                                 <div className="col-span-1 md:col-span-1">
                                     <Label className="text-[10px]">Qtd</Label>
-                                    <Input className="h-8" type="number" value={newItemDraft.quantity} onChange={e => setNewItemDraft({ ...newItemDraft, quantity: Number(e.target.value) })} />
+                                    <Input className="h-8" type="number" value={newItemDraft.quantity || ''} onChange={e => setNewItemDraft({ ...newItemDraft, quantity: Number(e.target.value) })} />
                                 </div>
                                 <div className="col-span-1 md:col-span-2">
                                     <Label className="text-[10px]">Total (R$)</Label>
-                                    <Input className="h-8" type="number" value={newItemDraft.cost} onChange={e => setNewItemDraft({ ...newItemDraft, cost: Number(e.target.value) })} />
+                                    <Input className="h-8" type="number" value={newItemDraft.cost || ''} onChange={e => setNewItemDraft({ ...newItemDraft, cost: Number(e.target.value) })} />
                                 </div>
                                 <div className="col-span-2 md:col-span-1"><Button onClick={handleAddItemToExistingOrder} size="sm" className="h-8 w-full md:w-8 px-2 md:p-0" title="Adicionar ao lote"><Plus className="h-4 w-4 mx-auto" /></Button></div>
                             </div>
@@ -1258,11 +1258,11 @@ const Purchases = () => {
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Quantidade</Label>
-                                    <Input type="number" value={editedValues.quantity} onChange={(e) => setEditedValues({ ...editedValues, quantity: Number(e.target.value) })} />
+                                    <Input type="number" value={editedValues.quantity || ''} onChange={(e) => setEditedValues({ ...editedValues, quantity: Number(e.target.value) })} />
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Custo Total R$</Label>
-                                    <Input type="number" value={editedValues.cost} onChange={(e) => setEditedValues({ ...editedValues, cost: Number(e.target.value) })} />
+                                    <Input type="number" value={editedValues.cost || ''} onChange={(e) => setEditedValues({ ...editedValues, cost: Number(e.target.value) })} />
                                 </div>
                             </div>
                             {editingItem.status === 'edit_approved' && (
