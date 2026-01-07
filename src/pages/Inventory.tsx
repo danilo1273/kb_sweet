@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 
@@ -44,6 +45,7 @@ interface PurchaseHistory {
 }
 
 export default function Inventory() {
+    const navigate = useNavigate();
     const [ingredients, setIngredients] = useState<Ingredient[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
@@ -606,9 +608,18 @@ export default function Inventory() {
                                     historyData.map(h => (
                                         <TableRow key={h.id} className="whitespace-nowrap">
                                             <TableCell>{new Date(h.created_at).toLocaleDateString()}</TableCell>
-                                            <TableCell className="text-xs font-medium text-blue-600">
-                                                {h.purchase_orders?.nickname || '-'}
-                                                {/* Future: Add Link/Click to open order */}
+                                            <TableCell className="text-xs font-medium">
+                                                {h.purchase_orders?.id ? (
+                                                    <Button
+                                                        variant="link"
+                                                        className="p-0 h-auto font-medium text-blue-600 underline decoration-blue-300 underline-offset-2"
+                                                        onClick={() => navigate(`/purchases?openOrder=${h.purchase_orders?.id}`)}
+                                                    >
+                                                        {h.purchase_orders?.nickname || 'Ver Lote'}
+                                                    </Button>
+                                                ) : (
+                                                    <span className="text-zinc-400">-</span>
+                                                )}
                                             </TableCell>
                                             <TableCell>{h.purchase_orders?.suppliers?.name || h.supplier || '-'}</TableCell>
                                             <TableCell>{h.purchase_orders?.profiles?.full_name?.split(' ')[0] || '-'}</TableCell>

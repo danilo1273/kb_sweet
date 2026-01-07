@@ -196,6 +196,38 @@ const Purchases = () => {
             setOrders(fetchedOrders);
             const userIds = (fetchedOrders || []).map((o: PurchaseOrder) => o.created_by).concat((fetchedOrders || []).flatMap((o: PurchaseOrder) => o.requests.map((r: PurchaseRequest) => r.user_id || '')));
             fetchProfilesForUsers(userIds as string[]);
+
+            // Check URL for direct order open
+            const params = new URLSearchParams(window.location.search);
+            const openOrderId = params.get('openOrder');
+            if (openOrderId) {
+                const found = fetchedOrders.find(o => o.id === openOrderId);
+                if (found) {
+                    openManageOrder(found);
+                    // Clear param to avoid re-opening on simple refresh if desired, or keep it. Keeping for deep link feeling.
+                } else {
+                    // Try fetching single if not in list
+                    const { data: singleOrder, error: singleErr } = await supabase
+                        .from('purchase_orders')
+                        .select(`*, requests:purchase_requests(*)`)
+                        .eq('id', openOrderId)
+                        .single();
+
+                    if (singleOrder && !singleErr) {
+                        // Enrich single order with financial status
+                        const rIds = singleOrder.requests.map((r: any) => r.id);
+                        if (rIds.length > 0) {
+                            const { data: fin } = await supabase.from('financial_movements').select('related_purchase_id, status').in('related_purchase_id', rIds);
+                            const sMap: Record<string, any> = {};
+                            fin?.forEach((f: any) => sMap[f.related_purchase_id] = f.status);
+                            singleOrder.requests = singleOrder.requests.map((r: any) => ({ ...r, financial_status: sMap[r.id] || 'none' }));
+                        }
+
+                        setOrders(prev => [singleOrder, ...prev.filter(p => p.id !== singleOrder.id)]);
+                        openManageOrder(singleOrder);
+                    }
+                }
+            }
         }
         setLoading(false);
     }
