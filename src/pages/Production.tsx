@@ -11,6 +11,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Loader2, Box, Layers, CheckCircle2, Factory, History, PlayCircle, Trash2, Edit } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 // --- Types ---
 
@@ -79,7 +80,6 @@ export default function Production() {
     // Create Order State
     const [newOrderProduct, setNewOrderProduct] = useState("");
     const [newOrderQuantity, setNewOrderQuantity] = useState(1);
-    const [apiError, setApiError] = useState<string | null>(null);
 
     // Execution State (Wizard)
     const [selectedOrder, setSelectedOrder] = useState<ProductionOrder | null>(null);
@@ -214,9 +214,6 @@ export default function Production() {
 
         if (error) {
             console.error("Error fetching items:", error);
-            setApiError(JSON.stringify(error));
-        } else {
-            setApiError(null);
         }
         console.log("Items found:", data);
 
@@ -514,18 +511,17 @@ export default function Production() {
                                         // Robust Conversion & Unit Determination
                                         const stockUnitLower = stockUnit?.toLowerCase();
 
-                                        // The "Consumption Unit" is what the recipe uses (grams, ml, or just units)
-                                        // We prioritize unitType if it's set on the ingredient.
+                                        // Priority: 1. Ingredient's Secondary Unit (unit_type) 2. Recipe's Unit 3. Default 'un'
                                         let consumptionUnit = (unitType || item.unit || 'un').toLowerCase();
 
-                                        // If the database item unit is 'un' but the ingredient factor is > 1 and has a type like 'g',
-                                        // it's highly likely the item.unit is just a placeholder and the value is in unitType.
+                                        // Specialized override: if stock is 'un' but we have a weight factor and a target type like 'g'
                                         if (stockUnitLower === 'un' && unitWeight > 1 && unitType && item.unit?.toLowerCase() === 'un') {
                                             consumptionUnit = unitType.toLowerCase();
                                         }
 
                                         let displayStock = currentStock;
 
+                                        // Apply Conversion Factor
                                         if ((stockUnitLower === 'un' || stockUnitLower === 'saco') && (consumptionUnit === 'g' || consumptionUnit === 'ml')) {
                                             displayStock = currentStock * unitWeight;
                                         } else if (stockUnitLower === 'kg' && consumptionUnit === 'g') displayStock = currentStock * 1000;
@@ -535,58 +531,61 @@ export default function Production() {
 
                                         const realQty = item.quantity_used ?? item.quantity_planned;
                                         const totalNeeded = realQty + (item.waste_quantity || 0);
-                                        const isInsufficient = totalNeeded > (displayStock + 0.001); // Small epsilon for float issues
+                                        const isInsufficient = totalNeeded > (displayStock + 0.001);
 
                                         return (
-                                            <TableRow key={item.id} className={isInsufficient ? "bg-red-50" : ""}>
+                                            <TableRow key={item.id} className={isInsufficient ? "bg-red-50/50" : ""}>
                                                 <TableCell className="font-medium">
                                                     <div className="flex flex-col">
-                                                        <div className="flex items-center gap-1">
-                                                            {item.type === 'product' ? <Layers className="h-3 w-3 text-amber-600" /> : <Box className="h-3 w-3 text-blue-600" />}
-                                                            {item.name}
+                                                        <div className="flex items-center gap-1.5">
+                                                            {item.type === 'product' ? <Layers className="h-3.5 w-3.5 text-amber-600" /> : <Box className="h-3.5 w-3.5 text-blue-600" />}
+                                                            <span className="text-zinc-900">{item.name}</span>
                                                         </div>
                                                         {isInsufficient && (
-                                                            <span className="text-[10px] text-red-600 font-bold animate-pulse">
-                                                                Estoque Insuficiente! (Faltam {(totalNeeded - displayStock).toFixed(2)}{consumptionUnit})
+                                                            <span className="text-[10px] text-red-600 font-bold mt-0.5">
+                                                                Saldo Insuficiente! (Faltam {(totalNeeded - displayStock).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}{consumptionUnit})
                                                             </span>
                                                         )}
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="text-xs text-zinc-500">{consumptionUnit}</TableCell>
+                                                <TableCell className="text-xs text-zinc-500 font-medium uppercase text-center">{consumptionUnit}</TableCell>
                                                 <TableCell className="text-xs font-mono">
                                                     <div className="flex flex-col">
-                                                        <span className={isInsufficient ? "text-red-600 font-bold" : "text-zinc-600"}>
-                                                            {displayStock.toFixed(displayStock % 1 === 0 ? 0 : 3)} {consumptionUnit}
+                                                        <span className={cn("font-bold", isInsufficient ? "text-red-600" : "text-zinc-700")}>
+                                                            {displayStock.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} {consumptionUnit}
                                                         </span>
                                                         <span className="text-[10px] text-zinc-400">
-                                                            Original: {currentStock} {stockUnit}
+                                                            Estoque: {currentStock} {stockUnit}
                                                         </span>
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="text-sm">
-                                                    {Number(item.quantity_planned).toFixed(2)} <span className="text-zinc-400 text-[10px]">{consumptionUnit}</span>
+                                                <TableCell className="text-sm font-medium text-zinc-700">
+                                                    {Number(item.quantity_planned).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-zinc-400 text-[10px] uppercase">{consumptionUnit}</span>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <div className="flex items-center gap-1">
+                                                    <div className="flex items-center gap-1.5">
                                                         <Input
                                                             type="number"
-                                                            className={`h-8 w-24 ${isInsufficient ? "border-red-300 bg-red-50" : ""}`}
+                                                            className={cn(
+                                                                "h-9 w-24 text-center font-medium",
+                                                                isInsufficient ? "border-red-300 bg-red-50 focus-visible:ring-red-500" : "bg-white"
+                                                            )}
                                                             value={item.quantity_used ?? item.quantity_planned}
                                                             onChange={e => updateItemUsage(item.id, 'quantity_used', Number(e.target.value))}
                                                         />
-                                                        <span className="text-[10px] text-zinc-400">{consumptionUnit}</span>
+                                                        <span className="text-[10px] text-zinc-400 font-bold uppercase">{consumptionUnit}</span>
                                                     </div>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <div className="flex items-center gap-1">
+                                                    <div className="flex items-center gap-1.5">
                                                         <Input
                                                             type="number"
-                                                            className="h-8 w-24 border-amber-200 focus:ring-amber-500"
-                                                            value={item.waste_quantity}
+                                                            className="h-9 w-24 border-amber-200 focus:ring-amber-500 text-center font-medium bg-amber-50/10 placeholder:text-amber-300"
+                                                            value={item.waste_quantity || ''}
                                                             onChange={e => updateItemUsage(item.id, 'waste_quantity', Number(e.target.value))}
                                                             placeholder="0"
                                                         />
-                                                        <span className="text-[10px] text-zinc-400">{consumptionUnit}</span>
+                                                        <span className="text-[10px] text-zinc-400 font-bold uppercase">{consumptionUnit}</span>
                                                     </div>
                                                 </TableCell>
                                             </TableRow>
