@@ -497,36 +497,45 @@ export default function Production() {
                                         let currentStock = 0;
                                         let stockUnit = '-';
                                         let unitWeight = 1;
+                                        let unitType = '';
 
                                         if (stockInfo) {
                                             if ('stock_danilo' in stockInfo) {
                                                 currentStock = stockInfo.stock_danilo;
                                                 stockUnit = stockInfo.unit;
                                                 unitWeight = stockInfo.unit_weight || 1;
+                                                unitType = stockInfo.unit_type || '';
                                             } else {
                                                 currentStock = stockInfo.stock_quantity;
                                                 stockUnit = stockInfo.unit || 'un';
-                                                // Products don't have unit_weight in the interface, default to 1
                                             }
                                         }
 
-                                        // Robust Conversion
-                                        let displayStock = currentStock;
-                                        const itemUnit = item.unit?.toLowerCase();
+                                        // Robust Conversion & Unit Determination
                                         const stockUnitLower = stockUnit?.toLowerCase();
 
-                                        if (stockUnitLower === 'un' && (itemUnit === 'g' || itemUnit === 'ml')) {
+                                        // The "Consumption Unit" is what the recipe uses (grams, ml, or just units)
+                                        // We prioritize unitType if it's set on the ingredient.
+                                        let consumptionUnit = (unitType || item.unit || 'un').toLowerCase();
+
+                                        // If the database item unit is 'un' but the ingredient factor is > 1 and has a type like 'g',
+                                        // it's highly likely the item.unit is just a placeholder and the value is in unitType.
+                                        if (stockUnitLower === 'un' && unitWeight > 1 && unitType && item.unit?.toLowerCase() === 'un') {
+                                            consumptionUnit = unitType.toLowerCase();
+                                        }
+
+                                        let displayStock = currentStock;
+
+                                        if ((stockUnitLower === 'un' || stockUnitLower === 'saco') && (consumptionUnit === 'g' || consumptionUnit === 'ml')) {
                                             displayStock = currentStock * unitWeight;
-                                        } else if (stockUnitLower === 'saco' && (itemUnit === 'g' || itemUnit === 'ml')) {
-                                            displayStock = currentStock * unitWeight;
-                                        } else if (stockUnitLower === 'kg' && itemUnit === 'g') displayStock = currentStock * 1000;
-                                        else if (stockUnitLower === 'g' && itemUnit === 'kg') displayStock = currentStock / 1000;
-                                        else if (stockUnitLower === 'l' && itemUnit === 'ml') displayStock = currentStock * 1000;
-                                        else if (stockUnitLower === 'ml' && itemUnit === 'l') displayStock = currentStock / 1000;
+                                        } else if (stockUnitLower === 'kg' && consumptionUnit === 'g') displayStock = currentStock * 1000;
+                                        else if (stockUnitLower === 'g' && consumptionUnit === 'kg') displayStock = currentStock / 1000;
+                                        else if (stockUnitLower === 'l' && consumptionUnit === 'ml') displayStock = currentStock * 1000;
+                                        else if (stockUnitLower === 'ml' && consumptionUnit === 'l') displayStock = currentStock / 1000;
 
                                         const realQty = item.quantity_used ?? item.quantity_planned;
                                         const totalNeeded = realQty + (item.waste_quantity || 0);
-                                        const isInsufficient = totalNeeded > displayStock;
+                                        const isInsufficient = totalNeeded > (displayStock + 0.001); // Small epsilon for float issues
 
                                         return (
                                             <TableRow key={item.id} className={isInsufficient ? "bg-red-50" : ""}>
@@ -538,16 +547,16 @@ export default function Production() {
                                                         </div>
                                                         {isInsufficient && (
                                                             <span className="text-[10px] text-red-600 font-bold animate-pulse">
-                                                                Estoque Insuficiente! (Faltam {(totalNeeded - displayStock).toFixed(2)}{item.unit})
+                                                                Estoque Insuficiente! (Faltam {(totalNeeded - displayStock).toFixed(2)}{consumptionUnit})
                                                             </span>
                                                         )}
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="text-xs text-zinc-500">{item.unit}</TableCell>
+                                                <TableCell className="text-xs text-zinc-500">{consumptionUnit}</TableCell>
                                                 <TableCell className="text-xs font-mono">
                                                     <div className="flex flex-col">
                                                         <span className={isInsufficient ? "text-red-600 font-bold" : "text-zinc-600"}>
-                                                            {displayStock.toFixed(displayStock % 1 === 0 ? 0 : 3)} {item.unit}
+                                                            {displayStock.toFixed(displayStock % 1 === 0 ? 0 : 3)} {consumptionUnit}
                                                         </span>
                                                         <span className="text-[10px] text-zinc-400">
                                                             Original: {currentStock} {stockUnit}
@@ -555,7 +564,7 @@ export default function Production() {
                                                     </div>
                                                 </TableCell>
                                                 <TableCell className="text-sm">
-                                                    {Number(item.quantity_planned).toFixed(2)} <span className="text-zinc-400 text-[10px]">{item.unit}</span>
+                                                    {Number(item.quantity_planned).toFixed(2)} <span className="text-zinc-400 text-[10px]">{consumptionUnit}</span>
                                                 </TableCell>
                                                 <TableCell>
                                                     <div className="flex items-center gap-1">
@@ -565,7 +574,7 @@ export default function Production() {
                                                             value={item.quantity_used ?? item.quantity_planned}
                                                             onChange={e => updateItemUsage(item.id, 'quantity_used', Number(e.target.value))}
                                                         />
-                                                        <span className="text-[10px] text-zinc-400">{item.unit}</span>
+                                                        <span className="text-[10px] text-zinc-400">{consumptionUnit}</span>
                                                     </div>
                                                 </TableCell>
                                                 <TableCell>
@@ -577,7 +586,7 @@ export default function Production() {
                                                             onChange={e => updateItemUsage(item.id, 'waste_quantity', Number(e.target.value))}
                                                             placeholder="0"
                                                         />
-                                                        <span className="text-[10px] text-zinc-400">{item.unit}</span>
+                                                        <span className="text-[10px] text-zinc-400">{consumptionUnit}</span>
                                                     </div>
                                                 </TableCell>
                                             </TableRow>
@@ -588,38 +597,42 @@ export default function Production() {
                         </div>
                     </div>
 
-                    {orderItems.some(i => ((i.quantity_used ?? i.quantity_planned) + (i.waste_quantity || 0)) > (
-                        (() => {
-                            const stockInfo = i.type === 'ingredient' ? ingredients.find(ing => ing.id === i.item_id) : products.find(p => p.id === i.item_id);
-                            let currentStock = 0;
-                            let stockUnit = 'un';
-                            let unitWeight = 1;
+                    {orderItems.some(i => {
+                        const stockInfo = i.type === 'ingredient' ? ingredients.find(ing => ing.id === i.item_id) : products.find(p => p.id === i.item_id);
+                        let currentStock = 0;
+                        let stockUnit = 'un';
+                        let unitWeight = 1;
+                        let unitType = '';
 
-                            if (stockInfo) {
-                                if ('stock_danilo' in stockInfo) {
-                                    currentStock = stockInfo.stock_danilo;
-                                    stockUnit = stockInfo.unit;
-                                    unitWeight = stockInfo.unit_weight || 1;
-                                } else {
-                                    currentStock = stockInfo.stock_quantity;
-                                    stockUnit = stockInfo.unit || 'un';
-                                }
+                        if (stockInfo) {
+                            if ('stock_danilo' in stockInfo) {
+                                currentStock = stockInfo.stock_danilo;
+                                stockUnit = stockInfo.unit;
+                                unitWeight = stockInfo.unit_weight || 1;
+                                unitType = stockInfo.unit_type || '';
+                            } else {
+                                currentStock = stockInfo.stock_quantity;
+                                stockUnit = stockInfo.unit || 'un';
                             }
+                        }
 
-                            let displayStock = currentStock;
-                            const itemUnit = i.unit?.toLowerCase();
-                            const stockUnitLower = stockUnit?.toLowerCase();
+                        const stockUnitLower = stockUnit?.toLowerCase();
+                        let consumptionUnit = (unitType || i.unit || 'un').toLowerCase();
+                        if (stockUnitLower === 'un' && unitWeight > 1 && unitType && i.unit?.toLowerCase() === 'un') {
+                            consumptionUnit = unitType.toLowerCase();
+                        }
 
-                            if (stockUnitLower === 'un' && (itemUnit === 'g' || itemUnit === 'ml')) displayStock = currentStock * unitWeight;
-                            else if (stockUnitLower === 'saco' && (itemUnit === 'g' || itemUnit === 'ml')) displayStock = currentStock * unitWeight;
-                            else if (stockUnitLower === 'kg' && itemUnit === 'g') displayStock = currentStock * 1000;
-                            else if (stockUnitLower === 'g' && itemUnit === 'kg') displayStock = currentStock / 1000;
-                            else if (stockUnitLower === 'l' && itemUnit === 'ml') displayStock = currentStock * 1000;
-                            else if (stockUnitLower === 'ml' && itemUnit === 'l') displayStock = currentStock / 1000;
+                        let displayStock = currentStock;
+                        if ((stockUnitLower === 'un' || stockUnitLower === 'saco') && (consumptionUnit === 'g' || consumptionUnit === 'ml')) displayStock = currentStock * unitWeight;
+                        else if (stockUnitLower === 'kg' && consumptionUnit === 'g') displayStock = currentStock * 1000;
+                        else if (stockUnitLower === 'g' && consumptionUnit === 'kg') displayStock = currentStock / 1000;
+                        else if (stockUnitLower === 'l' && consumptionUnit === 'ml') displayStock = currentStock * 1000;
+                        else if (stockUnitLower === 'ml' && consumptionUnit === 'l') displayStock = currentStock / 1000;
 
-                            return displayStock;
-                        })()
-                    )) && (
+                        const realQty = i.quantity_used ?? i.quantity_planned;
+                        const totalNeeded = realQty + (i.waste_quantity || 0);
+                        return totalNeeded > (displayStock + 0.001);
+                    }) && (
                             <div className="bg-red-50 p-4 rounded-md flex items-start gap-3 border border-red-200 mb-4 mx-4">
                                 <Trash2 className="h-5 w-5 text-red-600 mt-0.5" />
                                 <div>
