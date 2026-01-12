@@ -79,6 +79,7 @@ export default function Production() {
     // Execution State (Wizard)
     const [selectedOrder, setSelectedOrder] = useState<ProductionOrder | null>(null);
     const [orderItems, setOrderItems] = useState<ProductionOrderItem[]>([]);
+    const [actualOutputQuantity, setActualOutputQuantity] = useState(0);
 
     // Fetch Data
     useEffect(() => {
@@ -161,6 +162,7 @@ export default function Production() {
             .select('*')
             .eq('order_id', order.id);
         setOrderItems(data || []);
+        setActualOutputQuantity(order.quantity); // Default to planned
     }
 
     // Update LOCAL state of item usage
@@ -199,7 +201,8 @@ export default function Production() {
 
             // 2. Call RPC to close
             const { data, error } = await supabase.rpc('close_production_order', {
-                p_order_id: selectedOrder.id
+                p_order_id: selectedOrder.id,
+                p_actual_output_quantity: actualOutputQuantity
             });
 
             if (error) throw error;
@@ -408,6 +411,22 @@ export default function Production() {
                                     Ao confirmar, o sistema irá baixar do estoque: <br />
                                     <strong>(Qtd Real + Desperdício)</strong> de cada item listado acima.
                                 </p>
+                            </div>
+                        </div>
+
+                        {/* Actual Output Input */}
+                        <div className="flex items-center gap-4 p-4 border rounded-md bg-zinc-50">
+                            <div className="flex-1">
+                                <Label className="text-base font-semibold">Quantidade Final Produzida (Real)</Label>
+                                <p className="text-sm text-zinc-500">Se houve quebra ou rendimento maior que o planejado.</p>
+                            </div>
+                            <div className="w-32">
+                                <Input
+                                    type="number"
+                                    className="text-lg font-bold text-center h-12"
+                                    value={actualOutputQuantity}
+                                    onChange={(e) => setActualOutputQuantity(Number(e.target.value))}
+                                />
                             </div>
                         </div>
                     </div>

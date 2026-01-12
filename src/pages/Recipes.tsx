@@ -20,6 +20,8 @@ interface Product {
     image_url: string;
     type: 'finished' | 'intermediate';
     stock_quantity: number;
+    batch_size?: number;
+    unit?: string;
 }
 
 interface Ingredient {
@@ -116,7 +118,9 @@ export default function Recipes() {
                 price: Number(currentProduct.price || 0),
                 cost: Number(currentProduct.cost || 0),
                 image_url: currentProduct.image_url,
-                type: currentProduct.type || 'finished'
+                type: currentProduct.type || 'finished',
+                batch_size: Number(currentProduct.batch_size || 1),
+                unit: currentProduct.unit || 'un'
             };
 
             if (currentProduct.id) {
@@ -441,6 +445,41 @@ export default function Recipes() {
                                     />
                                 </div>
 
+                                <div className="space-y-2">
+                                    <Label htmlFor="batch_size">Rendimento Total da Receita</Label>
+                                    <div className="flex gap-2">
+                                        <Input
+                                            id="batch_size"
+                                            type="number"
+                                            min="0.1"
+                                            step="0.1"
+                                            className="flex-1"
+                                            value={currentProduct.batch_size || 1}
+                                            onChange={(e) => setCurrentProduct({ ...currentProduct, batch_size: Number(e.target.value) })}
+                                            placeholder="Ex: 500, 10..."
+                                        />
+                                        <Select
+                                            value={currentProduct.unit || 'un'}
+                                            onValueChange={(val) => setCurrentProduct({ ...currentProduct, unit: val })}
+                                        >
+                                            <SelectTrigger className="w-[100px]">
+                                                <SelectValue placeholder="Un" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="un">un</SelectItem>
+                                                <SelectItem value="g">g</SelectItem>
+                                                <SelectItem value="kg">kg</SelectItem>
+                                                <SelectItem value="ml">ml</SelectItem>
+                                                <SelectItem value="l">l</SelectItem>
+                                                <SelectItem value="cx">cx</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <p className="text-[10px] text-zinc-500">
+                                        Defina a quantidade final gerada por esta receita (ex: 500g de recheio, 10 unidades de bolo).
+                                    </p>
+                                </div>
+
                                 <div className="p-4 bg-zinc-50 rounded border text-sm text-zinc-600 space-y-2">
                                     <div className="flex justify-between">
                                         <span>Custo Atual (Cadastrado):</span>
@@ -632,6 +671,6 @@ export default function Recipes() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-        </div>
+        </div >
     );
 }
