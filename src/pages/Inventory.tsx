@@ -27,6 +27,7 @@ interface Ingredient {
     unit_type?: string;
     purchase_unit?: string;
     purchase_unit_factor?: number;
+    type?: 'stock' | 'expense';
 }
 
 interface PurchaseHistory {
@@ -63,15 +64,21 @@ export default function Inventory() {
     const [selectedIngName, setSelectedIngName] = useState("");
     const [isAdmin, setIsAdmin] = useState(false);
 
-    const [availableUnits, setAvailableUnits] = useState<string[]>(['un', 'kg', 'l', 'lata', 'cx', 'pct', 'ml', 'g']);
+    // Dynamic meta
+    interface Category { id: number; name: string; type: 'stock' | 'expense' }
+    const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
+    const [availableUnits, setAvailableUnits] = useState<string[]>([]);
+
+    // Dialog Management
     const [isManageUnitsOpen, setIsManageUnitsOpen] = useState(false);
     const [newUnitName, setNewUnitName] = useState("");
     const [categoryFilter, setCategoryFilter] = useState("all");
+    const [stockFilter, setStockFilter] = useState("all");
 
     // Category State
-    const [availableCategories, setAvailableCategories] = useState<string[]>(['Ingrediente', 'Embalagem', 'Uso Geral', 'Limpeza']);
     const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState("");
+    const [newCategoryType, setNewCategoryType] = useState<'stock' | 'expense'>('stock');
 
     useEffect(() => {
         checkUserRole();
@@ -81,28 +88,34 @@ export default function Inventory() {
     }, []);
 
     async function fetchCategories() {
-        const { data, error } = await supabase.from('custom_categories').select('name').order('name');
+        const { data, error } = await supabase.from('custom_categories').select('*').order('name');
         if (!error && data) {
-            setAvailableCategories(Array.from(new Set([...data.map(d => d.name), 'Ingrediente', 'Embalagem', 'Uso Geral', 'Limpeza'])));
+            setAvailableCategories(data.map((d: any) => ({
+                id: d.id,
+                name: d.name,
+                type: d.type || 'stock'
+            })));
         }
     }
 
     async function handleAddCategory() {
         if (!newCategoryName) return;
         const name = newCategoryName.trim();
-        const { error } = await supabase.from('custom_categories').insert({ name });
+        const { error } = await supabase.from('custom_categories').insert({ name, type: newCategoryType });
         if (error) {
             if (error.code === '42P01') {
-                toast({ title: "Modo Local", description: "Tabela 'custom_categories' não encontrada." });
-                setAvailableCategories(prev => [...prev, name]);
+                toast({ title: "Modo Local", description: "Tabela 'custom_categories' não encontrada. A categoria será usada apenas nesta sessão." });
+                // Mock local addition
+                setAvailableCategories(prev => [...prev, { id: Date.now(), name, type: newCategoryType }]);
+                setNewCategoryName("");
             } else {
                 toast({ variant: 'destructive', title: "Erro", description: error.message });
             }
         } else {
             toast({ title: "Categoria adicionada!" });
             fetchCategories();
+            setNewCategoryName("");
         }
-        setNewCategoryName("");
     }
 
     async function handleDeleteCategory(name: string) {
@@ -119,8 +132,7 @@ export default function Inventory() {
     async function fetchUnits() {
         const { data, error } = await supabase.from('custom_units').select('name').order('name');
         if (!error && data) {
-            const custom = data.map(d => d.name.toLowerCase());
-            setAvailableUnits(Array.from(new Set([...custom, 'un', 'kg', 'l', 'lata', 'cx', 'pct', 'ml', 'g', 'fardo', 'saco'])));
+            setAvailableUnits(data.map(d => d.name.toLowerCase()));
         }
     }
 
@@ -167,8 +179,9 @@ export default function Inventory() {
         setLoading(true);
         const { data, error } = await supabase
             .from('ingredients')
-            .select('*')
+            .select('*, type')
             .eq('is_active', true)
+            .neq('type', 'expense')
             .order('name');
         if (error) {
             toast({ variant: "destructive", title: "Erro ao carregar estoque", description: error.message });
@@ -182,7 +195,15 @@ export default function Inventory() {
         const matchesSearch = i.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             i.category.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesCategory = categoryFilter === 'all' || i.category === categoryFilter;
-        return matchesSearch && matchesCategory;
+        const isNotExpense = i.type !== 'expense';
+
+        const totalStock = (i.stock_danilo || 0) + (i.stock_adriel || 0);
+        const matchesStock =
+            stockFilter === 'all' ? true :
+                stockFilter === 'with_balance' ? totalStock > 0 :
+                    stockFilter === 'no_balance' ? totalStock <= 0 : true;
+
+        return matchesSearch && matchesCategory && isNotExpense && matchesStock;
     });
 
     const uniqueCategories = Array.from(new Set(ingredients.map(i => i.category))).filter(Boolean).sort();
@@ -200,6 +221,7 @@ export default function Inventory() {
                 unit: currentIngredient.unit,
                 unit_weight: Number(currentIngredient.unit_weight || 1), // Fator de Conversão
                 unit_type: currentIngredient.unit_type, // Nome da Unidade Secundária
+                type: currentIngredient.type,
                 // Legacy fields cleanup (optional, or keep generic)
                 purchase_unit: null,
                 purchase_unit_factor: 1
@@ -308,14 +330,14 @@ export default function Inventory() {
                 <h2 className="text-3xl font-bold tracking-tight">Estoque de Ingredientes</h2>
             </div>
 
-            <div className="flex items-center space-x-2">
-                <div className="relative flex-1 max-w-sm">
-                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <div className="flex gap-2 mb-4 bg-zinc-50 p-2 rounded-lg border">
+                <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" />
                     <Input
                         placeholder="Buscar ingrediente..."
+                        className="pl-8 bg-white"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-8 bg-white"
                     />
                 </div>
                 <Select value={categoryFilter} onValueChange={setCategoryFilter}>
@@ -327,6 +349,16 @@ export default function Inventory() {
                         {uniqueCategories.map(cat => (
                             <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                         ))}
+                    </SelectContent>
+                </Select>
+                <Select value={stockFilter} onValueChange={setStockFilter}>
+                    <SelectTrigger className="w-[180px] bg-white">
+                        <SelectValue placeholder="Filtrar Saldo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">Todos</SelectItem>
+                        <SelectItem value="with_balance">Com Saldo</SelectItem>
+                        <SelectItem value="no_balance">Sem Saldo</SelectItem>
                     </SelectContent>
                 </Select>
             </div>
@@ -375,40 +407,53 @@ export default function Inventory() {
                                 const totalVal = ((item.stock_danilo || 0) * (item.cost_danilo || 0)) + ((item.stock_adriel || 0) * (item.cost_adriel || 0));
 
                                 return (
-                                    <TableRow key={item.id}>
+                                    <TableRow key={item.id} className={item.type === 'expense' ? 'bg-gray-50/50' : ''}>
                                         <TableCell className="font-medium max-w-[200px] truncate" title={item.name}>
-                                            {item.name}
-                                            <div className="text-[10px] text-zinc-400 font-normal truncate">{item.category}</div>
+                                            <div className="flex flex-col">
+                                                <span>{item.name}</span>
+                                                <div className="flex gap-2 items-center">
+                                                    <span className="text-[10px] text-zinc-400 font-normal truncate">{item.category}</span>
+                                                    {item.type === 'expense' && <span className="text-[9px] bg-purple-100 text-purple-700 px-1 rounded border border-purple-200">Despesa</span>}
+                                                </div>
+                                            </div>
                                         </TableCell>
                                         <TableCell>{item.unit}</TableCell>
 
                                         {/* Danilo Columns */}
-                                        <TableCell className={cn("text-right bg-blue-50/30", item.stock_danilo <= item.min_stock ? "text-red-600 font-bold" : "")}>
-                                            {item.stock_danilo}
+                                        <TableCell className={cn("text-right bg-blue-50/30", item.stock_danilo <= item.min_stock && item.type !== 'expense' ? "text-red-600 font-bold" : "")}>
+                                            {item.type === 'expense' ? '-' : `${item.stock_danilo} ${item.unit}`}
                                         </TableCell>
                                         <TableCell className="text-right text-xs bg-blue-50/30">
-                                            <div>R$ {item.cost_danilo?.toFixed(2) || '0.00'}</div>
-                                            <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                            {item.type === 'expense' ? '-' : (
+                                                <>
+                                                    <div>R$ {item.cost_danilo?.toFixed(2) || '0.00'}</div>
+                                                    <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                                </>
+                                            )}
                                         </TableCell>
                                         <TableCell className="text-right text-xs font-bold text-blue-700 bg-blue-50/30">
-                                            R$ {((item.stock_danilo || 0) * (item.cost_danilo || 0)).toFixed(2)}
+                                            {item.type === 'expense' ? '-' : `R$ ${((item.stock_danilo || 0) * (item.cost_danilo || 0)).toFixed(2)}`}
                                         </TableCell>
 
                                         {/* Adriel Columns */}
                                         <TableCell className="text-right bg-amber-50/30">
-                                            {item.stock_adriel}
+                                            {item.type === 'expense' ? '-' : `${item.stock_adriel} ${item.unit}`}
                                         </TableCell>
                                         <TableCell className="text-right text-xs bg-amber-50/30">
-                                            <div>R$ {item.cost_adriel?.toFixed(2) || '0.00'}</div>
-                                            <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                            {item.type === 'expense' ? '-' : (
+                                                <>
+                                                    <div>R$ {item.cost_adriel?.toFixed(2) || '0.00'}</div>
+                                                    <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                                </>
+                                            )}
                                         </TableCell>
                                         <TableCell className="text-right text-xs font-bold text-amber-700 bg-amber-50/30">
-                                            R$ {((item.stock_adriel || 0) * (item.cost_adriel || 0)).toFixed(2)}
+                                            {item.type === 'expense' ? '-' : `R$ ${((item.stock_adriel || 0) * (item.cost_adriel || 0)).toFixed(2)}`}
                                         </TableCell>
 
                                         {/* Total Geral Columns */}
-                                        <TableCell className="text-right font-bold bg-zinc-50">{totalQtd}</TableCell>
-                                        <TableCell className="text-right font-bold text-green-700 bg-zinc-50">R$ {totalVal.toFixed(2)}</TableCell>
+                                        <TableCell className="text-right font-bold bg-zinc-50">{item.type === 'expense' ? '-' : `${totalQtd} ${item.unit}`}</TableCell>
+                                        <TableCell className="text-right font-bold text-green-700 bg-zinc-50">{item.type === 'expense' ? '-' : `R$ ${totalVal.toFixed(2)}`}</TableCell>
 
                                         <TableCell className="text-right space-x-1">
                                             <Button variant="ghost" size="icon" onClick={() => openHistory(item)} title="Histórico de Compras">
@@ -450,6 +495,41 @@ export default function Inventory() {
                             />
                         </div>
 
+                        {/* Tipo de Produto */}
+                        <div className="space-y-2">
+                            <Label>Tipo de Produto</Label>
+                            <div className="flex gap-4">
+                                <label className="flex items-center space-x-2 border p-3 rounded-md w-full cursor-pointer hover:bg-zinc-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-200">
+                                    <input
+                                        type="radio"
+                                        name="editProductType"
+                                        value="stock"
+                                        checked={currentIngredient.type === 'stock' || !currentIngredient.type}
+                                        onChange={() => setCurrentIngredient({ ...currentIngredient, type: 'stock' })}
+                                        disabled={!isAdmin}
+                                        className="text-blue-600"
+                                    />
+                                    <div className="flex flex-col">
+                                        <span className="font-medium text-sm">Estoque</span>
+                                    </div>
+                                </label>
+                                <label className="flex items-center space-x-2 border p-3 rounded-md w-full cursor-pointer hover:bg-zinc-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-200">
+                                    <input
+                                        type="radio"
+                                        name="editProductType"
+                                        value="expense"
+                                        checked={currentIngredient.type === 'expense'}
+                                        onChange={() => setCurrentIngredient({ ...currentIngredient, type: 'expense', min_stock: 0 })}
+                                        disabled={!isAdmin}
+                                        className="text-blue-600"
+                                    />
+                                    <div className="flex flex-col">
+                                        <span className="font-medium text-sm">Despesa</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
                         {/* Categoria (Híbrido) */}
                         <div className="space-y-2">
                             <Label>Categoria</Label>
@@ -463,7 +543,10 @@ export default function Inventory() {
                                         <SelectValue placeholder="Selecione..." />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {availableCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                        {availableCategories
+                                            .filter(c => c.type === (currentIngredient.type || 'stock'))
+                                            .map(c => <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>)
+                                        }
                                     </SelectContent>
                                 </Select>
                                 <Button
@@ -478,6 +561,9 @@ export default function Inventory() {
                             </div>
                         </div>
 
+                    </div>
+
+                    {(!currentIngredient.type || currentIngredient.type === 'stock') && (
                         <div className="grid grid-cols-2 gap-4">
                             {/* Unidade Principal */}
                             <div className="space-y-2">
@@ -518,8 +604,10 @@ export default function Inventory() {
                                 />
                             </div>
                         </div>
+                    )}
 
-                        {/* Conversão Opcional */}
+                    {/* Conversão Opcional */}
+                    {(!currentIngredient.type || currentIngredient.type === 'stock') && (
                         <div className="border rounded-md p-3 bg-zinc-50 space-y-3">
                             <div className="flex items-center space-x-2">
                                 <input
@@ -589,8 +677,8 @@ export default function Inventory() {
                                 </div>
                             )}
                         </div>
+                    )}
 
-                    </div>
                     <DialogFooter>
                         {!isAdmin && <span className="text-xs text-amber-600 flex items-center mr-auto">Apenas: Estoque Mínimo.</span>}
                         <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
@@ -691,19 +779,39 @@ export default function Inventory() {
                 <DialogContent>
                     <DialogHeader><DialogTitle>Gerenciar Categorias</DialogTitle></DialogHeader>
                     <div className="space-y-4 py-4">
-                        <div className="flex gap-2">
+                        <div className="space-y-3 p-3 bg-zinc-50 rounded border">
+                            <Label>Adicionar Nova</Label>
                             <Input
-                                placeholder="Nova Categoria"
+                                placeholder="Nome da Categoria"
                                 value={newCategoryName}
                                 onChange={e => setNewCategoryName(e.target.value)}
                             />
-                            <Button onClick={handleAddCategory}><Plus className="h-4 w-4" /></Button>
+                            <div className="flex gap-4">
+                                <label className="flex items-center space-x-2">
+                                    <input type="radio" checked={newCategoryType === 'stock'} onChange={() => setNewCategoryType('stock')} className="text-blue-600" />
+                                    <span className="text-sm">Estoque</span>
+                                </label>
+                                <label className="flex items-center space-x-2">
+                                    <input type="radio" checked={newCategoryType === 'expense'} onChange={() => setNewCategoryType('expense')} className="text-blue-600" />
+                                    <span className="text-sm">Despesa</span>
+                                </label>
+                            </div>
+                            <Button onClick={handleAddCategory} disabled={!newCategoryName} className="w-full">
+                                <Plus className="h-4 w-4 mr-2" /> Adicionar Categoria
+                            </Button>
                         </div>
+
                         <div className="border rounded-md p-2 max-h-[200px] overflow-y-auto space-y-1">
+                            <Label className="text-xs text-muted-foreground px-2">Categorias Existentes</Label>
                             {availableCategories.map(c => (
-                                <div key={c} className="flex justify-between items-center bg-zinc-50 p-2 rounded text-sm">
-                                    <span>{c}</span>
-                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400" onClick={() => handleDeleteCategory(c)}>
+                                <div key={c.name} className="flex justify-between items-center bg-white border p-2 rounded text-sm">
+                                    <div className="flex flex-col">
+                                        <span>{c.name}</span>
+                                        <span className={`text-[10px] ${c.type === 'expense' ? 'text-purple-600' : 'text-blue-600'}`}>
+                                            {c.type === 'expense' ? 'Despesa' : 'Estoque'}
+                                        </span>
+                                    </div>
+                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400" onClick={() => handleDeleteCategory(c.name)}>
                                         <Trash2 className="h-3 w-3" />
                                     </Button>
                                 </div>

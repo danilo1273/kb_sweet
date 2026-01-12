@@ -18,6 +18,7 @@ import { Session } from '@supabase/supabase-js';
 import { Loader2, ShoppingCart } from 'lucide-react';
 
 const AdminUsers = lazy(() => import('@/pages/AdminUsers'));
+const AdminRegisters = lazy(() => import('@/pages/AdminRegisters'));
 
 function App() {
     const [session, setSession] = useState<Session | null>(null);
@@ -61,6 +62,11 @@ function App() {
                     <Route path="/admin" element={
                         <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
                             <AdminUsers />
+                        </Suspense>
+                    } />
+                    <Route path="/admin/registers" element={
+                        <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
+                            <AdminRegisters />
                         </Suspense>
                     } />
 

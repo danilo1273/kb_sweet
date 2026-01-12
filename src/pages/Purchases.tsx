@@ -76,6 +76,7 @@ interface Ingredient {
     category?: string;
     unit_weight?: number;
     unit_type?: string;
+    type?: 'stock' | 'expense';
 }
 
 interface Supplier {
@@ -127,16 +128,45 @@ const Purchases = () => {
     const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
     const [newSupplierName, setNewSupplierName] = useState("");
 
+    // Dynamic Lists
+    interface Category { id: number; name: string; type: 'stock' | 'expense' }
+    const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
+    const [availableUnits, setAvailableUnits] = useState<string[]>([]);
+
+    // Manage Dialogs State
+    // Manage Dialogs State
+    const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
+    const [newCategoryName, setNewCategoryName] = useState("");
+    const [newCategoryType, setNewCategoryType] = useState<'stock' | 'expense'>('stock');
+    const [isManageUnitsOpen, setIsManageUnitsOpen] = useState(false);
+    const [newUnitName, setNewUnitName] = useState("");
+
     useEffect(() => {
         fetchData();
         fetchMeta();
     }, []);
 
     async function fetchMeta() {
-        const { data: ing } = await supabase.from('ingredients').select('id, name, stock_danilo, stock_adriel, cost, cost_danilo, cost_adriel, unit, purchase_unit, purchase_unit_factor, category').order('name');
+        const { data: ing } = await supabase.from('ingredients').select('id, name, stock_danilo, stock_adriel, cost, cost_danilo, cost_adriel, unit, purchase_unit, purchase_unit_factor, category, type').order('name');
         if (ing) setIngredients(ing as Ingredient[]);
         const { data: sup } = await supabase.from('suppliers').select('id, name').order('name');
         if (sup) setSuppliers(sup);
+
+        // Fetch Categories
+        const { data: catData } = await supabase.from('custom_categories').select('*').order('name');
+        if (catData) {
+            setAvailableCategories(catData.map((d: any) => ({
+                id: d.id,
+                name: d.name,
+                type: d.type || 'stock'
+            })));
+        }
+
+        // Fetch Units
+        const { data: unitData } = await supabase.from('custom_units').select('name').order('name');
+        if (unitData) {
+            setAvailableUnits(unitData.map(d => d.name.toLowerCase()));
+        }
 
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
@@ -147,6 +177,54 @@ const Purchases = () => {
                 if (!roles.length && profile.role) roles = [profile.role];
                 setUserRoles(roles);
             }
+        }
+    }
+
+    async function handleAddCategory() {
+        if (!newCategoryName) return;
+        const name = newCategoryName.trim();
+        const { error } = await supabase.from('custom_categories').insert({ name, type: newCategoryType });
+        if (error) {
+            toast({ variant: 'destructive', title: "Erro", description: error.message });
+        } else {
+            toast({ title: "Categoria adicionada!" });
+            fetchMeta();
+        }
+        setNewCategoryName("");
+    }
+
+    async function handleDeleteCategory(name: string) {
+        if (!confirm(`Remover categoria "${name}"?`)) return;
+        const { error } = await supabase.from('custom_categories').delete().eq('name', name);
+        if (error) {
+            toast({ variant: 'destructive', title: "Erro", description: error.message });
+        } else {
+            toast({ title: "Categoria removida" });
+            fetchMeta();
+        }
+    }
+
+    async function handleAddUnit() {
+        if (!newUnitName) return;
+        const norm = newUnitName.toLowerCase().trim();
+        const { error } = await supabase.from('custom_units').insert({ name: norm });
+        if (error) {
+            toast({ variant: 'destructive', title: "Erro", description: error.message });
+        } else {
+            toast({ title: "Unidade adicionada!" });
+            fetchMeta();
+            setNewUnitName("");
+        }
+    }
+
+    async function handleDeleteUnit(name: string) {
+        if (!confirm(`Remover unidade "${name}"?`)) return;
+        const { error } = await supabase.from('custom_units').delete().eq('name', name);
+        if (error) {
+            toast({ variant: 'destructive', title: "Erro", description: error.message });
+        } else {
+            toast({ title: "Unidade removida" });
+            fetchMeta();
         }
     }
 
@@ -447,7 +525,7 @@ const Purchases = () => {
 
         if (ingId) {
             const { data: currentIng } = await supabase.from('ingredients').select('*').eq('id', ingId).single();
-            if (currentIng) {
+            if (currentIng && currentIng.type !== 'expense') {
                 const targetStockField = item.destination === 'adriel' ? 'stock_adriel' : 'stock_danilo';
                 const currentStock = currentIng[targetStockField] || 0;
 
@@ -480,47 +558,52 @@ const Purchases = () => {
                     if (fetchErr) throw new Error("Falha ao buscar dados atuais do ingrediente");
 
                     if (freshIng) {
-                        // Updated Conversion Logic (Primary/Secondary + Legacy)
-                        const isPrimary = (item.unit || '').trim().toLowerCase() === (freshIng.unit || '').trim().toLowerCase();
-                        const isSecondary = (item.unit || '').trim().toLowerCase() === (freshIng.unit_type || '').trim().toLowerCase();
-                        const isLegacyPurchase = (item.unit || '').trim().toLowerCase() === (freshIng.purchase_unit || '').trim().toLowerCase();
-
-                        let factor = 1;
-                        if (isPrimary) {
-                            factor = 1;
-                        } else if (isSecondary) {
-                            factor = Number(freshIng.unit_weight) || 1;
-                        } else if (isLegacyPurchase) {
-                            factor = Number(freshIng.purchase_unit_factor) || 1;
+                        // Skip stock update for Expense items
+                        if (freshIng.type === 'expense') {
+                            console.log(`[Approve] Item is Expense type. Skipping stock update.`);
                         } else {
-                            // Fallback: If unit names match roughly (e.g. 'un' vs 'UN')
-                            console.warn(`[Approve] Unit mismatch: Request=${item.unit}, Stock=${freshIng.unit}. Assumed factor 1.`);
+                            // Updated Conversion Logic (Primary/Secondary + Legacy)
+                            const isPrimary = (item.unit || '').trim().toLowerCase() === (freshIng.unit || '').trim().toLowerCase();
+                            const isSecondary = (item.unit || '').trim().toLowerCase() === (freshIng.unit_type || '').trim().toLowerCase();
+                            const isLegacyPurchase = (item.unit || '').trim().toLowerCase() === (freshIng.purchase_unit || '').trim().toLowerCase();
+
+                            let factor = 1;
+                            if (isPrimary) {
+                                factor = 1;
+                            } else if (isSecondary) {
+                                factor = Number(freshIng.unit_weight) || 1;
+                            } else if (isLegacyPurchase) {
+                                factor = Number(freshIng.purchase_unit_factor) || 1;
+                            } else {
+                                // Fallback: If unit names match roughly (e.g. 'un' vs 'UN')
+                                console.warn(`[Approve] Unit mismatch: Request=${item.unit}, Stock=${freshIng.unit}. Assumed factor 1.`);
+                            }
+
+                            const convertedQty = Number(item.quantity) * factor;
+
+                            const targetField = item.destination === 'adriel' ? 'stock_adriel' : 'stock_danilo';
+                            const targetCostField = item.destination === 'adriel' ? 'cost_adriel' : 'cost_danilo';
+
+                            const currentOwnerStock = freshIng[targetField] || 0;
+                            const currentOwnerCost = freshIng[targetCostField] || 0;
+
+                            const newOwnerStock = currentOwnerStock + convertedQty;
+                            const newOwnerAvg = ((currentOwnerStock * (currentOwnerCost || 0)) + Number(item.cost)) / newOwnerStock;
+
+                            const totalStock = (freshIng.stock_danilo || 0) + (freshIng.stock_adriel || 0);
+                            const newTotalStock = totalStock + convertedQty;
+                            const newGlobalAvg = ((totalStock * (freshIng.cost || 0)) + Number(item.cost)) / newTotalStock;
+
+                            console.log(`[Approve] Calc: Factor=${factor}, ConvertedQty=${convertedQty}, OldStock=${currentOwnerStock}, NewStock=${newOwnerStock}, NewAvg=${newOwnerAvg}`);
+
+                            const { error: updateErr } = await supabase.from('ingredients').update({
+                                [targetField]: newOwnerStock,
+                                [targetCostField]: isNaN(newOwnerAvg) ? currentOwnerCost : newOwnerAvg,
+                                cost: isNaN(newGlobalAvg) ? (freshIng.cost || 0) : newGlobalAvg
+                            }).eq('id', ingId);
+
+                            if (updateErr) throw new Error("Falha ao atualizar estoque/custo");
                         }
-
-                        const convertedQty = Number(item.quantity) * factor;
-
-                        const targetField = item.destination === 'adriel' ? 'stock_adriel' : 'stock_danilo';
-                        const targetCostField = item.destination === 'adriel' ? 'cost_adriel' : 'cost_danilo';
-
-                        const currentOwnerStock = freshIng[targetField] || 0;
-                        const currentOwnerCost = freshIng[targetCostField] || 0;
-
-                        const newOwnerStock = currentOwnerStock + convertedQty;
-                        const newOwnerAvg = ((currentOwnerStock * (currentOwnerCost || 0)) + Number(item.cost)) / newOwnerStock;
-
-                        const totalStock = (freshIng.stock_danilo || 0) + (freshIng.stock_adriel || 0);
-                        const newTotalStock = totalStock + convertedQty;
-                        const newGlobalAvg = ((totalStock * (freshIng.cost || 0)) + Number(item.cost)) / newTotalStock;
-
-                        console.log(`[Approve] Calc: Factor=${factor}, ConvertedQty=${convertedQty}, OldStock=${currentOwnerStock}, NewStock=${newOwnerStock}, NewAvg=${newOwnerAvg}`);
-
-                        const { error: updateErr } = await supabase.from('ingredients').update({
-                            [targetField]: newOwnerStock,
-                            [targetCostField]: isNaN(newOwnerAvg) ? currentOwnerCost : newOwnerAvg,
-                            cost: isNaN(newGlobalAvg) ? (freshIng.cost || 0) : newGlobalAvg
-                        }).eq('id', ingId);
-
-                        if (updateErr) throw new Error("Falha ao atualizar estoque/custo");
                     }
                 } else {
                     console.warn(`[Approve] No ingredient found for "${item.item_name}". Stock not updated.`);
@@ -725,6 +808,7 @@ const Purchases = () => {
                 unit: newProduct.unit || 'UN',
                 unit_weight: Number(newProduct.unit_weight || 1),
                 unit_type: newProduct.unit_type || '',
+                type: newProduct.type || 'stock',
                 is_active: true,
                 stock_danilo: 0,
                 stock_adriel: 0,
@@ -736,7 +820,7 @@ const Purchases = () => {
             await supabase.from('ingredients').insert(payload);
             toast({ title: "Produto criado com sucesso" });
             setIsProductDialogOpen(false);
-            setNewProduct({ unit: 'UN' }); // Reset clean
+            setNewProduct({ unit: 'UN', type: 'stock' }); // Reset clean
             fetchMeta();
         } catch (e: any) {
             toast({ variant: "destructive", title: "Erro", description: e.message });
@@ -1037,7 +1121,7 @@ const Purchases = () => {
                                             setNewOrderNickname(`Compra - ${new Date().toLocaleDateString()}`);
                                         }
                                     }}>
-                                        <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger> <SelectContent><SelectItem value="default">Vários</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                                        <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger> <SelectContent><SelectItem value="default">Fornecedor (campo obrigatório)</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
                                     </Select>
                                     <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
                                         <Plus className="h-4 w-4" />
@@ -1062,7 +1146,7 @@ const Purchases = () => {
                                             }
                                         }}>
                                             <SelectTrigger className="h-8 flex-1"><SelectValue /></SelectTrigger>
-                                            <SelectContent><SelectItem value="custom">Outro</SelectItem>{ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+                                            <SelectContent><SelectItem value="custom">Item (obrigatório)</SelectItem>{ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
                                         </Select>
                                         <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setIsProductDialogOpen(true)} title="Cadastrar Novo Ingrediente"><Plus className="h-3 w-3" /></Button>
                                     </div>
@@ -1138,7 +1222,7 @@ const Purchases = () => {
                                         disabled={isManageOrderReadOnly}
                                     >
                                         <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
-                                        <SelectContent><SelectItem value="default">Vários</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                                        <SelectContent><SelectItem value="default">Fornecedor (campo obrigatório)</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
                                     </Select>
                                     {!isManageOrderReadOnly && (
                                         <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
@@ -1211,7 +1295,7 @@ const Purchases = () => {
                                                 }}
                                             >
                                                 <SelectTrigger className="h-8 flex-1"><SelectValue /></SelectTrigger>
-                                                <SelectContent><SelectItem value="custom">Outro</SelectItem>{ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+                                                <SelectContent><SelectItem value="custom">Item (obrigatório)</SelectItem>{ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
                                             </Select>
                                             <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setIsProductDialogOpen(true)}><Plus className="h-3 w-3" /></Button>
                                         </div>
@@ -1315,18 +1399,12 @@ const Purchases = () => {
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label>Unidade</Label>
-                                    <Select value={editedValues.unit} onValueChange={(v) => setEditedValues({ ...editedValues, unit: v })} disabled>
+                                    <Select value={editedValues.unit} onValueChange={(v) => setEditedValues({ ...editedValues, unit: v })}>
                                         <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="un">un</SelectItem>
-                                            <SelectItem value="g">g</SelectItem>
-                                            <SelectItem value="ml">ml</SelectItem>
-                                            <SelectItem value="kg">kg</SelectItem>
-                                            <SelectItem value="l">l</SelectItem>
-                                            <SelectItem value="Caixa">Caixa</SelectItem>
-                                            <SelectItem value="Fardo">Fardo</SelectItem>
-                                            <SelectItem value="Pacote">Pacote</SelectItem>
-                                            {/* Add dynamic purchase unit from ingredient if found? Hard to get here without fetching. */}
+                                            {availableUnits.map(u => (
+                                                <SelectItem key={u} value={u}>{u}</SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
                                 </div>
@@ -1339,16 +1417,25 @@ const Purchases = () => {
                                     <Input type="number" value={editedValues.cost || ''} onChange={(e) => setEditedValues({ ...editedValues, cost: Number(e.target.value) })} />
                                 </div>
                             </div>
-                            <div className="space-y-2">
-                                <Label>Estoque de Destino (Para onde vai?)</Label>
-                                <Select value={editedValues.destination} onValueChange={(v: any) => setEditedValues({ ...editedValues, destination: v })}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="danilo">Danilo</SelectItem>
-                                        <SelectItem value="adriel">Adriel</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                            {(() => {
+                                const selectedIng = ingredients.find(i => i.id === editedValues.ingredient_id);
+                                const isExpense = selectedIng?.type === 'expense';
+
+                                if (isExpense) return null;
+
+                                return (
+                                    <div className="space-y-2">
+                                        <Label>Estoque de Destino (Para onde vai?)</Label>
+                                        <Select value={editedValues.destination} onValueChange={(v: any) => setEditedValues({ ...editedValues, destination: v })}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="danilo">Danilo</SelectItem>
+                                                <SelectItem value="adriel">Adriel</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                );
+                            })()}
                             {editingItem.status === 'edit_approved' && (
                                 <div className="p-3 bg-orange-50 border border-orange-200 rounded text-xs text-orange-800">
                                     <strong>Atenção:</strong> Ao salvar, o estoque será revertido e o item voltará para aprovação.
@@ -1411,102 +1498,153 @@ const Purchases = () => {
                             <Input value={newProduct.name || ''} onChange={e => setNewProduct({ ...newProduct, name: e.target.value })} placeholder="Ex: Fita de Cetim" />
                         </div>
 
+                        <div className="space-y-2">
+                            <Label>Tipo de Produto</Label>
+                            <div className="flex gap-4">
+                                <label className="flex items-center space-x-2 border p-3 rounded-md w-full cursor-pointer hover:bg-zinc-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-200">
+                                    <input
+                                        type="radio"
+                                        name="productType"
+                                        value="stock"
+                                        checked={newProduct.type === 'stock' || !newProduct.type}
+                                        onChange={() => setNewProduct({ ...newProduct, type: 'stock' })}
+                                        className="text-blue-600"
+                                    />
+                                    <div className="flex flex-col">
+                                        <span className="font-medium text-sm">Estoque</span>
+                                        <span className="text-[10px] text-zinc-500">Controla quantidade e custos.</span>
+                                    </div>
+                                </label>
+                                <label className="flex items-center space-x-2 border p-3 rounded-md w-full cursor-pointer hover:bg-zinc-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-200">
+                                    <input
+                                        type="radio"
+                                        name="productType"
+                                        value="expense"
+                                        checked={newProduct.type === 'expense'}
+                                        onChange={() => setNewProduct({ ...newProduct, type: 'expense', unit_weight: 1, unit_type: '' })}
+                                        className="text-blue-600"
+                                    />
+                                    <div className="flex flex-col">
+                                        <span className="font-medium text-sm">Despesa</span>
+                                        <span className="text-[10px] text-zinc-500">Apenas registro financeiro.</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label>Categoria</Label>
-                                <div className="relative">
-                                    <Input
-                                        list="new-prod-categories"
-                                        value={newProduct.category || ''}
-                                        onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
-                                        placeholder="Selecione ou digite..."
-                                    />
-                                    <datalist id="new-prod-categories">
-                                        <option value="Laticínios" />
-                                        <option value="Secos" />
-                                        <option value="Embalagens" />
-                                        <option value="Outros" />
-                                    </datalist>
+                                <div className="flex gap-2">
+                                    <Select
+                                        value={newProduct.category}
+                                        onValueChange={(val) => setNewProduct({ ...newProduct, category: val })}
+                                    >
+                                        <SelectTrigger className="w-full">
+                                            <SelectValue placeholder="Selecione..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {availableCategories
+                                                .filter(c => c.type === (newProduct.type || 'stock'))
+                                                .map(c => <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>)
+                                            }
+                                        </SelectContent>
+                                    </Select>
+                                    <Button
+                                        variant="outline"
+                                        size="icon"
+                                        onClick={() => setIsManageCategoriesOpen(true)}
+                                        title="Nova Categoria"
+                                    >
+                                        <Plus className="h-4 w-4" />
+                                    </Button>
                                 </div>
                             </div>
                             <div className="space-y-2">
                                 <Label>Unidade Principal</Label>
-                                <div className="relative">
-                                    <Input
-                                        list="new-prod-units"
-                                        value={newProduct.unit || ''}
-                                        onChange={(e) => setNewProduct({ ...newProduct, unit: e.target.value })}
-                                        className="uppercase"
-                                        placeholder="Ex: UN"
+                                <div className="flex gap-2">
+                                    <Select
+                                        value={newProduct.unit}
+                                        onValueChange={(val) => setNewProduct({ ...newProduct, unit: val })}
+                                    >
+                                        <SelectTrigger className="w-full">
+                                            <SelectValue placeholder="Selecione..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {availableUnits.map(u => <SelectItem key={u} value={u}>{u.toUpperCase()}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                    <Button
+                                        variant="outline"
+                                        size="icon"
+                                        onClick={() => setIsManageUnitsOpen(true)}
+                                        title="Nova Unidade"
+                                    >
+                                        <Plus className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Conversão Opcional (Apenas para Estoque) */}
+                        {(!newProduct.type || newProduct.type === 'stock') && (
+                            <div className="border rounded-md p-3 bg-zinc-50 space-y-3">
+                                <div className="flex items-center space-x-2">
+                                    <input
+                                        type="checkbox"
+                                        id="new-prod-conversion"
+                                        className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                                        checked={!!newProduct.unit_type}
+                                        onChange={(e) => {
+                                            if (e.target.checked) {
+                                                setNewProduct({ ...newProduct, unit_weight: 0, unit_type: 'g' });
+                                            } else {
+                                                setNewProduct({ ...newProduct, unit_weight: 1, unit_type: '' });
+                                            }
+                                        }}
                                     />
-                                    <datalist id="new-prod-units">
-                                        <option value="UN" />
-                                        <option value="LATA" />
-                                        <option value="CX" />
-                                        <option value="KG" />
-                                        <option value="L" />
-                                    </datalist>
+                                    <Label htmlFor="new-prod-conversion" className="text-sm font-medium cursor-pointer">
+                                        Habilitar conversão secundária (Receita)
+                                    </Label>
                                 </div>
-                            </div>
-                        </div>
 
-                        {/* Conversão Opcional */}
-                        <div className="border rounded-md p-3 bg-zinc-50 space-y-3">
-                            <div className="flex items-center space-x-2">
-                                <input
-                                    type="checkbox"
-                                    id="new-prod-conversion"
-                                    className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                                    checked={!!newProduct.unit_type}
-                                    onChange={(e) => {
-                                        if (e.target.checked) {
-                                            setNewProduct({ ...newProduct, unit_weight: 0, unit_type: 'g' });
-                                        } else {
-                                            setNewProduct({ ...newProduct, unit_weight: 1, unit_type: '' });
-                                        }
-                                    }}
-                                />
-                                <Label htmlFor="new-prod-conversion" className="text-sm font-medium cursor-pointer">
-                                    Habilitar conversão secundária (Receita)
-                                </Label>
+                                {(!!newProduct.unit_type) && (
+                                    <div className="grid grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2">
+                                        <div className="col-span-1 space-y-1">
+                                            <Label className="text-[10px]">Unid. Secundária</Label>
+                                            <Input
+                                                list="new-prod-sec-units"
+                                                value={newProduct.unit_type || ''}
+                                                onChange={(e) => setNewProduct({ ...newProduct, unit_type: e.target.value })}
+                                                className="h-8 text-xs"
+                                                placeholder="g, ml..."
+                                            />
+                                            <datalist id="new-prod-sec-units">
+                                                <option value="g" />
+                                                <option value="ml" />
+                                                <option value="fatias" />
+                                                <option value="un" />
+                                            </datalist>
+                                        </div>
+                                        <div className="col-span-2 space-y-1">
+                                            <Label className="text-[10px]">Fator de Conversão</Label>
+                                            <Input
+                                                type="number"
+                                                value={newProduct.unit_weight || ''}
+                                                onChange={(e) => setNewProduct({ ...newProduct, unit_weight: Number(e.target.value) })}
+                                                className="h-8 text-xs"
+                                                placeholder="Ex: 395"
+                                            />
+                                        </div>
+                                        <div className="col-span-3">
+                                            <p className="text-[11px] text-zinc-500 bg-white p-2 border rounded text-center italic">
+                                                "1 <strong>{newProduct.unit || '...'}</strong> equivale a <strong>{newProduct.unit_weight || '?'} {newProduct.unit_type || '...'}</strong>"
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-
-                            {(!!newProduct.unit_type) && (
-                                <div className="grid grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2">
-                                    <div className="col-span-1 space-y-1">
-                                        <Label className="text-[10px]">Unid. Secundária</Label>
-                                        <Input
-                                            list="new-prod-sec-units"
-                                            value={newProduct.unit_type || ''}
-                                            onChange={(e) => setNewProduct({ ...newProduct, unit_type: e.target.value })}
-                                            className="h-8 text-xs"
-                                            placeholder="g, ml..."
-                                        />
-                                        <datalist id="new-prod-sec-units">
-                                            <option value="g" />
-                                            <option value="ml" />
-                                            <option value="fatias" />
-                                            <option value="un" />
-                                        </datalist>
-                                    </div>
-                                    <div className="col-span-2 space-y-1">
-                                        <Label className="text-[10px]">Fator de Conversão</Label>
-                                        <Input
-                                            type="number"
-                                            value={newProduct.unit_weight || ''}
-                                            onChange={(e) => setNewProduct({ ...newProduct, unit_weight: Number(e.target.value) })}
-                                            className="h-8 text-xs"
-                                            placeholder="Ex: 395"
-                                        />
-                                    </div>
-                                    <div className="col-span-3">
-                                        <p className="text-[11px] text-zinc-500 bg-white p-2 border rounded text-center italic">
-                                            "1 <strong>{newProduct.unit || '...'}</strong> equivale a <strong>{newProduct.unit_weight || '?'} {newProduct.unit_type || '...'}</strong>"
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
+                        )}
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsProductDialogOpen(false)}>Cancelar</Button>
@@ -1527,6 +1665,79 @@ const Purchases = () => {
                         <Button variant="outline" onClick={() => setIsSupplierDialogOpen(false)}>Cancelar</Button>
                         <Button onClick={handleSaveSupplier} disabled={!newSupplierName.trim()}>Salvar</Button>
                     </DialogFooter>
+                </DialogContent>
+            </Dialog>
+            {/* Dialog Gerenciar Categorias */}
+            <Dialog open={isManageCategoriesOpen} onOpenChange={setIsManageCategoriesOpen}>
+                <DialogContent>
+                    <DialogHeader><DialogTitle>Gerenciar Categorias</DialogTitle></DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-3 p-3 bg-zinc-50 rounded border">
+                            <Label>Adicionar Nova</Label>
+                            <Input
+                                placeholder="Nome da Categoria"
+                                value={newCategoryName}
+                                onChange={e => setNewCategoryName(e.target.value)}
+                            />
+                            <div className="flex gap-4">
+                                <label className="flex items-center space-x-2">
+                                    <input type="radio" checked={newCategoryType === 'stock'} onChange={() => setNewCategoryType('stock')} className="text-blue-600" />
+                                    <span className="text-sm">Estoque</span>
+                                </label>
+                                <label className="flex items-center space-x-2">
+                                    <input type="radio" checked={newCategoryType === 'expense'} onChange={() => setNewCategoryType('expense')} className="text-blue-600" />
+                                    <span className="text-sm">Despesa</span>
+                                </label>
+                            </div>
+                            <Button onClick={handleAddCategory} disabled={!newCategoryName} className="w-full">
+                                <Plus className="h-4 w-4 mr-2" /> Adicionar Categoria
+                            </Button>
+                        </div>
+
+                        <div className="border rounded-md p-2 max-h-[200px] overflow-y-auto space-y-1">
+                            <Label className="text-xs text-muted-foreground px-2">Categorias Existentes</Label>
+                            {availableCategories.map(c => (
+                                <div key={c.name} className="flex justify-between items-center bg-white border p-2 rounded text-sm">
+                                    <div className="flex flex-col">
+                                        <span>{c.name}</span>
+                                        <span className={`text-[10px] ${c.type === 'expense' ? 'text-purple-600' : 'text-blue-600'}`}>
+                                            {c.type === 'expense' ? 'Despesa' : 'Estoque'}
+                                        </span>
+                                    </div>
+                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400" onClick={() => handleDeleteCategory(c.name)}>
+                                        <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Dialog Gerenciar Unidades */}
+            <Dialog open={isManageUnitsOpen} onOpenChange={setIsManageUnitsOpen}>
+                <DialogContent>
+                    <DialogHeader><DialogTitle>Gerenciar Unidades</DialogTitle></DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="flex gap-2">
+                            <Input
+                                placeholder="Nova Unidade (Ex: barra)"
+                                value={newUnitName}
+                                onChange={e => setNewUnitName(e.target.value.toLowerCase())}
+                            />
+                            <Button onClick={handleAddUnit}><Plus className="h-4 w-4" /></Button>
+                        </div>
+                        <div className="border rounded-md p-2 max-h-[200px] overflow-y-auto space-y-1">
+                            {availableUnits.map(u => (
+                                <div key={u} className="flex justify-between items-center bg-zinc-50 p-2 rounded text-sm">
+                                    <span>{u}</span>
+                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400" onClick={() => handleDeleteUnit(u)}>
+                                        <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </DialogContent>
             </Dialog>
         </div>

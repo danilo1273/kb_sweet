@@ -1,19 +1,36 @@
+
 import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Loader2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Plus, Loader2, Box, Layers, CheckCircle2, Factory, History, PlayCircle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+
+// --- Types ---
 
 interface Product {
     id: string;
     name: string;
     stock_quantity: number;
     cost: number;
+    type: 'finished' | 'intermediate';
+}
+
+interface Ingredient {
+    id: string;
+    name: string;
+    unit: string;
+    stock_danilo: number;
+    stock_adriel: number;
+    cost: number;
+    unit_weight: number;
+    unit_type: string;
 }
 
 interface ProductionOrder {
@@ -21,214 +38,175 @@ interface ProductionOrder {
     created_at: string;
     product_id: string;
     quantity: number;
-    status: string;
+    status: 'open' | 'closed' | 'canceled';
     user_id: string;
+    closed_at?: string;
     products?: Product;
+    cost_at_production?: number;
     profiles?: { email: string };
-    cost_at_production: number;
 }
 
-interface BomItem {
-    ingredient_id: string;
-    quantity: number; // Qty per unit of product
+interface ProductionOrderItem {
+    id: string;
+    order_id: string;
+    type: 'ingredient' | 'product';
+    item_id: string;
+    name: string;
     unit: string;
-    ingredients: {
-        id: string;
-        name: string;
-        stock_danilo: number;
-        stock_adriel: number;
-        unit_weight: number;
-        unit_type: string;
-        cost: number;
-    };
+    quantity_planned: number;
+    quantity_used: number;
+    waste_quantity: number;
+    unit_cost: number;
 }
 
 export default function Production() {
+    const { toast } = useToast();
+    const [loading, setLoading] = useState(true);
     const [orders, setOrders] = useState<ProductionOrder[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
-    const [loading, setLoading] = useState(true);
-    const { toast } = useToast();
+    const [ingredients, setIngredients] = useState<Ingredient[]>([]);
 
-    // Dialog State
-    const [isDialogOpen, setIsDialogOpen] = useState(false);
-    const [selectedProductId, setSelectedProductId] = useState("");
-    const [quantity, setQuantity] = useState(1);
-    const [stockSource, setStockSource] = useState<'danilo' | 'adriel' | ''>('');
-    const [isSimulating, setIsSimulating] = useState(false);
-    const [simulatedBom, setSimulatedBom] = useState<BomItem[]>([]);
-    const [canProduce, setCanProduce] = useState(false);
-    const [productionCost, setProductionCost] = useState(0);
-
+    // UI State
+    const [activeTab, setActiveTab] = useState<'open' | 'history'>('open');
+    const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+    const [isExecutionDialogOpen, setIsExecutionDialogOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
+    // Create Order State
+    const [newOrderProduct, setNewOrderProduct] = useState("");
+    const [newOrderQuantity, setNewOrderQuantity] = useState(1);
+
+    // Execution State (Wizard)
+    const [selectedOrder, setSelectedOrder] = useState<ProductionOrder | null>(null);
+    const [orderItems, setOrderItems] = useState<ProductionOrderItem[]>([]);
+
+    // Fetch Data
     useEffect(() => {
-        fetchData();
+        fetchInitialData();
     }, []);
 
-    async function fetchData() {
+    // Also refetch orders when tabs change or after ops
+    useEffect(() => {
+        fetchOrders();
+    }, [activeTab]);
+
+    async function fetchInitialData() {
         setLoading(true);
-        const { data: ords, error: errOrders } = await supabase
+        await Promise.all([fetchOrders(), fetchResources()]);
+        setLoading(false);
+    }
+
+    async function fetchResources() {
+        const { data: prods } = await supabase.from('products').select('*').order('name');
+        const { data: ings } = await supabase.from('ingredients').select('*').eq('is_active', true).order('name');
+        if (prods) setProducts(prods);
+        if (ings) setIngredients(ings);
+    }
+
+    async function fetchOrders() {
+        let query = supabase
             .from('production_orders')
             .select('*, products(name, stock_quantity, cost), profiles(email)')
             .order('created_at', { ascending: false });
 
-        const { data: prods } = await supabase
-            .from('products')
-            .select('*')
-            .order('name');
+        if (activeTab === 'open') {
+            query = query.eq('status', 'open');
+        } else {
+            query = query.neq('status', 'open');
+        }
 
-        if (errOrders) toast({ variant: 'destructive', title: 'Erro ao carregar', description: errOrders.message });
-        else setOrders(ords || []);
-
-        if (prods) setProducts(prods);
-        setLoading(false);
+        const { data } = await query;
+        setOrders(data || []);
     }
 
-    // Simulation: Calculate ingredients needed and check stock
-    useEffect(() => {
-        if (selectedProductId && quantity > 0 && stockSource) {
-            simulateProduction();
-        } else {
-            setSimulatedBom([]);
-            setCanProduce(false);
+    // --- Actions ---
+
+    async function handleCreateOrder() {
+        if (!newOrderProduct) return;
+        setIsSaving(true);
+        try {
+            // Get user session
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error("Usuário não logado");
+
+            const { data, error } = await supabase.rpc('create_production_order', {
+                p_product_id: newOrderProduct,
+                p_quantity: newOrderQuantity,
+                p_user_id: user.id
+            });
+
+            if (error) throw error;
+
+            toast({ title: "Ordem Criada", description: "OP iniciada com sucesso. Acesse-a na aba 'Em Aberto'." });
+            setIsCreateDialogOpen(false);
+            setNewOrderProduct("");
+            setNewOrderQuantity(1);
+            fetchOrders();
+            // Optional: Switch to open tab and maybe open execution dialog immediately
+            setActiveTab('open');
+
+        } catch (error: any) {
+            toast({ variant: 'destructive', title: "Erro ao criar", description: error.message });
+        } finally {
+            setIsSaving(false);
         }
-    }, [selectedProductId, quantity, stockSource]);
+    }
 
-    async function simulateProduction() {
-        setIsSimulating(true);
-        setCanProduce(true);
+    async function openExecution(order: ProductionOrder) {
+        setSelectedOrder(order);
+        setIsExecutionDialogOpen(true);
+        // Fetch items
+        const { data } = await supabase
+            .from('production_order_items')
+            .select('*')
+            .eq('order_id', order.id);
+        setOrderItems(data || []);
+    }
 
-        // Fetch BOM for product
-        const { data: bomData } = await supabase
-            .from('product_bom')
-            .select('*, ingredients(*)')
-            .eq('product_id', selectedProductId);
+    // Update LOCAL state of item usage
+    function updateItemUsage(itemId: string, field: 'quantity_used' | 'waste_quantity', value: number) {
+        setOrderItems(prev => prev.map(item =>
+            item.id === itemId ? { ...item, [field]: value } : item
+        ));
+    }
 
-        if (!bomData) {
-            setSimulatedBom([]);
-            setIsSimulating(false);
-            return;
-        }
+    // Save changes to items (auto-save or before close?)
+    // Allowing inline edits. For simplicity, we save all items when closing or have a "Save Progress" button.
+    // Let's implement "Execute/Close" which saves implicitly or explicitly.
+    // Ideally we update the specific item row in DB on blur, but bulk update on Close is atomic.
+    // **Wait**, RPC close_production_order reads from the DB table. So we MUST save changes to DB first.
 
-        const items: BomItem[] = bomData.map((item: any) => ({
-            ingredient_id: item.ingredient_id,
-            quantity: item.quantity,
-            unit: item.unit,
-            ingredients: item.ingredients
+    async function saveOrderItems() {
+        // Bulk update
+        const updates = orderItems.map(item => ({
+            id: item.id,
+            quantity_used: item.quantity_used,
+            waste_quantity: item.waste_quantity
         }));
 
-        let producible = true;
-        let totalBatchCost = 0;
-
-        const simulated = items.map(item => {
-            // Conversion logic (reuse from Recipes roughly or simplified)
-            let qtyNeeded = item.quantity * quantity; // Total needed for Batch
-
-            // Adjust based on Unit?
-            // Assuming item.quantity is ALREADY in the unit specified in BOM.
-            // If BOM says 200g, and unit is 'g', needed is 200 * qty.
-            // If BOM says 1 'un', needed is 1 * qty.
-
-            // Availability check
-            const available = stockSource === 'danilo' ? item.ingredients.stock_danilo : item.ingredients.stock_adriel;
-
-            // Normalize available to BOM unit? 
-            // Inventory 'stock_danilo' is in 'item.ingredients.unit'.
-            // BOM 'quantity' and 'unit' might differ.
-            // COMPLEXITY: We need to normalize units.
-
-            // Simplification: Assume BOM unit matches Inventory unit OR handle g/kg/l/ml.
-            let qtyNeededNormal = qtyNeeded;
-
-            // If BOM is kg and Stock is g -> *1000
-            if (item.unit === 'kg' && item.ingredients.unit_type === 'weight') qtyNeededNormal = qtyNeeded * 1000;
-            if (item.unit === 'l' && item.ingredients.unit_type === 'volume') qtyNeededNormal = qtyNeeded * 1000;
-
-            // If BOM is g and Stock is kg (unlikely, stock usually base unit).
-            // Assume Stock is ALWAYS stored in base units (g, ml, un) as implied by 'unit_weight' logic in Inventory.
-            // Inventory.tsx doesn't enforce unit types on stock columns yet, just labels.
-            // But let's assume standard names.
-
-            const isEnough = available >= qtyNeededNormal;
-            if (!isEnough) producible = false;
-
-            // Cost calculation
-            // Cost of ingredient per base unit
-            const costPerBase = item.ingredients.unit_weight && item.ingredients.cost
-                ? item.ingredients.cost / item.ingredients.unit_weight
-                : 0;
-
-            totalBatchCost += costPerBase * qtyNeededNormal;
-
-            return {
-                ...item,
-                needed: qtyNeededNormal,
-                available,
-                isEnough
-            };
-        });
-
-        setSimulatedBom(simulated as any);
-        setCanProduce(producible);
-        setProductionCost(totalBatchCost);
-        setIsSimulating(false);
+        const { error } = await supabase.from('production_order_items').upsert(updates);
+        if (error) throw error;
     }
 
-    async function handleProduce() {
-        if (!canProduce) return;
+    async function handleCloseOrder() {
+        if (!selectedOrder) return;
+        if (!confirm("Isso irá baixar o estoque dos insumos e dar entrada no produto final. Confirmar?")) return;
+
         setIsSaving(true);
-
         try {
-            const product = products.find(p => p.id === selectedProductId);
-            if (!product) throw new Error("Produto não encontrado");
+            // 1. Save current state of items/waste
+            await saveOrderItems();
 
-            // 1. Deduct Stock from Ingredients
-            for (const item of simulatedBom) {
-                const { needed, ingredients } = item as any;
-                const field = stockSource === 'danilo' ? 'stock_danilo' : 'stock_adriel';
+            // 2. Call RPC to close
+            const { data, error } = await supabase.rpc('close_production_order', {
+                p_order_id: selectedOrder.id
+            });
 
-                const newStock = ingredients[field] - needed;
+            if (error) throw error;
 
-                const { error } = await supabase.from('ingredients')
-                    .update({ [field]: newStock })
-                    .eq('id', ingredients.id);
-
-                if (error) throw new Error(`Falha ao baixar estoque de ${ingredients.name}`);
-            }
-
-            // 2. Add Stock to Product & Update Average Cost
-            // New Cost Formula: ((CurrQty * CurrCost) + (NewQty * NewBatchUnitCost)) / (CurrQty + NewQty)
-
-            const currentQty = product.stock_quantity || 0;
-            const currentCost = product.cost || 0;
-            const batchUnitCost = productionCost / quantity;
-
-            const newTotalQty = currentQty + quantity;
-            const newAvgCost = ((currentQty * currentCost) + (quantity * batchUnitCost)) / newTotalQty;
-
-            const { error: prodError } = await supabase.from('products')
-                .update({
-                    stock_quantity: newTotalQty,
-                    cost: newAvgCost
-                })
-                .eq('id', selectedProductId);
-
-            if (prodError) throw new Error("Falha ao atualizar estoque do produto");
-
-            // 3. Create Production Order Log
-            const { error: ordError } = await supabase.from('production_orders').insert([{
-                product_id: selectedProductId,
-                quantity: quantity,
-                status: 'completed',
-                user_id: (await supabase.auth.getUser()).data.user?.id,
-                cost_at_production: batchUnitCost
-            }]);
-
-            if (ordError) throw new Error("Falha ao criar registro de ordem");
-
-            toast({ title: "Produção concluída!", description: `${quantity}un de ${product.name} adicionados.` });
-            setIsDialogOpen(false);
-            fetchData();
+            toast({ title: "Produção Concluída!", description: "Estoque atualizado com sucesso." });
+            setIsExecutionDialogOpen(false);
+            fetchOrders();
 
         } catch (error: any) {
             toast({ variant: 'destructive', title: "Erro na produção", description: error.message });
@@ -242,128 +220,204 @@ export default function Production() {
             <div className="flex items-center justify-between">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight">Ordens de Produção</h2>
-                    <p className="text-zinc-500">Registre produção e atualize estoques automaticamente.</p>
+                    <p className="text-zinc-500">Planejamento e controle de fábrica.</p>
                 </div>
-                <Button onClick={() => setIsDialogOpen(true)} className="bg-zinc-900 text-white hover:bg-zinc-800">
-                    <Plus className="mr-2 h-4 w-4" /> Nova Produção
+                <Button onClick={() => setIsCreateDialogOpen(true)} className="bg-zinc-900 text-white hover:bg-zinc-800">
+                    <Plus className="mr-2 h-4 w-4" /> Nova OP
                 </Button>
             </div>
 
-            <div className="bg-white rounded-lg border shadow-sm">
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Data</TableHead>
-                            <TableHead>Produto</TableHead>
-                            <TableHead>Qtd Produzida</TableHead>
-                            <TableHead>Custo Unit. (Produção)</TableHead>
-                            <TableHead>Estoque Atual</TableHead>
-                            <TableHead>Usuário</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {loading ? <TableRow><TableCell colSpan={6} className="text-center py-4"><Loader2 className="animate-spin" /></TableCell></TableRow> :
-                            orders.length === 0 ? <TableRow><TableCell colSpan={6} className="text-center py-4">Nenhuma ordem registrada.</TableCell></TableRow> :
-                                orders.map(order => (
-                                    <TableRow key={order.id}>
-                                        <TableCell>{new Date(order.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</TableCell>
-                                        <TableCell className="font-medium">{order.products?.name}</TableCell>
-                                        <TableCell>{order.quantity}</TableCell>
-                                        <TableCell>R$ {order.cost_at_production?.toFixed(2)}</TableCell>
-                                        <TableCell>{order.products?.stock_quantity}</TableCell>
-                                        <TableCell>{order.profiles?.email}</TableCell>
-                                    </TableRow>
-                                ))}
-                    </TableBody>
-                </Table>
-            </div>
+            <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="space-y-4">
+                <TabsList>
+                    <TabsTrigger value="open" className="gap-2"><Factory className="h-4 w-4" /> Em Aberto / Execução</TabsTrigger>
+                    <TabsTrigger value="history" className="gap-2"><History className="h-4 w-4" /> Histórico</TabsTrigger>
+                </TabsList>
 
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogContent className="max-w-3xl">
+                <TabsContent value="open">
+                    {activeTab === 'open' && (
+                        <div className="bg-white rounded-lg border shadow-sm">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Data Criação</TableHead>
+                                        <TableHead>Produto</TableHead>
+                                        <TableHead>Qtd Planejada</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead className="text-right">Ações</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {orders.length === 0 ? (
+                                        <TableRow><TableCell colSpan={5} className="text-center py-8 text-zinc-500">Nenhuma produção em andamento.</TableCell></TableRow>
+                                    ) : (
+                                        orders.map(order => (
+                                            <TableRow key={order.id}>
+                                                <TableCell>{new Date(order.created_at).toLocaleString()}</TableCell>
+                                                <TableCell className="font-medium text-lg">{order.products?.name}</TableCell>
+                                                <TableCell><Badge variant="outline" className="text-base">{order.quantity}</Badge></TableCell>
+                                                <TableCell><Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200">Em Aberto</Badge></TableCell>
+                                                <TableCell className="text-right">
+                                                    <Button size="sm" onClick={() => openExecution(order)} className="bg-blue-600 hover:bg-blue-700">
+                                                        <PlayCircle className="mr-2 h-4 w-4" /> Executar
+                                                    </Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    )}
+                </TabsContent>
+
+                <TabsContent value="history">
+                    {activeTab === 'history' && (
+                        <div className="bg-white rounded-lg border shadow-sm">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Data Fechamento</TableHead>
+                                        <TableHead>Produto</TableHead>
+                                        <TableHead>Qtd Produzida</TableHead>
+                                        <TableHead>Custo Total</TableHead>
+                                        <TableHead>Custo Unitário</TableHead>
+                                        <TableHead>Status</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {orders.length === 0 ? (
+                                        <TableRow><TableCell colSpan={6} className="text-center py-8 text-zinc-500">Histórico vazio.</TableCell></TableRow>
+                                    ) : (
+                                        orders.map(order => (
+                                            <TableRow key={order.id}>
+                                                <TableCell>{order.closed_at ? new Date(order.closed_at).toLocaleString() : '-'}</TableCell>
+                                                <TableCell className="font-medium">{order.products?.name}</TableCell>
+                                                <TableCell>{order.quantity}</TableCell>
+                                                <TableCell>R$ {order.cost_at_production?.toFixed(2)}</TableCell>
+                                                <TableCell className="text-zinc-500 font-mono">
+                                                    R$ {order.quantity > 0 && order.cost_at_production ? (order.cost_at_production / order.quantity).toFixed(2) : '-'}
+                                                </TableCell>
+                                                <TableCell><Badge className="bg-zinc-100 text-zinc-800">Concluído</Badge></TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    )}
+                </TabsContent>
+            </Tabs>
+
+            {/* DIALOG: CREATE OP */}
+            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Nova Produção</DialogTitle>
+                        <DialogTitle>Planejar Nova Produção</DialogTitle>
+                        <DialogDescription>Abre uma nova OP sem baixar estoque imediatamente.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label>Produto</Label>
+                            <Select onValueChange={setNewOrderProduct}>
+                                <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                                <SelectContent>
+                                    {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Quantidade a Produzir</Label>
+                            <Input type="number" min={1} value={newOrderQuantity} onChange={e => setNewOrderQuantity(Number(e.target.value))} />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>Cancelar</Button>
+                        <Button onClick={handleCreateOrder} disabled={!newOrderProduct || isSaving}>
+                            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Criar OP
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* DIALOG: EXECUTION WIZARD */}
+            <Dialog open={isExecutionDialogOpen} onOpenChange={setIsExecutionDialogOpen}>
+                <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Factory className="h-5 w-5 text-blue-600" />
+                            Executar OP: <span className="text-zinc-500 font-normal">{selectedOrder?.products?.name} (Qtd: {selectedOrder?.quantity})</span>
+                        </DialogTitle>
+                        <DialogDescription>Confirme os insumos utilizados e aponte desperdícios antes de finalizar.</DialogDescription>
                     </DialogHeader>
 
-                    <div className="grid gap-4 py-4">
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="space-y-2">
-                                <Label>Produto</Label>
-                                <Select onValueChange={setSelectedProductId}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Selecione..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {products.map(p => (
-                                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    <div className="py-4 space-y-6">
+                        <div className="border rounded-md overflow-hidden">
+                            <div className="bg-zinc-100 p-2 text-sm font-semibold text-zinc-700 flex justify-between px-4">
+                                <span>Insumos Planejados (Receita)</span>
+                                <span>Ajuste Manual</span>
+                            </div>
+                            <div className="max-h-[300px] overflow-auto">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Item</TableHead>
+                                            <TableHead className="w-24">Unid.</TableHead>
+                                            <TableHead className="w-32">Planejado</TableHead>
+                                            <TableHead className="w-32">Qtd. Real</TableHead>
+                                            <TableHead className="w-32 text-amber-600">Desperdício</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {orderItems.map(item => (
+                                            <TableRow key={item.id}>
+                                                <TableCell className="font-medium">
+                                                    {item.type === 'product' ? <Layers className="inline h-3 w-3 mr-1 text-amber-600" /> : <Box className="inline h-3 w-3 mr-1 text-blue-600" />}
+                                                    {item.name}
+                                                </TableCell>
+                                                <TableCell className="text-xs text-zinc-500">{item.unit}</TableCell>
+                                                <TableCell>{Number(item.quantity_planned).toFixed(2)}</TableCell>
+                                                <TableCell>
+                                                    <Input
+                                                        type="number"
+                                                        className="h-8 w-24"
+                                                        value={item.quantity_used}
+                                                        onChange={e => updateItemUsage(item.id, 'quantity_used', Number(e.target.value))}
+                                                    />
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Input
+                                                        type="number"
+                                                        className="h-8 w-24 border-amber-200 focus:ring-amber-500"
+                                                        value={item.waste_quantity}
+                                                        onChange={e => updateItemUsage(item.id, 'waste_quantity', Number(e.target.value))}
+                                                        placeholder="0"
+                                                    />
+                                                </TableCell>
+                                            </TableRow>
                                         ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Quantidade a Produzir</Label>
-                                <Input type="number" min={1} value={quantity} onChange={e => setQuantity(Number(e.target.value))} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Origem da Matéria Prima</Label>
-                                <Select value={stockSource} onValueChange={(v: any) => setStockSource(v)}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Selecione..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="danilo">Estoque Danilo</SelectItem>
-                                        <SelectItem value="adriel">Estoque Adriel</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                    </TableBody>
+                                </Table>
                             </div>
                         </div>
 
-                        {selectedProductId && stockSource && (
-                            <div className="border rounded-md p-4 bg-zinc-50">
-                                <h4 className="font-semibold mb-2">Simulação de Matéria Prima</h4>
-                                {isSimulating ? <Loader2 className="animate-spin" /> :
-                                    simulatedBom.length === 0 ? <p className="text-sm text-muted-foreground">Este produto não possui ficha técnica cadastrada.</p> :
-                                        (
-                                            <div className="space-y-2">
-                                                <Table>
-                                                    <TableHeader>
-                                                        <TableRow>
-                                                            <TableHead>Ingrediente</TableHead>
-                                                            <TableHead>Necessário</TableHead>
-                                                            <TableHead>Disponível ({stockSource})</TableHead>
-                                                            <TableHead>Status</TableHead>
-                                                        </TableRow>
-                                                    </TableHeader>
-                                                    <TableBody>
-                                                        {simulatedBom.map((item: any) => (
-                                                            <TableRow key={item.ingredient_id}>
-                                                                <TableCell>{item.ingredients.name}</TableCell>
-                                                                <TableCell>{item.needed?.toFixed(2)} {item.ingredients.unit}</TableCell>
-                                                                <TableCell>{item.available?.toFixed(2)} {item.ingredients.unit}</TableCell>
-                                                                <TableCell>
-                                                                    {item.isEnough ?
-                                                                        <span className="text-green-600 font-bold">OK</span> :
-                                                                        <span className="text-red-500 font-bold">FALTA</span>}
-                                                                </TableCell>
-                                                            </TableRow>
-                                                        ))}
-                                                    </TableBody>
-                                                </Table>
-                                                {!canProduce && <p className="text-red-600 font-bold text-sm text-center">Material insuficiente para produção.</p>}
-                                                <div className="text-right text-sm text-zinc-600 pt-2">
-                                                    Custo Estimado do Lote: <strong>R$ {productionCost.toFixed(2)}</strong> (R$ {(productionCost / quantity).toFixed(2)}/un)
-                                                </div>
-                                            </div>
-                                        )
-                                }
+                        <div className="bg-blue-50 p-4 rounded-md flex items-start gap-3 border border-blue-100">
+                            <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5" />
+                            <div>
+                                <h4 className="font-medium text-blue-900">Resumo da Ação</h4>
+                                <p className="text-sm text-blue-700 mt-1">
+                                    Ao confirmar, o sistema irá baixar do estoque: <br />
+                                    <strong>(Qtd Real + Desperdício)</strong> de cada item listado acima.
+                                </p>
                             </div>
-                        )}
+                        </div>
                     </div>
 
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
-                        <Button onClick={handleProduce} disabled={!canProduce || isSaving || !selectedProductId}>
+                        <Button variant="outline" onClick={() => setIsExecutionDialogOpen(false)}>Voltar</Button>
+                        <Button onClick={handleCloseOrder} disabled={isSaving} className="bg-green-600 hover:bg-green-700">
                             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Confirmar Produção
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                            Finalizar e Baixar Estoque
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -371,5 +425,3 @@ export default function Production() {
         </div>
     );
 }
-
-
