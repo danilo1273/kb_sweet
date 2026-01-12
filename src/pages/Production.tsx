@@ -489,13 +489,6 @@ export default function Production() {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {orderItems.length === 0 && (
-                                        <TableRow>
-                                            <TableCell colSpan={6} className="text-center py-8 text-zinc-500">
-                                                Nenhum insumo encontrado. Verifique a Ficha Técnica deste produto.
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
                                     {orderItems.map(item => {
                                         const stockInfo = item.type === 'ingredient'
                                             ? ingredients.find(i => i.id === item.item_id)
@@ -503,50 +496,89 @@ export default function Production() {
 
                                         let currentStock = 0;
                                         let stockUnit = '-';
+                                        let unitWeight = 1;
 
                                         if (stockInfo) {
                                             if ('stock_danilo' in stockInfo) {
                                                 currentStock = stockInfo.stock_danilo;
                                                 stockUnit = stockInfo.unit;
+                                                unitWeight = stockInfo.unit_weight || 1;
                                             } else {
                                                 currentStock = stockInfo.stock_quantity;
                                                 stockUnit = stockInfo.unit || 'un';
+                                                // Products don't have unit_weight in the interface, default to 1
                                             }
                                         }
 
+                                        // Robust Conversion
                                         let displayStock = currentStock;
-                                        if (stockUnit === 'kg' && item.unit === 'g') displayStock = currentStock * 1000;
-                                        else if (stockUnit === 'g' && item.unit === 'kg') displayStock = currentStock / 1000;
-                                        else if (stockUnit === 'l' && item.unit === 'ml') displayStock = currentStock * 1000;
-                                        else if (stockUnit === 'ml' && item.unit === 'l') displayStock = currentStock / 1000;
+                                        const itemUnit = item.unit?.toLowerCase();
+                                        const stockUnitLower = stockUnit?.toLowerCase();
+
+                                        if (stockUnitLower === 'un' && (itemUnit === 'g' || itemUnit === 'ml')) {
+                                            displayStock = currentStock * unitWeight;
+                                        } else if (stockUnitLower === 'saco' && (itemUnit === 'g' || itemUnit === 'ml')) {
+                                            displayStock = currentStock * unitWeight;
+                                        } else if (stockUnitLower === 'kg' && itemUnit === 'g') displayStock = currentStock * 1000;
+                                        else if (stockUnitLower === 'g' && itemUnit === 'kg') displayStock = currentStock / 1000;
+                                        else if (stockUnitLower === 'l' && itemUnit === 'ml') displayStock = currentStock * 1000;
+                                        else if (stockUnitLower === 'ml' && itemUnit === 'l') displayStock = currentStock / 1000;
+
+                                        const realQty = item.quantity_used ?? item.quantity_planned;
+                                        const totalNeeded = realQty + (item.waste_quantity || 0);
+                                        const isInsufficient = totalNeeded > displayStock;
 
                                         return (
-                                            <TableRow key={item.id}>
+                                            <TableRow key={item.id} className={isInsufficient ? "bg-red-50" : ""}>
                                                 <TableCell className="font-medium">
-                                                    {item.type === 'product' ? <Layers className="inline h-3 w-3 mr-1 text-amber-600" /> : <Box className="inline h-3 w-3 mr-1 text-blue-600" />}
-                                                    {item.name}
+                                                    <div className="flex flex-col">
+                                                        <div className="flex items-center gap-1">
+                                                            {item.type === 'product' ? <Layers className="h-3 w-3 text-amber-600" /> : <Box className="h-3 w-3 text-blue-600" />}
+                                                            {item.name}
+                                                        </div>
+                                                        {isInsufficient && (
+                                                            <span className="text-[10px] text-red-600 font-bold animate-pulse">
+                                                                Estoque Insuficiente! (Faltam {(totalNeeded - displayStock).toFixed(2)}{item.unit})
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </TableCell>
                                                 <TableCell className="text-xs text-zinc-500">{item.unit}</TableCell>
-                                                <TableCell className="text-xs font-mono text-zinc-600">
-                                                    {displayStock.toFixed(displayStock % 1 === 0 ? 0 : 3)}
+                                                <TableCell className="text-xs font-mono">
+                                                    <div className="flex flex-col">
+                                                        <span className={isInsufficient ? "text-red-600 font-bold" : "text-zinc-600"}>
+                                                            {displayStock.toFixed(displayStock % 1 === 0 ? 0 : 3)} {item.unit}
+                                                        </span>
+                                                        <span className="text-[10px] text-zinc-400">
+                                                            Original: {currentStock} {stockUnit}
+                                                        </span>
+                                                    </div>
                                                 </TableCell>
-                                                <TableCell>{Number(item.quantity_planned).toFixed(2)}</TableCell>
-                                                <TableCell>
-                                                    <Input
-                                                        type="number"
-                                                        className="h-8 w-24"
-                                                        value={item.quantity_used ?? item.quantity_planned}
-                                                        onChange={e => updateItemUsage(item.id, 'quantity_used', Number(e.target.value))}
-                                                    />
+                                                <TableCell className="text-sm">
+                                                    {Number(item.quantity_planned).toFixed(2)} <span className="text-zinc-400 text-[10px]">{item.unit}</span>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <Input
-                                                        type="number"
-                                                        className="h-8 w-24 border-amber-200 focus:ring-amber-500"
-                                                        value={item.waste_quantity}
-                                                        onChange={e => updateItemUsage(item.id, 'waste_quantity', Number(e.target.value))}
-                                                        placeholder="0"
-                                                    />
+                                                    <div className="flex items-center gap-1">
+                                                        <Input
+                                                            type="number"
+                                                            className={`h-8 w-24 ${isInsufficient ? "border-red-300 bg-red-50" : ""}`}
+                                                            value={item.quantity_used ?? item.quantity_planned}
+                                                            onChange={e => updateItemUsage(item.id, 'quantity_used', Number(e.target.value))}
+                                                        />
+                                                        <span className="text-[10px] text-zinc-400">{item.unit}</span>
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div className="flex items-center gap-1">
+                                                        <Input
+                                                            type="number"
+                                                            className="h-8 w-24 border-amber-200 focus:ring-amber-500"
+                                                            value={item.waste_quantity}
+                                                            onChange={e => updateItemUsage(item.id, 'waste_quantity', Number(e.target.value))}
+                                                            placeholder="0"
+                                                        />
+                                                        <span className="text-[10px] text-zinc-400">{item.unit}</span>
+                                                    </div>
                                                 </TableCell>
                                             </TableRow>
                                         );
@@ -554,38 +586,81 @@ export default function Production() {
                                 </TableBody>
                             </Table>
                         </div>
+                    </div>
 
-                        <div className="bg-blue-50 p-4 rounded-md flex items-start gap-3 border border-blue-100">
-                            <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5" />
-                            <div>
-                                <h4 className="font-medium text-blue-900">Resumo da Ação</h4>
-                                <p className="text-sm text-blue-700 mt-1">
-                                    Ao confirmar, o sistema irá baixar do estoque: <br />
-                                    <strong>(Qtd Real + Desperdício)</strong> de cada item listado acima.
-                                </p>
+                    {orderItems.some(i => ((i.quantity_used ?? i.quantity_planned) + (i.waste_quantity || 0)) > (
+                        (() => {
+                            const stockInfo = i.type === 'ingredient' ? ingredients.find(ing => ing.id === i.item_id) : products.find(p => p.id === i.item_id);
+                            let currentStock = 0;
+                            let stockUnit = 'un';
+                            let unitWeight = 1;
+
+                            if (stockInfo) {
+                                if ('stock_danilo' in stockInfo) {
+                                    currentStock = stockInfo.stock_danilo;
+                                    stockUnit = stockInfo.unit;
+                                    unitWeight = stockInfo.unit_weight || 1;
+                                } else {
+                                    currentStock = stockInfo.stock_quantity;
+                                    stockUnit = stockInfo.unit || 'un';
+                                }
+                            }
+
+                            let displayStock = currentStock;
+                            const itemUnit = i.unit?.toLowerCase();
+                            const stockUnitLower = stockUnit?.toLowerCase();
+
+                            if (stockUnitLower === 'un' && (itemUnit === 'g' || itemUnit === 'ml')) displayStock = currentStock * unitWeight;
+                            else if (stockUnitLower === 'saco' && (itemUnit === 'g' || itemUnit === 'ml')) displayStock = currentStock * unitWeight;
+                            else if (stockUnitLower === 'kg' && itemUnit === 'g') displayStock = currentStock * 1000;
+                            else if (stockUnitLower === 'g' && itemUnit === 'kg') displayStock = currentStock / 1000;
+                            else if (stockUnitLower === 'l' && itemUnit === 'ml') displayStock = currentStock * 1000;
+                            else if (stockUnitLower === 'ml' && itemUnit === 'l') displayStock = currentStock / 1000;
+
+                            return displayStock;
+                        })()
+                    )) && (
+                            <div className="bg-red-50 p-4 rounded-md flex items-start gap-3 border border-red-200 mb-4 mx-4">
+                                <Trash2 className="h-5 w-5 text-red-600 mt-0.5" />
+                                <div>
+                                    <h4 className="font-medium text-red-900">Atenção: Estoque Crítico</h4>
+                                    <p className="text-sm text-red-700 mt-1">
+                                        Há itens com estoque insuficiente para esta OP. O fechamento irá deixar o estoque NEGATIVO.
+                                    </p>
+                                </div>
                             </div>
-                        </div>
+                        )}
 
-                        <div className="flex items-center gap-4 p-4 border rounded-md bg-zinc-50">
-                            <div className="flex-1">
-                                <Label className="text-base font-semibold">Quantidade Final Produzida (Real)</Label>
-                                <p className="text-xs text-muted-foreground mb-2">Se houve quebra ou rendimento maior que o planejado.</p>
-                                <div className="relative">
-                                    <Input
-                                        type="number"
-                                        value={actualOutputQuantity}
-                                        onChange={e => setActualOutputQuantity(Number(e.target.value))}
-                                        className="pr-16"
-                                    />
-                                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-zinc-500 bg-zinc-50 px-3 border-l rounded-r-md">
-                                        {selectedOrder?.products?.unit || 'un'}
-                                    </div>
+                    <div className="bg-blue-50 p-4 rounded-md flex items-start gap-3 border border-blue-100 mx-4">
+                        <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5" />
+                        <div>
+                            <h4 className="font-medium text-blue-900">Resumo da Ação</h4>
+                            <p className="text-sm text-blue-700 mt-1">
+                                Ao confirmar, o sistema irá baixar do estoque: <br />
+                                <strong>(Qtd Real + Desperdício)</strong> de cada item listado acima.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 p-4 border rounded-md bg-zinc-50 mx-4 my-6">
+                        <div className="flex-1">
+                            <Label className="text-base font-semibold">Quantidade Final Produzida (Real)</Label>
+                            <p className="text-xs text-muted-foreground mb-2">Se houve quebra ou rendimento maior que o planejado.</p>
+                            <div className="relative">
+                                <Input
+                                    type="number"
+                                    value={actualOutputQuantity}
+                                    onChange={e => setActualOutputQuantity(Number(e.target.value))}
+                                    className="pr-16"
+                                />
+                                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-zinc-500 bg-zinc-50 px-3 border-l rounded-r-md">
+                                    {selectedOrder?.products?.unit || 'un'}
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <DialogFooter>
+                    <DialogFooter className="px-4 pb-4">
                         <Button variant="outline" onClick={() => setIsExecutionDialogOpen(false)}>Voltar</Button>
                         <Button onClick={handleCloseOrder} disabled={isSaving} className="bg-green-600 hover:bg-green-700">
                             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
