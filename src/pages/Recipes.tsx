@@ -227,14 +227,28 @@ export default function Recipes() {
             toast({ title: "Item adicionado" });
             fetchBom(currentProduct.id);
             setNewBomItem({ target_id: '', quantity: 0, unit: 'g' });
+            // Custo será recalculado no useEffect de bomItems
         }
     }
 
     async function handleDeleteBomItem(id: string) {
         const { error } = await supabase.from('product_bom').delete().eq('id', id);
         if (error) toast({ variant: 'destructive', title: "Erro ao remover" });
-        else fetchBom(currentProduct.id!);
+        else {
+            fetchBom(currentProduct.id!);
+            // Recalcular com lista atualizada (removendo item localmente para calculo imediato ou esperando fetch)
+            // Para simplicidade, vamos chamar calculateAndUpdateCost APÓS o fetch atualizar o estado, 
+            // mas como o fetch é async e setBomItems também, o melhor é forçar o calculo.
+            // Vamos mudar a estratégia: Criar um useEffect que monitora bomItems.
+        }
     }
+
+    // Effect para recalcular custo sempre que a lista de BOM mudar e tivermos um produto aberto
+    useEffect(() => {
+        if (currentProduct.id && bomItems.length > 0) {
+            calculateAndUpdateCost();
+        }
+    }, [bomItems]);
 
     async function calculateAndUpdateCost() {
         if (!currentProduct.id) return;
@@ -261,13 +275,11 @@ export default function Recipes() {
             totalCost += itemCost;
         });
 
-        if (totalCost > 0) {
+        // Só atualiza se o custo mudou significativamente para evitar loops ou updates desnecessários
+        if (Math.abs(totalCost - (currentProduct.cost || 0)) > 0.01) {
             await supabase.from('products').update({ cost: totalCost }).eq('id', currentProduct.id!);
-            toast({ title: "Custo atualizado!", description: `Novo custo: R$ ${totalCost.toFixed(2)}` });
-            fetchProducts();
             setCurrentProduct(prev => ({ ...prev, cost: totalCost }));
-        } else {
-            toast({ title: "Não foi possível calcular cost", description: "Verifique custos dos componentes." });
+            // toast({ title: "Custo atualizado!", description: `Novo custo: R$ ${totalCost.toFixed(2)}` }); // Ocultando toast para não poluir
         }
     }
 
@@ -654,9 +666,7 @@ export default function Recipes() {
                                         </div>
 
                                         <div className="flex justify-end pt-2">
-                                            <Button variant="secondary" size="sm" onClick={calculateAndUpdateCost}>
-                                                Recalcular Custo Total
-                                            </Button>
+                                            {/* Cost is auto-calculated now */}
                                         </div>
                                     </>
                                 )}
