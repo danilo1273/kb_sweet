@@ -1,123 +1,58 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Loader2, Pencil, Check, X, Trash2, RotateCcw, Clock, ChevronDown, ChevronUp, CheckCheck } from "lucide-react";
+import { Plus, RotateCcw, Clock, Package, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { NewOrderDialog } from "@/components/purchases/NewOrderDialog";
+import { ManageOrderDialog } from "@/components/purchases/ManageOrderDialog";
 
-interface PurchaseOrder {
-    id: string;
-    nickname: string;
-    supplier_id?: string;
-    created_at: string;
-    created_by: string;
-    status: 'open' | 'closed' | 'partial';
-    total_value: number;
-    requests: PurchaseRequest[];
-    creator_name?: string;
-}
+import { EditItemDialog } from "@/components/purchases/EditItemDialog";
+import { QuickProductDialog } from "@/components/purchases/QuickProductDialog";
+import { CreateSupplierDialog } from "@/components/purchases/CreateSupplierDialog";
+import { ManageCategoriesDialog } from "@/components/purchases/ManageCategoriesDialog";
+import { ManageUnitsDialog } from "@/components/purchases/ManageUnitsDialog";
+import { useNavigate } from "react-router-dom"; // Adding missing nav if needed or just hook
+import { usePurchases } from "@/hooks/usePurchases";
+import { PurchaseOrder, PurchaseRequest, Ingredient, Supplier, ItemDraft, Category } from "@/types";
 
-interface PurchaseRequest {
-    id: string;
-    order_id: string;
-    item_name: string;
-    ingredient_id?: string;
-    quantity: number;
-    unit: string;
-    status: 'pending' | 'approved' | 'rejected' | 'edit_requested' | 'edit_approved';
-    cost: number;
-    supplier?: string;
-    destination?: 'danilo' | 'adriel';
-    created_at: string;
-    user_id?: string;
-    requested_by?: string;
-    change_reason?: string;
-    financial_status?: 'pending' | 'paid' | 'none';
-}
 
-interface PurchaseHistory {
-    id: string;
-    changed_at: string;
-    change_reason: string;
-    old_value: string;
-    new_value: string;
-    changed_by_email?: string;
-    changed_by?: string;
-    field_changed?: string;
-}
 
-interface ItemDraft {
-    item_name: string;
-    ingredient_id?: string;
-    quantity: number;
-    unit: string;
-    cost: number;
-    destination: 'danilo' | 'adriel';
-}
 
-interface Ingredient {
-    id: string;
-    name: string;
-    stock_danilo: number;
-    stock_adriel: number;
-    cost: number;
-    cost_danilo?: number;
-    cost_adriel?: number;
-    unit: string;
-    purchase_unit?: string;
-    purchase_unit_factor?: number;
-    category?: string;
-    unit_weight?: number;
-    unit_type?: string;
-    type?: 'stock' | 'expense';
-}
 
-interface Supplier {
-    id: string;
-    name: string;
-}
+import { motion, AnimatePresence } from "framer-motion";
 
 const Purchases = () => {
     const { toast } = useToast();
-    const [orders, setOrders] = useState<PurchaseOrder[]>([]);
+    const { orders, loading, fetchOrders, createOrder, deleteOrder, profilesCache } = usePurchases();
+
+    // Meta State (Ingredients, Suppliers, Categories)
     const [ingredients, setIngredients] = useState<Ingredient[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-    const [profiles, setProfiles] = useState<Record<string, string>>({});
-    const [loading, setLoading] = useState(true);
-    const [userRoles, setUserRoles] = useState<string[]>([]);
+
+
+
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
     // New Order State
     const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
-    const [newOrderNickname, setNewOrderNickname] = useState("");
-    const [newOrderSupplier, setNewOrderSupplier] = useState<string>("default");
-    const [orderItems, setOrderItems] = useState<ItemDraft[]>([]);
-    const [draftItem, setDraftItem] = useState<ItemDraft>({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo' });
-    const [isSavingOrder, setIsSavingOrder] = useState(false);
+
 
     // MANAGE ORDER Dialog (New V3.7)
     const [isManageOrderOpen, setIsManageOrderOpen] = useState(false);
     const [isManageOrderReadOnly, setIsManageOrderReadOnly] = useState(false);
-    const [manageOrderData, setManageOrderData] = useState<{ id: string, nickname: string, supplier_id: string, items: PurchaseRequest[] }>({ id: '', nickname: '', supplier_id: '', items: [] });
-    const [newItemDraft, setNewItemDraft] = useState<ItemDraft>({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo' });
+    const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+
+    const selectedOrder = orders.find(o => o.id === selectedOrderId) || null;
 
     // Filter State
     const [filterStatus, setFilterStatus] = useState<'all' | 'approved' | 'pending' | 'partial' | 'rejected' | 'editing'>('all');
-    const [expandedOrders, setExpandedOrders] = useState<Record<string, boolean>>({});
 
     // Dialogs
-    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-    const [historyLogs, setHistoryLogs] = useState<PurchaseHistory[]>([]);
-    const [isEditRequestOpen, setIsEditRequestOpen] = useState(false);
-    const [editReason, setEditReason] = useState("");
-    const [itemToRequestEdit, setItemToRequestEdit] = useState<PurchaseRequest | null>(null);
+
     const [isEditItemOpen, setIsEditItemOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<PurchaseRequest | null>(null);
     const [editedValues, setEditedValues] = useState<{ quantity: number, cost: number, item_name: string, unit: string, ingredient_id?: string, destination: 'danilo' | 'adriel' }>({ quantity: 0, cost: 0, item_name: '', unit: 'un', destination: 'danilo' });
@@ -129,11 +64,9 @@ const Purchases = () => {
     const [newSupplierName, setNewSupplierName] = useState("");
 
     // Dynamic Lists
-    interface Category { id: number; name: string; type: 'stock' | 'expense' }
     const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
     const [availableUnits, setAvailableUnits] = useState<string[]>([]);
 
-    // Manage Dialogs State
     // Manage Dialogs State
     const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState("");
@@ -142,9 +75,10 @@ const Purchases = () => {
     const [newUnitName, setNewUnitName] = useState("");
 
     useEffect(() => {
-        fetchData();
+        fetchOrders();
         fetchMeta();
-    }, []);
+    }, [fetchOrders]);
+
 
     async function fetchMeta() {
         const { data: ing } = await supabase.from('ingredients').select('id, name, stock_danilo, stock_adriel, cost, cost_danilo, cost_adriel, unit, purchase_unit, purchase_unit_factor, category, type').order('name');
@@ -171,12 +105,7 @@ const Purchases = () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
             setCurrentUserId(user.id);
-            const { data: profile } = await supabase.from('profiles').select('roles, role').eq('id', user.id).single();
-            if (profile) {
-                let roles = profile.roles || [];
-                if (!roles.length && profile.role) roles = [profile.role];
-                setUserRoles(roles);
-            }
+            // Removed local profile fetching as we rely on cache/hook where possible or just currentUserId
         }
     }
 
@@ -228,92 +157,11 @@ const Purchases = () => {
         }
     }
 
-    async function fetchProfilesForUsers(userIds: string[]) {
-        const uniqueIds = Array.from(new Set(userIds)).filter(Boolean);
-        if (uniqueIds.length === 0) return;
-        const { data } = await supabase.from('profiles').select('id, full_name, email').in('id', uniqueIds);
-        if (data) {
-            const map: Record<string, string> = {};
-            data.forEach(p => map[p.id] = p.full_name || p.email);
-            setProfiles(prev => ({ ...prev, ...map }));
-        }
-    }
 
-    async function fetchData() {
-        setLoading(true);
-        const { data: ordersData, error } = await supabase
-            .from('purchase_orders')
-            .select(`*, requests:purchase_requests(*)`)
-            .order('created_at', { ascending: false });
 
-        if (error) {
-            toast({ variant: 'destructive', title: 'Erro', description: error.message });
-        } else {
-            let fetchedOrders: PurchaseOrder[] = ordersData || [];
+    // fetchData removed
 
-            // Financial Status Check
-            const requestIds = fetchedOrders.flatMap(o => o.requests.map(r => r.id));
-            if (requestIds.length > 0) {
-                const { data: financial } = await supabase.from('financial_movements').select('related_purchase_id, status').in('related_purchase_id', requestIds);
-                const statusMap: Record<string, 'pending' | 'paid'> = {};
-                financial?.forEach(f => { statusMap[f.related_purchase_id!] = f.status; });
 
-                fetchedOrders = fetchedOrders.map(o => ({
-                    ...o,
-                    requests: o.requests.map(r => ({ ...r, financial_status: statusMap[r.id] || 'none' }))
-                }));
-            }
-
-            const { data: { user } } = await supabase.auth.getUser();
-            const { data: profile } = await supabase.from('profiles').select('roles, role').eq('id', user?.id).single();
-            let roles = profile?.roles || (profile?.role ? [profile.role] : []);
-
-            if (!roles.includes('admin') && !roles.includes('approver') && !roles.includes('financial')) {
-                fetchedOrders = fetchedOrders.filter(o => o.created_by === user?.id);
-            }
-
-            setOrders(fetchedOrders);
-            const userIds = (fetchedOrders || []).map((o: PurchaseOrder) => o.created_by).concat((fetchedOrders || []).flatMap((o: PurchaseOrder) => o.requests.map((r: PurchaseRequest) => r.user_id || '')));
-            fetchProfilesForUsers(userIds as string[]);
-
-            // Check URL for direct order open
-            const params = new URLSearchParams(window.location.search);
-            const openOrderId = params.get('openOrder');
-            if (openOrderId) {
-                const found = fetchedOrders.find(o => o.id === openOrderId);
-                if (found) {
-                    openManageOrder(found, true);
-                    // Clear param to avoid re-opening on simple refresh if desired, or keep it. Keeping for deep link feeling.
-                } else {
-                    // Try fetching single if not in list
-                    const { data: singleOrder, error: singleErr } = await supabase
-                        .from('purchase_orders')
-                        .select(`*, requests:purchase_requests(*)`)
-                        .eq('id', openOrderId)
-                        .single();
-
-                    if (singleOrder && !singleErr) {
-                        // Enrich single order with financial status
-                        const rIds = singleOrder.requests.map((r: any) => r.id);
-                        if (rIds.length > 0) {
-                            const { data: fin } = await supabase.from('financial_movements').select('related_purchase_id, status').in('related_purchase_id', rIds);
-                            const sMap: Record<string, any> = {};
-                            fin?.forEach((f: any) => sMap[f.related_purchase_id] = f.status);
-                            singleOrder.requests = singleOrder.requests.map((r: any) => ({ ...r, financial_status: sMap[r.id] || 'none' }));
-                        }
-
-                        setOrders(prev => [singleOrder, ...prev.filter(p => p.id !== singleOrder.id)]);
-                        openManageOrder(singleOrder, true);
-                    }
-                }
-            }
-        }
-        setLoading(false);
-    }
-
-    const toggleOrder = (id: string) => {
-        setExpandedOrders(prev => ({ ...prev, [id]: !prev[id] }));
-    }
 
     // --- MANAGE ORDER LOGIC ---
     function openManageOrder(order: PurchaseOrder, readOnly: boolean = false) {
@@ -327,478 +175,72 @@ const Purchases = () => {
                 });
             }
         }
-        setManageOrderData({
-            id: order.id,
-            nickname: order.nickname,
-            supplier_id: order.supplier_id || 'default',
-            items: order.requests
-        });
+        setSelectedOrderId(order.id);
         setIsManageOrderReadOnly(readOnly);
         setIsManageOrderOpen(true);
     }
 
-    async function handleAddItemToExistingOrder() {
-        if (!newItemDraft.item_name && !newItemDraft.ingredient_id) return toast({ title: "Preencha o item" });
 
-        let finalName = newItemDraft.item_name;
-        if (newItemDraft.ingredient_id && !finalName) {
-            const ing = ingredients.find(i => i.id === newItemDraft.ingredient_id);
-            finalName = ing?.name || 'Unknown';
-        }
-
-        try {
-            const { data: user } = await supabase.auth.getUser();
-            const userName = profiles[user.user?.id!] || 'Sistema';
-
-            await supabase.from('purchase_requests').insert({
-                order_id: manageOrderData.id,
-                item_name: finalName,
-                ingredient_id: newItemDraft.ingredient_id || null,
-                quantity: newItemDraft.quantity,
-                unit: newItemDraft.unit,
-                cost: newItemDraft.cost,
-                destination: newItemDraft.destination,
-                status: 'pending',
-                user_id: user.user?.id,
-                requested_by: userName
-            });
-
-            toast({ title: "Item adicionado ao lote" });
-            fetchData();
-            // Update modal data manually to show new item immediately
-            const { data: updatedReqs } = await supabase.from('purchase_requests').select('*').eq('order_id', manageOrderData.id);
-            if (updatedReqs) {
-                // Re-enrich with financial status (default none for new)
-                const enriched = updatedReqs.map(r => ({ ...r, financial_status: 'none' as const }));
-                setManageOrderData(prev => ({ ...prev, items: enriched }));
-            }
-            setNewItemDraft({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo' });
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: "Erro", description: e.message });
-        }
-    }
-
-    async function handleDeleteItemFromOrder(itemId: string, finStatus?: string) {
-        if (finStatus === 'paid') return toast({ variant: 'destructive', title: "Bloqueado", description: "Item já pago não pode ser excluído." });
-
-        const itemToDelete = manageOrderData.items.find(i => i.id === itemId);
-        if (!itemToDelete) return;
-
-        if (!confirm(`Remover "${itemToDelete.item_name}" do pedido?`)) return;
-
-        try {
-            if (itemToDelete.status === 'approved') {
-                await reverseStockAndFinancial(itemToDelete);
-                await supabase.from('financial_movements').delete().eq('related_purchase_id', itemId);
-            }
-
-            await supabase.from('purchase_requests').delete().eq('id', itemId);
-
-            // Re-fetch everything to ensure data integrity
-            fetchData();
-
-            // Update local modal state
-            const updatedItems = manageOrderData.items.filter(i => i.id !== itemId);
-            setManageOrderData(prev => ({ ...prev, items: updatedItems }));
-
-            toast({ title: "Item removido e estoque/financeiro revertidos" });
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: "Erro", description: e.message });
-        }
-    }
-
-    async function saveManageOrderHeader() {
-        try {
-            await supabase.from('purchase_orders').update({
-                nickname: manageOrderData.nickname,
-                supplier_id: manageOrderData.supplier_id === 'default' ? null : manageOrderData.supplier_id
-            }).eq('id', manageOrderData.id);
-            toast({ title: "Dados atualizados" });
-            setIsManageOrderOpen(false);
-            fetchData();
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: "Erro", description: e.message });
-        }
-    }
 
     // --- Order Logic ---
-    function addItemToDraft() {
-        if (!draftItem.item_name && !draftItem.ingredient_id) return toast({ title: "Nome ou produto obrigatório" });
-        let finalName = draftItem.item_name;
-        if (draftItem.ingredient_id && !finalName) {
-            const ing = ingredients.find(i => i.id === draftItem.ingredient_id);
-            finalName = ing?.name || 'Unknown';
-        }
-        setOrderItems([...orderItems, { ...draftItem, item_name: finalName }]);
-        setDraftItem({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo', ingredient_id: undefined });
-    }
-
-    function removeItemFromDraft(index: number) {
-        const newItems = [...orderItems];
-        newItems.splice(index, 1);
-        setOrderItems(newItems);
-    }
-
-    async function handleSaveOrder() {
-        if (orderItems.length === 0) return toast({ variant: 'destructive', title: 'Adicione pelo menos um item' });
-        if (!newOrderNickname) return toast({ variant: 'destructive', title: 'Defina um apelido para a compra' });
-
-        setIsSavingOrder(true);
-        try {
-            const { data: user } = await supabase.auth.getUser();
-            const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', user.user?.id).single();
-            const requestedByName = profile?.full_name || user.user?.user_metadata?.full_name || 'Comprador';
-
-            const { data: order, error: orderError } = await supabase.from('purchase_orders').insert({
-                nickname: newOrderNickname,
-                supplier_id: newOrderSupplier === 'default' ? null : newOrderSupplier,
-                created_by: user.user?.id,
-                total_value: orderItems.reduce((acc, i) => acc + Number(i.cost), 0)
-            }).select().single();
-
-            if (orderError) throw orderError;
-
-            const requestsPayload = orderItems.map(item => ({
-                order_id: order.id,
-                item_name: item.item_name,
-                ingredient_id: item.ingredient_id || null,
-                quantity: item.quantity,
-                unit: item.unit,
-                cost: item.cost,
-                destination: item.destination,
-                status: 'pending',
-                user_id: user.user?.id,
-                requested_by: requestedByName
-            }));
-
-            const { error: itemsError } = await supabase.from('purchase_requests').insert(requestsPayload);
-            if (itemsError) throw itemsError;
-
-            toast({ title: "Pedido de Compra criado!" });
+    // --- Order Logic ---
+    async function handleCreateOrder(nickname: string, supplierId: string, items: any[]) {
+        const success = await createOrder(nickname, supplierId, items, currentUserId || '');
+        if (success) {
             setIsOrderDialogOpen(false);
-            setOrderItems([]);
-            setNewOrderNickname("");
-            fetchData();
-        } catch (error: any) {
-            toast({ variant: 'destructive', title: 'Erro ao salvar', description: error.message });
-        } finally {
-            setIsSavingOrder(false);
-        }
-    }
-
-    async function handleDeleteOrder(orderId: string) {
-        const order = orders.find(o => o.id === orderId);
-        const hasPaidItem = order?.requests.some(r => r.financial_status === 'paid');
-        if (hasPaidItem) {
-            return toast({
-                title: "Exclusão Bloqueada",
-                description: "Este lote contém itens já pagos. O Financeiro precisa estornar a baixa antes de excluir o pedido.",
-                variant: "destructive"
-            });
-        }
-        if (!confirm("Excluir este pedido excluirá TODOS os itens dele e reverterá estoque se aprovado. Confirmar?")) return;
-        try {
-            const { data: reqs } = await supabase.from('purchase_requests').select('id, status, ingredient_id, item_name, quantity, destination, cost').eq('order_id', orderId);
-            if (reqs) {
-                for (const r of reqs) {
-                    if (r.status === 'approved') await reverseStockAndFinancial(r);
-                    await supabase.from('financial_movements').delete().eq('related_purchase_id', r.id);
-                }
-                await supabase.from('purchase_requests').delete().eq('order_id', orderId);
-            }
-            await supabase.from('purchase_orders').delete().eq('id', orderId);
-            toast({ title: "Pedido excluído" });
-            fetchData();
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: "Erro", description: e.message });
-        }
-    }
-
-    async function reverseStockAndFinancial(item: any) {
-        let ingId = item.ingredient_id;
-        if (!ingId) {
-            const normName = normalizeString(item.item_name);
-            const { data: allIngs } = await supabase.from('ingredients').select('id, name');
-            const match = allIngs?.find(i => normalizeString(i.name) === normName);
-            if (match) ingId = match.id;
-        }
-
-        if (ingId) {
-            const { data: currentIng } = await supabase.from('ingredients').select('*').eq('id', ingId).single();
-            if (currentIng && currentIng.type !== 'expense') {
-                const targetStockField = item.destination === 'adriel' ? 'stock_adriel' : 'stock_danilo';
-                const currentStock = currentIng[targetStockField] || 0;
-
-                // Use factor in reverse too
-                const isPurchaseUnit = item.unit === currentIng.purchase_unit;
-                const factor = isPurchaseUnit ? (Number(currentIng.purchase_unit_factor) || 1) : 1;
-                const qtyToReverse = Number(item.quantity) * factor;
-
-                const newStock = Math.max(0, currentStock - qtyToReverse);
-                await supabase.from('ingredients').update({ [targetStockField]: newStock }).eq('id', ingId);
-            }
-        }
-    }
-
-    async function handleApproveItem(item: PurchaseRequest, approved: boolean) {
-        try {
-            const newStatus = approved ? 'approved' : 'rejected';
-
-            if (approved) {
-                let ingId = item.ingredient_id;
-                if (!ingId) {
-                    const normalizedItemName = normalizeString(item.item_name);
-                    const match = ingredients.find(i => normalizeString(i.name) === normalizedItemName);
-                    if (match) ingId = match.id;
-                    console.log(`[Approve] Ingredient lookup by name: "${item.item_name}" (norm: "${normalizedItemName}") -> ${ingId ? 'Found (' + ingId + ')' : 'Not Found'}`);
-                }
-
-                if (ingId) {
-                    const { data: freshIng, error: fetchErr } = await supabase.from('ingredients').select('*').eq('id', ingId).single();
-                    if (fetchErr) throw new Error("Falha ao buscar dados atuais do ingrediente");
-
-                    if (freshIng) {
-                        // Skip stock update for Expense items
-                        if (freshIng.type === 'expense') {
-                            console.log(`[Approve] Item is Expense type. Skipping stock update.`);
-                        } else {
-                            // Updated Conversion Logic (Primary/Secondary + Legacy)
-                            const isPrimary = (item.unit || '').trim().toLowerCase() === (freshIng.unit || '').trim().toLowerCase();
-                            const isSecondary = (item.unit || '').trim().toLowerCase() === (freshIng.unit_type || '').trim().toLowerCase();
-                            const isLegacyPurchase = (item.unit || '').trim().toLowerCase() === (freshIng.purchase_unit || '').trim().toLowerCase();
-
-                            let factor = 1;
-                            if (isPrimary) {
-                                factor = 1;
-                            } else if (isSecondary) {
-                                factor = Number(freshIng.unit_weight) || 1;
-                            } else if (isLegacyPurchase) {
-                                factor = Number(freshIng.purchase_unit_factor) || 1;
-                            } else {
-                                // Fallback: If unit names match roughly (e.g. 'un' vs 'UN')
-                                console.warn(`[Approve] Unit mismatch: Request=${item.unit}, Stock=${freshIng.unit}. Assumed factor 1.`);
-                            }
-
-                            const convertedQty = Number(item.quantity) * factor;
-
-                            const targetField = item.destination === 'adriel' ? 'stock_adriel' : 'stock_danilo';
-                            const targetCostField = item.destination === 'adriel' ? 'cost_adriel' : 'cost_danilo';
-
-                            const currentOwnerStock = freshIng[targetField] || 0;
-                            const currentOwnerCost = freshIng[targetCostField] || 0;
-
-                            const newOwnerStock = currentOwnerStock + convertedQty;
-                            const newOwnerAvg = ((currentOwnerStock * (currentOwnerCost || 0)) + Number(item.cost)) / newOwnerStock;
-
-                            const totalStock = (freshIng.stock_danilo || 0) + (freshIng.stock_adriel || 0);
-                            const newTotalStock = totalStock + convertedQty;
-                            const newGlobalAvg = ((totalStock * (freshIng.cost || 0)) + Number(item.cost)) / newTotalStock;
-
-                            console.log(`[Approve] Calc: Factor=${factor}, ConvertedQty=${convertedQty}, OldStock=${currentOwnerStock}, NewStock=${newOwnerStock}, NewAvg=${newOwnerAvg}`);
-
-                            const { error: updateErr } = await supabase.from('ingredients').update({
-                                [targetField]: newOwnerStock,
-                                [targetCostField]: isNaN(newOwnerAvg) ? currentOwnerCost : newOwnerAvg,
-                                cost: isNaN(newGlobalAvg) ? (freshIng.cost || 0) : newGlobalAvg
-                            }).eq('id', ingId);
-
-                            if (updateErr) throw new Error("Falha ao atualizar estoque/custo");
-                        }
-                    }
-                } else {
-                    console.warn(`[Approve] No ingredient found for "${item.item_name}". Stock not updated.`);
-                }
-
-                if (item.cost > 0) {
-                    const { data: existing } = await supabase.from('financial_movements').select('id').eq('related_purchase_id', item.id).single();
-                    const movementPayload = {
-                        description: `Compra: ${item.item_name}`,
-                        amount: -Math.abs(Number(item.cost)),
-                        type: 'expense' as const,
-                        status: 'pending' as const,
-                        related_purchase_id: item.id,
-                        due_date: new Date().toISOString()
-                    };
-                    if (existing) await supabase.from('financial_movements').update(movementPayload).eq('id', existing.id);
-                    else await supabase.from('financial_movements').insert(movementPayload);
-                }
-
-            } else if (!approved && item.status === 'approved') {
-                await reverseStockAndFinancial(item);
-                await supabase.from('financial_movements').delete().eq('related_purchase_id', item.id);
-            }
-
-            const { error: statusErr } = await supabase.from('purchase_requests').update({ status: newStatus }).eq('id', item.id);
-            if (statusErr) throw new Error("Falha ao atualizar status do pedido");
-
-            toast({ title: `Item ${approved ? 'Aprovado' : 'Rejeitado'}` });
-
-            // Refresh everything
-            fetchData();
-            fetchMeta();
-
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: "Erro", description: e.message });
+            fetchOrders();
         }
     }
 
 
 
-    // --- Edit & History Logic ---
-    async function handleRequestEdit(item: PurchaseRequest) {
-        if (item.financial_status === 'paid') {
-            return toast({
-                variant: 'destructive',
-                title: "Bloqueado",
-                description: "Este item já foi pago. Para editar, o Financeiro precisa estornar a baixa primeiro."
-            });
-        }
-        setItemToRequestEdit(item);
-        setEditReason("");
-        setIsEditRequestOpen(true);
-    }
 
-    async function submitEditRequest() {
-        if (!itemToRequestEdit) return;
-        try {
-            await supabase.from('purchase_requests').update({ status: 'edit_requested', change_reason: editReason }).eq('id', itemToRequestEdit.id);
-            await supabase.from('purchase_edits_history').insert({
-                purchase_request_id: itemToRequestEdit.id,
-                changed_by: currentUserId,
-                change_reason: editReason,
-                field_changed: 'status',
-                old_value: itemToRequestEdit.status,
-                new_value: 'edit_requested'
-            });
-            toast({ title: "Solicitação enviada" });
-            setIsEditRequestOpen(false);
-            fetchData();
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: "Erro", description: e.message });
-        }
-    }
+    // Reverting: I will NOT replace handleDeleteOrder blindly. I'll just fix fetchData call inside it.
+    // So I am removing this chunk from the request and will do a global replace for fetchData -> fetchOrders.
 
-    async function handleAuthorizeEdit(item: PurchaseRequest, approved: boolean) {
-        try {
-            if (approved) {
-                // IMMEDIATE STOCK REVERSAL upon authorization
-                await reverseStockAndFinancial(item);
-                await supabase.from('financial_movements').delete().eq('related_purchase_id', item.id);
-            }
 
-            const nextStatus = approved ? 'edit_approved' : 'approved';
-            await supabase.from('purchase_requests').update({ status: nextStatus }).eq('id', item.id);
-            toast({ title: approved ? "Edição Autorizada e Estoque Revertido" : "Solicitação Negada" });
-            fetchData();
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: "Erro", description: e.message });
-        }
-    }
 
-    async function handleSendToApproval(item: PurchaseRequest) {
-        if (!confirm("Enviar este item para re-aprovação? Ele será removido do estoque até ser aprovado novamente.")) return;
-        try {
-            // Se já estava aprovado, reverte antes de mudar pra pendente. 
-            // Se estiver 'edit_approved', JÁ FOI revertido na autorização, então não reverte de novo.
-            if (item.status === 'approved') {
-                await reverseStockAndFinancial(item);
-                await supabase.from('financial_movements').delete().eq('related_purchase_id', item.id);
-            }
-            await supabase.from('purchase_requests').update({ status: 'pending' }).eq('id', item.id);
-            toast({ title: "Enviado para aprovação" });
-            fetchData();
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: "Erro", description: e.message });
-        }
-    }
+
+
+
+
+
+
 
     function openEditItem(item: PurchaseRequest) {
-        if (item.financial_status === 'paid') {
-            return toast({
-                variant: 'destructive',
-                title: "Bloqueado",
-                description: "Este item já foi pago. Para editar, o Financeiro precisa estornar a baixa primeiro."
-            });
-        }
         setEditingItem(item);
-        setEditedValues({ quantity: item.quantity, cost: item.cost, item_name: item.item_name, unit: item.unit, ingredient_id: item.ingredient_id, destination: item.destination || 'danilo' });
+        setEditedValues({
+            quantity: item.quantity,
+            cost: item.cost,
+            item_name: item.item_name,
+            unit: item.unit,
+            ingredient_id: item.ingredient_id,
+            destination: item.destination || 'danilo'
+        });
         setIsEditItemOpen(true);
     }
 
     async function saveEditItem() {
         if (!editingItem) return;
         try {
-            const oldData = { q: editingItem.quantity, c: editingItem.cost, n: editingItem.item_name };
-            const newData = { q: editedValues.quantity, c: editedValues.cost, n: editedValues.item_name };
-
-            // Se o item já estava autorizado para edição (era aprovado antes), o estoque JÁ FOI revertido na autorização.
-            // Apenas salvamos os novos dados.
-
-            await supabase.from('purchase_requests').update({
+            const { error } = await supabase.from('purchase_requests').update({
                 quantity: editedValues.quantity,
                 cost: editedValues.cost,
                 item_name: editedValues.item_name,
                 unit: editedValues.unit,
-                ingredient_id: editedValues.ingredient_id,
-                destination: editedValues.destination,
-                status: editingItem.status === 'edit_approved' ? 'pending' : editingItem.status // Volta pra pendente se era edit_approved
+                ingredient_id: editedValues.ingredient_id || null,
+                destination: editedValues.destination
             }).eq('id', editingItem.id);
 
-            await supabase.from('purchase_edits_history').insert({
-                purchase_request_id: editingItem.id,
-                changed_by: currentUserId,
-                change_reason: "Edição de valores",
-                field_changed: 'details',
-                old_value: `Qtd: ${oldData.q}, Total: ${oldData.c}, Nome: ${oldData.n}`,
-                new_value: `Qtd: ${newData.q}, Total: ${newData.c}, Nome: ${newData.n}`
-            });
+            if (error) throw error;
 
             toast({ title: "Item atualizado" });
             setIsEditItemOpen(false);
-            fetchData();
-
-            if (isManageOrderOpen && manageOrderData.items) {
-                const updatedItems = manageOrderData.items.map(item =>
-                    item.id === editingItem.id ? { ...item, ...editedValues, status: editingItem.status === 'edit_approved' ? 'pending' : item.status } : item
-                );
-                setManageOrderData({ ...manageOrderData, items: updatedItems });
-            }
+            fetchOrders();
         } catch (e: any) {
             toast({ variant: 'destructive', title: "Erro", description: e.message });
         }
     }
-
-    async function openHistory(item: PurchaseRequest) {
-        const { data } = await supabase.from('purchase_edits_history').select('*').eq('purchase_request_id', item.id).order('changed_at', { ascending: false });
-        if (data && data.length > 0) {
-            const uids = data.map(d => d.changed_by).filter(Boolean);
-            fetchProfilesForUsers(uids as string[]);
-        }
-        setHistoryLogs(data || []);
-        setIsHistoryOpen(true);
-    }
-
-    async function handleApproveAll(order: PurchaseOrder) {
-        const pending = order.requests.filter(r => r.status === 'pending');
-        if (pending.length === 0) return toast({ title: "Nada pendente para aprovar." });
-
-        if (!confirm(`Confirmar aprovação de todos os ${pending.length} itens pendentes?`)) return;
-
-        setLoading(true);
-        try {
-            // Process sequentially to avoid race conditions on stock updates
-            for (const item of pending) {
-                await handleApproveItem(item, true);
-            }
-            toast({ title: "Todos os itens aprovados!" });
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: "Erro na aprovação em lote", description: e.message });
-        } finally {
-            setLoading(false);
-            fetchData();
-        }
-    }
-
     async function handleSaveProduct() {
         try {
             if (!newProduct.name) return;
@@ -841,9 +283,6 @@ const Purchases = () => {
             // Refresh suppliers and select the new one if a modal is open
             await fetchMeta();
 
-            if (isOrderDialogOpen) setNewOrderSupplier(data.id);
-            if (isManageOrderOpen) setManageOrderData(prev => ({ ...prev, supplier_id: data.id }));
-
         } catch (e: any) {
             toast({ variant: 'destructive', title: "Erro", description: e.message });
         }
@@ -851,7 +290,7 @@ const Purchases = () => {
 
     async function handleSyncStock() {
         if (!confirm("Recalcular estoque e custos médios? Isso reconstruirá os valores com base apenas nos pedidos 'Aprovados'.")) return;
-        setLoading(true);
+        // setLoading removed
         try {
             const { data: allApproved } = await supabase.from('purchase_requests').select('*').eq('status', 'approved');
             const { data: currentIngs } = await supabase.from('ingredients').select('*');
@@ -909,12 +348,12 @@ const Purchases = () => {
                 }).eq('id', id);
             }
             toast({ title: "Estoques e Custos recalculados com sucesso" });
-            fetchData();
+            fetchOrders();
             fetchMeta();
         } catch (error: any) {
             toast({ variant: "destructive", title: "Erro na sincronização", description: error.message });
         } finally {
-            setLoading(false);
+            // setLoading removed
         }
     }
 
@@ -977,7 +416,7 @@ const Purchases = () => {
                         <Button variant="outline" onClick={handleSyncStock} disabled={loading} className="text-orange-600 border-orange-200">
                             <RotateCcw className="mr-2 h-4 w-4" /> Sync
                         </Button>
-                        <Button onClick={() => { setNewOrderNickname(`Compra ${new Date().toLocaleDateString()}`); setIsOrderDialogOpen(true); }}>
+                        <Button onClick={() => setIsOrderDialogOpen(true)} variant="gradient">
                             <Plus className="mr-2 h-4 w-4" /> Novo Pedido
                         </Button>
                     </div>
@@ -995,752 +434,174 @@ const Purchases = () => {
                 </div>
             </div>
 
-            {loading ? <div className="p-8 text-center"><Loader2 className="animate-spin h-8 w-8 mx-auto" /></div> : (
-                <div className="space-y-4">
-                    {filteredOrders.map(order => (
-                        <Card key={order.id} className="overflow-hidden">
-                            <div className="flex items-center justify-between p-4 bg-zinc-50/50 cursor-pointer hover:bg-zinc-100/50 transition-colors" onClick={() => toggleOrder(order.id)}>
-                                <div className="flex items-center gap-4">
-                                    <Button variant="ghost" size="sm" className="p-0 h-6 w-6">
-                                        {expandedOrders[order.id] ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                    </Button>
-                                    <div>
-                                        <h3 className="font-semibold text-lg flex items-center gap-2">
-                                            {order.nickname}
-                                            <Badge variant="outline" className={`text-[10px] font-normal px-2 ${getOrderStatus(order).color}`}>
-                                                {getOrderStatus(order).label}
-                                            </Badge>
-                                            <span className="text-xs font-normal text-zinc-400">por {profiles[order.created_by] || '...'}</span>
-                                        </h3>
-                                        <div className="text-sm text-zinc-500 flex gap-4">
-                                            <span>{new Date(order.created_at).toLocaleDateString()}</span>
-                                            <span>{order.requests?.length || 0} itens</span>
-                                            <span className="font-medium text-zinc-700">{formatCurrency(order.requests?.reduce((acc, req) => acc + Number(req.cost), 0) || 0)}</span>
+            {loading ? (
+                <div className="flex justify-center p-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
+                </div>
+            ) : filteredOrders.length === 0 ? (
+                <EmptyState
+                    icon={Package}
+                    title="Nenhum pedido encontrado"
+                    description={
+                        filterStatus !== 'all'
+                            ? `Não há pedidos com o status "${filterStatus}".`
+                            : "Comece criando um novo pedido de compra."
+                    }
+                    actionLabel="Novo Pedido"
+                    onAction={() => setIsOrderDialogOpen(true)}
+                    actionVariant="gradient"
+                    className="border-2 border-dashed border-zinc-200 bg-transparent shadow-none"
+                />
+            ) : (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    <AnimatePresence>
+                        {filteredOrders.map(order => {
+                            const status = getOrderStatus(order);
+                            return (
+                                <motion.div
+                                    key={order.id}
+                                    layoutId={order.id}
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95 }}
+                                    whileHover={{ scale: 1.02 }}
+                                    transition={{ duration: 0.2 }}
+                                >
+                                    <Card
+                                        className="p-4 hover:shadow-lg transition-shadow cursor-pointer relative overflow-hidden group border-zinc-200"
+                                        onClick={() => openManageOrder(order)}
+                                    >
+                                        <div className={`absolute top-0 left-0 w-1 h-full ${status.value === 'approved' ? 'bg-green-500' : status.value === 'pending' ? 'bg-yellow-500' : status.value === 'rejected' ? 'bg-red-500' : status.value === 'editing' ? 'bg-indigo-500' : 'bg-gray-300'}`} />
+                                        <div className="flex justify-between items-start mb-2 pl-3">
+                                            <div>
+                                                <h3 className="font-bold text-lg">{order.nickname}</h3>
+                                                <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1">
+                                                    <Clock className="h-3 w-3" />
+                                                    {new Date(order.created_at).toLocaleDateString()}
+                                                    <span>•</span>
+                                                    <span>{profilesCache[order.created_by] || '...'}</span>
+                                                </div>
+                                            </div>
+                                            <Badge variant="secondary" className={status.color}>{status.label}</Badge>
                                         </div>
-                                    </div>
-                                </div>
-                                <div className="flex gap-2 items-center" onClick={e => e.stopPropagation()}>
-                                    {(userRoles.includes('admin') || userRoles.includes('approver')) && (
-                                        <>
-                                            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleApproveAll(order); }} title="Aprovar Lote Pendente" className="text-green-600 hover:bg-green-50">
-                                                <CheckCheck className="h-4 w-4" />
-                                            </Button>
-                                            <Button variant="ghost" size="icon" onClick={() => openManageOrder(order)} title="Gerenciar Lote" className="text-blue-500 hover:bg-blue-50">
-                                                <Pencil className="h-4 w-4" />
-                                            </Button>
-                                            <Button variant="ghost" size="icon" onClick={() => handleDeleteOrder(order.id)} className="text-red-400 hover:text-red-600">
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
-                                        </>
-                                    )}
-                                </div>
-                            </div>
 
-                            {expandedOrders[order.id] && (
-                                <div className="p-4 pt-0 border-t">
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>Item</TableHead><TableHead>Qtd</TableHead><TableHead>Valor</TableHead><TableHead>Status</TableHead><TableHead>Destino</TableHead><TableHead>Solicitante</TableHead><TableHead className="text-right">Ações</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {order.requests?.map(req => (
-                                                <TableRow key={req.id}>
-                                                    <TableCell className="font-medium">
-                                                        {req.item_name}
-                                                        {req.change_reason && <div className="text-[10px] text-orange-600 ml-2" title={req.change_reason}>Obs: {req.change_reason}</div>}
-                                                    </TableCell>
-                                                    <TableCell>{req.quantity} {req.unit}</TableCell>
-                                                    <TableCell>{formatCurrency(req.cost)}</TableCell>
-                                                    <TableCell>
-                                                        <div className="flex flex-col gap-1">
-                                                            <Badge className={req.status === 'approved' ? 'bg-green-600' : ''}>{formatStatus(req.status)}</Badge>
-                                                            {req.financial_status === 'paid' && <Badge variant="outline" className="text-[10px] border-green-200 text-green-700 bg-green-50 w-fit">PAGO</Badge>}
+                                        <div className="pl-3 mt-4 flex justify-between items-end">
+                                            <div>
+                                                <p className="text-xs text-zinc-500 uppercase tracking-widest font-semibold">Total estimado</p>
+                                                <p className="text-xl font-bold text-zinc-900">{formatCurrency(order.requests?.reduce((acc, r) => acc + (Number(r.cost) || 0), 0) || 0)}</p>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-xs text-zinc-400">{order.requests?.length || 0} itens</p>
+                                                <div className="flex -space-x-2 mt-1 justify-end">
+                                                    {order.requests?.slice(0, 3).map((r, i) => (
+                                                        <div key={i} className="h-6 w-6 rounded-full bg-zinc-100 border-2 border-white flex items-center justify-center text-[10px] text-zinc-500" title={r.item_name || 'Item sem nome'}>
+                                                            {(r.item_name || '?').charAt(0).toUpperCase()}
                                                         </div>
-                                                    </TableCell>
-                                                    <TableCell className="capitalize">{req.destination}</TableCell>
-                                                    <TableCell className="text-xs text-muted-foreground capitalize">{profiles[req.user_id || ''] || req.requested_by}</TableCell>
-                                                    <TableCell className="text-right flex justify-end gap-1 items-center">
-                                                        <Button variant="ghost" size="icon" onClick={() => openHistory(req)} title="Histórico"><Clock className="h-3 w-3 text-zinc-400" /></Button>
-
-                                                        {(userRoles.includes('admin') || userRoles.includes('approver')) && req.status === 'pending' && (
-                                                            <>
-                                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-green-600" onClick={() => handleApproveItem(req, true)} title="Aprovar"><Check className="h-3 w-3" /></Button>
-                                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-red-600" onClick={() => handleApproveItem(req, false)} title="Rejeitar"><X className="h-3 w-3" /></Button>
-                                                            </>
-                                                        )}
-
-                                                        {(userRoles.includes('admin') || userRoles.includes('approver')) && req.status === 'edit_requested' && (
-                                                            <>
-                                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-blue-600" onClick={() => handleAuthorizeEdit(req, true)} title="Autorizar Edição"><Check className="h-3 w-3" /></Button>
-                                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-zinc-400" onClick={() => handleAuthorizeEdit(req, false)} title="Negar Edição"><X className="h-3 w-3" /></Button>
-                                                            </>
-                                                        )}
-
-                                                        {(userRoles.includes('buyer') || userRoles.includes('admin')) && req.status === 'approved' && (
-                                                            <Button size="sm" variant="ghost" onClick={() => handleRequestEdit(req)} title="Solicitar Edição"><Pencil className="h-3 w-3" /></Button>
-                                                        )}
-
-                                                        {(userRoles.includes('buyer') || userRoles.includes('admin')) && req.status === 'edit_approved' && (
-                                                            <div className="flex gap-1">
-                                                                <Button size="sm" variant="ghost" onClick={() => openEditItem(req)} title="Editar Agora"><Pencil className="h-3 w-3 text-orange-500" /></Button>
-                                                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-1" onClick={() => handleSendToApproval(req)}>Enviar p/ Aprovação</Button>
-                                                            </div>
-                                                        )}
-
-                                                        {(userRoles.includes('buyer') || userRoles.includes('admin')) && req.status === 'pending' && (
-                                                            <Button size="sm" variant="ghost" onClick={() => openEditItem(req)}><Pencil className="h-3 w-3" /></Button>
-                                                        )}
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                </div>
-                            )}
-                        </Card>
-                    ))}
+                                                    ))}
+                                                    {(order.requests?.length || 0) > 3 && (
+                                                        <div className="h-6 w-6 rounded-full bg-zinc-100 border-2 border-white flex items-center justify-center text-[8px] text-zinc-500">
+                                                            +{(order.requests?.length || 0) - 3}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </Card>
+                                </motion.div>
+                            );
+                        })}
+                    </AnimatePresence>
                 </div>
             )}
 
-            {/* Modal: New Order */}
-            <Dialog open={isOrderDialogOpen} onOpenChange={setIsOrderDialogOpen}>
-                <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader><DialogTitle>Novo Pedido</DialogTitle></DialogHeader>
-                    <div className="grid gap-4 py-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2"><Label>Fornecedor</Label>
-                                <div className="flex gap-2">
-                                    <Select value={newOrderSupplier} onValueChange={(val) => {
-                                        setNewOrderSupplier(val);
-                                        if (val !== 'default') {
-                                            const sup = suppliers.find(s => s.id === val);
-                                            if (sup) setNewOrderNickname(`${sup.name} - ${new Date().toLocaleDateString()}`);
-                                        } else {
-                                            setNewOrderNickname(`Compra - ${new Date().toLocaleDateString()}`);
-                                        }
-                                    }}>
-                                        <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger> <SelectContent><SelectItem value="default">Fornecedor (campo obrigatório)</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-                                    </Select>
-                                    <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
-                                        <Plus className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="space-y-2 px-1">
-                            <Label>Apelido</Label>
-                            <Input value={newOrderNickname} readOnly className="bg-zinc-100 text-zinc-500" />
-                        </div>
-                        <div className="border rounded p-4 bg-zinc-50 space-y-4">
-                            <div className="grid grid-cols-2 md:grid-cols-12 gap-2 items-end">
-                                <div className="col-span-2 md:col-span-3">
-                                    <Label className="text-[10px]">Produto</Label>
-                                    <div className="flex items-center gap-1">
-                                        <Select value={draftItem.ingredient_id || "custom"} onValueChange={(val) => {
-                                            if (val === 'custom') setDraftItem({ ...draftItem, ingredient_id: undefined, item_name: '' });
-                                            else {
-                                                const i = ingredients.find(x => x.id === val);
-                                                setDraftItem({ ...draftItem, ingredient_id: val, item_name: i?.name || '', unit: i?.unit || 'un' });
-                                            }
-                                        }}>
-                                            <SelectTrigger className="h-8 flex-1"><SelectValue /></SelectTrigger>
-                                            <SelectContent><SelectItem value="custom">Item (obrigatório)</SelectItem>{ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
-                                        </Select>
-                                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setIsProductDialogOpen(true)} title="Cadastrar Novo Ingrediente"><Plus className="h-3 w-3" /></Button>
-                                    </div>
-                                </div>
-                                <div className="col-span-1 md:col-span-2">
-                                    <Label className="text-[10px]">Unid. Selecionada</Label>
-                                    <Select
-                                        value={draftItem.unit || 'un'}
-                                        onValueChange={(val) => setDraftItem({ ...draftItem, unit: val })}
-                                    >
-                                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            {(() => {
-                                                const ing = ingredients.find(i => i.id === draftItem.ingredient_id);
-                                                if (!ing) return <SelectItem value="un">un</SelectItem>;
-                                                return (
-                                                    <>
-                                                        <SelectItem value={ing.unit}>Estoque ({ing.unit})</SelectItem>
-                                                        {ing.purchase_unit && <SelectItem value={ing.purchase_unit}>Compra ({ing.purchase_unit})</SelectItem>}
-                                                    </>
-                                                );
-                                            })()}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="col-span-1 md:col-span-2">
-                                    <Label className="text-[10px]">Destino</Label>
-                                    <Select value={draftItem.destination} onValueChange={(val: any) => setDraftItem({ ...draftItem, destination: val })}>
-                                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="danilo">Danilo</SelectItem>
-                                            <SelectItem value="adriel">Adriel</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="col-span-2 md:col-span-2">
-                                    <Label className="text-[10px]">Marca/Ref</Label>
-                                    <Input className="h-8" placeholder="Ex: Marca" value={draftItem.item_name} onChange={e => setDraftItem({ ...draftItem, item_name: e.target.value })} />
-                                </div>
-                                <div className="col-span-1 md:col-span-1">
-                                    <Label className="text-[10px]">Qtd</Label>
-                                    <Input className="h-8" type="number" placeholder="Qtd" value={draftItem.quantity || ''} onChange={e => setDraftItem({ ...draftItem, quantity: Number(e.target.value) })} />
-                                </div>
-                                <div className="col-span-1 md:col-span-2">
-                                    <Label className="text-[10px]">Total (R$)</Label>
-                                    <Input className="h-8" type="number" placeholder="R$" value={draftItem.cost || ''} onChange={e => setDraftItem({ ...draftItem, cost: Number(e.target.value) })} />
-                                </div>
-                                <div className="col-span-2 md:col-span-1"><Button onClick={addItemToDraft} size="sm" className="h-8 w-full md:w-8 px-2 md:p-0"><Plus className="h-4 w-4 mx-auto" /></Button></div>
-                            </div>
-                        </div>
-                        <div className="max-h-[200px] overflow-auto border bg-white rounded">
-                            <Table><TableBody>{orderItems.map((i, x) => <TableRow key={x}><TableCell>{i.item_name}</TableCell><TableCell>{i.quantity} {i.unit}</TableCell><TableCell>{i.cost}</TableCell><TableCell><Button variant="ghost" size="sm" onClick={() => removeItemFromDraft(x)}><Trash2 className="h-3 w-3 text-red-400" /></Button></TableCell></TableRow>)}</TableBody></Table>
-                        </div>
-                    </div>
-                    <DialogFooter><Button onClick={handleSaveOrder} disabled={isSavingOrder}>Salvar Pedido</Button></DialogFooter>
-                </DialogContent>
-            </Dialog>
 
-            {/* Modal: MANAGE ORDER */}
-            <Dialog open={isManageOrderOpen} onOpenChange={setIsManageOrderOpen}>
-                <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>{isManageOrderReadOnly ? 'Visualizar Lote / Pedido' : 'Gerenciar Lote / Pedido'}</DialogTitle>
-                    </DialogHeader>
-                    <div className="py-4 space-y-6">
-                        <div className="grid grid-cols-2 gap-4 border-b pb-4">
-                            <div className="space-y-2">
-                                <Label>Fornecedor</Label>
-                                <div className="flex gap-2">
-                                    <Select
-                                        value={manageOrderData.supplier_id}
-                                        onValueChange={(val) => setManageOrderData({ ...manageOrderData, supplier_id: val })}
-                                        disabled={isManageOrderReadOnly}
-                                    >
-                                        <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
-                                        <SelectContent><SelectItem value="default">Fornecedor (campo obrigatório)</SelectItem>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-                                    </Select>
-                                    {!isManageOrderReadOnly && (
-                                        <Button variant="outline" size="icon" onClick={() => setIsSupplierDialogOpen(true)} title="Novo Fornecedor">
-                                            <Plus className="h-4 w-4" />
-                                        </Button>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Apelido</Label>
-                                <Input
-                                    value={manageOrderData.nickname}
-                                    onChange={e => setManageOrderData({ ...manageOrderData, nickname: e.target.value })}
-                                    readOnly={isManageOrderReadOnly}
-                                    className={isManageOrderReadOnly ? "bg-zinc-100" : ""}
-                                />
-                            </div>
-                        </div>
+            <NewOrderDialog
+                isOpen={isOrderDialogOpen}
+                onOpenChange={setIsOrderDialogOpen}
+                suppliers={suppliers}
+                ingredients={ingredients}
+                onNewSupplier={() => setIsSupplierDialogOpen(true)}
+                onNewProduct={() => setIsProductDialogOpen(true)}
+                onCreate={handleCreateOrder}
+            />
 
-                        <div className="space-y-2">
-                            <h4 className="font-semibold text-sm text-zinc-700">Itens neste Lote ({manageOrderData.items.length})</h4>
-                            <div className="border rounded bg-white overflow-hidden max-h-[300px] overflow-y-auto">
-                                <Table>
-                                    <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qtd</TableHead><TableHead>Custo</TableHead><TableHead>Status</TableHead>{!isManageOrderReadOnly && <TableHead className="text-right">Ação</TableHead>}</TableRow></TableHeader>
-                                    <TableBody>
-                                        {manageOrderData.items.map(item => (
-                                            <TableRow key={item.id}>
-                                                <TableCell>{item.item_name}</TableCell>
-                                                <TableCell>{item.quantity} {item.unit}</TableCell>
-                                                <TableCell>{formatCurrency(item.cost)}</TableCell>
-                                                <TableCell>
-                                                    {item.financial_status === 'paid' ? <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge> : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>}
-                                                </TableCell>
-                                                {!isManageOrderReadOnly && (
-                                                    <TableCell className="text-right flex justify-end gap-1">
-                                                        {item.financial_status !== 'paid' && (
-                                                            <>
-                                                                <Button variant="ghost" size="sm" onClick={() => openEditItem(item)} className="h-6 w-6 p-0 text-blue-500">
-                                                                    <Pencil className="h-3 w-3" />
-                                                                </Button>
-                                                                <Button variant="ghost" size="sm" onClick={() => handleDeleteItemFromOrder(item.id, item.financial_status)} className="h-6 w-6 p-0 text-red-400">
-                                                                    <Trash2 className="h-3 w-3" />
-                                                                </Button>
-                                                            </>
-                                                        )}
-                                                    </TableCell>
-                                                )}
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        </div>
+            <ManageOrderDialog
+                isOpen={isManageOrderOpen}
+                onOpenChange={setIsManageOrderOpen}
+                isReadOnly={isManageOrderReadOnly}
+                order={selectedOrder}
+                suppliers={suppliers}
+                ingredients={ingredients}
+                onNewSupplier={() => setIsSupplierDialogOpen(true)}
+                onNewProduct={() => setIsProductDialogOpen(true)}
+                formatCurrency={formatCurrency}
+                formatStatus={formatStatus}
+                onEditItem={openEditItem}
 
-                        {!isManageOrderReadOnly && (
-                            <div className="pt-4 border-t space-y-3">
-                                <h4 className="font-semibold text-sm text-zinc-700">Adicionar Novo Item ao Lote</h4>
-                                <div className="grid grid-cols-2 md:grid-cols-12 gap-2 items-end bg-zinc-50 p-3 rounded border">
-                                    <div className="col-span-2 md:col-span-3">
-                                        <Label className="text-[10px]">Produto</Label>
-                                        <div className="flex items-center gap-1">
-                                            <Select
-                                                value={newItemDraft.ingredient_id || 'custom'}
-                                                onValueChange={(val) => {
-                                                    if (val === 'custom') setNewItemDraft({ ...newItemDraft, ingredient_id: undefined, item_name: '' });
-                                                    else {
-                                                        const i = ingredients.find(x => x.id === val);
-                                                        setNewItemDraft({ ...newItemDraft, ingredient_id: val, item_name: i?.name || '', unit: i?.unit || 'un' });
-                                                    }
-                                                }}
-                                            >
-                                                <SelectTrigger className="h-8 flex-1"><SelectValue /></SelectTrigger>
-                                                <SelectContent><SelectItem value="custom">Item (obrigatório)</SelectItem>{ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
-                                            </Select>
-                                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setIsProductDialogOpen(true)}><Plus className="h-3 w-3" /></Button>
-                                        </div>
-                                    </div>
-                                    <div className="col-span-1 md:col-span-2">
-                                        <Label className="text-[10px]">Unid. Selecionada</Label>
-                                        <Select
-                                            value={newItemDraft.unit || 'un'}
-                                            onValueChange={(val) => setNewItemDraft({ ...newItemDraft, unit: val })}
-                                        >
-                                            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                {(() => {
-                                                    const ing = ingredients.find(i => i.id === newItemDraft.ingredient_id);
-                                                    if (!ing) return <SelectItem value="un">un</SelectItem>;
-                                                    return (
-                                                        <>
-                                                            <SelectItem value={ing.unit}>Estoque ({ing.unit})</SelectItem>
-                                                            {ing.purchase_unit && <SelectItem value={ing.purchase_unit}>Compra ({ing.purchase_unit})</SelectItem>}
-                                                        </>
-                                                    );
-                                                })()}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="col-span-1 md:col-span-2">
-                                        <Label className="text-[10px]">Destino</Label>
-                                        <Select value={newItemDraft.destination} onValueChange={(val: any) => setNewItemDraft({ ...newItemDraft, destination: val })}>
-                                            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="danilo">Danilo</SelectItem>
-                                                <SelectItem value="adriel">Adriel</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="col-span-2 md:col-span-2">
-                                        <Label className="text-[10px]">Obs/Marca</Label>
-                                        <Input className="h-8" value={newItemDraft.item_name} onChange={e => setNewItemDraft({ ...newItemDraft, item_name: e.target.value })} />
-                                    </div>
-                                    <div className="col-span-1 md:col-span-1">
-                                        <Label className="text-[10px]">Qtd</Label>
-                                        <Input className="h-8" type="number" value={newItemDraft.quantity || ''} onChange={e => setNewItemDraft({ ...newItemDraft, quantity: Number(e.target.value) })} />
-                                    </div>
-                                    <div className="col-span-1 md:col-span-2">
-                                        <Label className="text-[10px]">Total (R$)</Label>
-                                        <Input className="h-8" type="number" value={newItemDraft.cost || ''} onChange={e => setNewItemDraft({ ...newItemDraft, cost: Number(e.target.value) })} />
-                                    </div>
-                                    <div className="col-span-2 md:col-span-1"><Button onClick={handleAddItemToExistingOrder} size="sm" className="h-8 w-full md:w-8 px-2 md:p-0" title="Adicionar ao lote"><Plus className="h-4 w-4 mx-auto" /></Button></div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsManageOrderOpen(false)}>Fechar</Button>
-                        {!isManageOrderReadOnly && <Button onClick={saveManageOrderHeader}>Salvar Cabeçalho</Button>}
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                currentUserId={currentUserId || ''}
+                onDeleteOrder={async (id) => {
+                    const success = await deleteOrder(id);
+                    if (success) setIsManageOrderOpen(false);
+                }}
+            />
 
-            {/* Modal: Edit Request */}
-            <Dialog open={isEditRequestOpen} onOpenChange={setIsEditRequestOpen}>
-                <DialogContent>
-                    <DialogHeader><DialogTitle>Solicitar Edição</DialogTitle></DialogHeader>
-                    <div className="py-4 space-y-4">
-                        <Label>Motivo da alteração</Label>
-                        <Textarea
-                            placeholder="Descreva por que este item precisa ser alterado..."
-                            value={editReason}
-                            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditReason(e.target.value)}
-                        />
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsEditRequestOpen(false)}>Cancelar</Button>
-                        <Button onClick={submitEditRequest} disabled={!editReason.trim()}>Enviar Solicitação</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
 
-            {/* Modal: Edit Item */}
-            <Dialog open={isEditItemOpen} onOpenChange={setIsEditItemOpen}>
-                <DialogContent>
-                    <DialogHeader><DialogTitle>Editar Item</DialogTitle></DialogHeader>
-                    {editingItem && (
-                        <div className="py-4 space-y-4">
-                            <div className="space-y-2">
-                                <Label>Nome / Marca</Label>
-                                <Label>Item (Estoque)</Label>
-                                <Select value={editedValues.ingredient_id || 'custom'} onValueChange={(val) => {
-                                    if (val !== 'custom') {
-                                        const i = ingredients.find(x => x.id === val);
-                                        setEditedValues({ ...editedValues, ingredient_id: val, item_name: i?.name || '', unit: i?.unit || 'un' });
-                                    }
-                                }}>
-                                    <SelectTrigger className="w-full"><SelectValue placeholder="Selecione o produto..." /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="custom" disabled>Selecione um produto da lista</SelectItem>
-                                        {ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Unidade</Label>
-                                    <Select value={editedValues.unit} onValueChange={(v) => setEditedValues({ ...editedValues, unit: v })}>
-                                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            {availableUnits.map(u => (
-                                                <SelectItem key={u} value={u}>{u}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Quantidade</Label>
-                                    <Input type="number" value={editedValues.quantity || ''} onChange={(e) => setEditedValues({ ...editedValues, quantity: Number(e.target.value) })} />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Custo Total R$</Label>
-                                    <Input type="number" value={editedValues.cost || ''} onChange={(e) => setEditedValues({ ...editedValues, cost: Number(e.target.value) })} />
-                                </div>
-                            </div>
-                            {(() => {
-                                const selectedIng = ingredients.find(i => i.id === editedValues.ingredient_id);
-                                const isExpense = selectedIng?.type === 'expense';
 
-                                if (isExpense) return null;
+            <EditItemDialog
+                isOpen={isEditItemOpen}
+                onOpenChange={setIsEditItemOpen}
+                editingItem={editingItem}
+                editedValues={editedValues}
+                onEditedValuesChange={setEditedValues}
+                ingredients={ingredients}
+                availableUnits={availableUnits}
+                onSave={saveEditItem}
+            />
 
-                                return (
-                                    <div className="space-y-2">
-                                        <Label>Estoque de Destino (Para onde vai?)</Label>
-                                        <Select value={editedValues.destination} onValueChange={(v: any) => setEditedValues({ ...editedValues, destination: v })}>
-                                            <SelectTrigger><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="danilo">Danilo</SelectItem>
-                                                <SelectItem value="adriel">Adriel</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                );
-                            })()}
-                            {editingItem.status === 'edit_approved' && (
-                                <div className="p-3 bg-orange-50 border border-orange-200 rounded text-xs text-orange-800">
-                                    <strong>Atenção:</strong> Ao salvar, o estoque será revertido e o item voltará para aprovação.
-                                </div>
-                            )}
-                        </div>
-                    )}
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsEditItemOpen(false)}>Cancelar</Button>
-                        <Button onClick={saveEditItem}>Salvar Alterações</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
 
-            {/* Modal: History */}
-            <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
-                <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-                    <DialogHeader><DialogTitle>Histórico de Alterações</DialogTitle></DialogHeader>
-                    <div className="py-4">
-                        {historyLogs.length === 0 ? (
-                            <p className="text-center text-zinc-500 py-8">Nenhuma alteração registrada para este item.</p>
-                        ) : (
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Data</TableHead>
-                                        <TableHead>Usuário</TableHead>
-                                        <TableHead>Motivo</TableHead>
-                                        <TableHead>Alteração</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {historyLogs.map(log => (
-                                        <TableRow key={log.id}>
-                                            <TableCell className="text-xs">{new Date(log.changed_at).toLocaleString()}</TableCell>
-                                            <TableCell className="text-xs">{profiles[log.changed_by || ''] || '...'}</TableCell>
-                                            <TableCell className="text-xs font-medium">{log.change_reason}</TableCell>
-                                            <TableCell className="text-xs">
-                                                <div className="flex flex-col gap-1">
-                                                    <span className="text-red-500 line-through">{log.old_value}</span>
-                                                    <span className="text-green-600">{log.new_value}</span>
-                                                </div>
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        )}
-                    </div>
-                </DialogContent>
-            </Dialog>
 
-            {/* Modal: Quick Product Creation */}
-            <Dialog open={isProductDialogOpen} onOpenChange={setIsProductDialogOpen}>
-                <DialogContent className="overflow-visible">
-                    <DialogHeader><DialogTitle>Cadastrar Novo Produto</DialogTitle></DialogHeader>
-                    <div className="py-4 space-y-4">
-                        <div className="space-y-2">
-                            <Label>Nome do Produto</Label>
-                            <Input value={newProduct.name || ''} onChange={e => setNewProduct({ ...newProduct, name: e.target.value })} placeholder="Ex: Fita de Cetim" />
-                        </div>
+            <QuickProductDialog
+                isOpen={isProductDialogOpen}
+                onOpenChange={setIsProductDialogOpen}
+                newProduct={newProduct}
+                onNewProductChange={setNewProduct}
+                availableCategories={availableCategories}
+                availableUnits={availableUnits}
+                onManageCategories={() => setIsManageCategoriesOpen(true)}
+                onManageUnits={() => setIsManageUnitsOpen(true)}
+                onSave={handleSaveProduct}
+            />
 
-                        <div className="space-y-2">
-                            <Label>Tipo de Produto</Label>
-                            <div className="flex gap-4">
-                                <label className="flex items-center space-x-2 border p-3 rounded-md w-full cursor-pointer hover:bg-zinc-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-200">
-                                    <input
-                                        type="radio"
-                                        name="productType"
-                                        value="stock"
-                                        checked={newProduct.type === 'stock' || !newProduct.type}
-                                        onChange={() => setNewProduct({ ...newProduct, type: 'stock' })}
-                                        className="text-blue-600"
-                                    />
-                                    <div className="flex flex-col">
-                                        <span className="font-medium text-sm">Estoque</span>
-                                        <span className="text-[10px] text-zinc-500">Controla quantidade e custos.</span>
-                                    </div>
-                                </label>
-                                <label className="flex items-center space-x-2 border p-3 rounded-md w-full cursor-pointer hover:bg-zinc-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-200">
-                                    <input
-                                        type="radio"
-                                        name="productType"
-                                        value="expense"
-                                        checked={newProduct.type === 'expense'}
-                                        onChange={() => setNewProduct({ ...newProduct, type: 'expense', unit_weight: 1, unit_type: '' })}
-                                        className="text-blue-600"
-                                    />
-                                    <div className="flex flex-col">
-                                        <span className="font-medium text-sm">Despesa</span>
-                                        <span className="text-[10px] text-zinc-500">Apenas registro financeiro.</span>
-                                    </div>
-                                </label>
-                            </div>
-                        </div>
+            <CreateSupplierDialog
+                isOpen={isSupplierDialogOpen}
+                onOpenChange={setIsSupplierDialogOpen}
+                supplierName={newSupplierName}
+                onSupplierNameChange={setNewSupplierName}
+                onSave={handleSaveSupplier}
+            />
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>Categoria</Label>
-                                <div className="flex gap-2">
-                                    <Select
-                                        value={newProduct.category}
-                                        onValueChange={(val) => setNewProduct({ ...newProduct, category: val })}
-                                    >
-                                        <SelectTrigger className="w-full">
-                                            <SelectValue placeholder="Selecione..." />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {availableCategories
-                                                .filter(c => c.type === (newProduct.type || 'stock'))
-                                                .map(c => <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>)
-                                            }
-                                        </SelectContent>
-                                    </Select>
-                                    <Button
-                                        variant="outline"
-                                        size="icon"
-                                        onClick={() => setIsManageCategoriesOpen(true)}
-                                        title="Nova Categoria"
-                                    >
-                                        <Plus className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Unidade Principal</Label>
-                                <div className="flex gap-2">
-                                    <Select
-                                        value={newProduct.unit}
-                                        onValueChange={(val) => setNewProduct({ ...newProduct, unit: val })}
-                                    >
-                                        <SelectTrigger className="w-full">
-                                            <SelectValue placeholder="Selecione..." />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {availableUnits.map(u => <SelectItem key={u} value={u}>{u.toUpperCase()}</SelectItem>)}
-                                        </SelectContent>
-                                    </Select>
-                                    <Button
-                                        variant="outline"
-                                        size="icon"
-                                        onClick={() => setIsManageUnitsOpen(true)}
-                                        title="Nova Unidade"
-                                    >
-                                        <Plus className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            </div>
-                        </div>
+            <ManageCategoriesDialog
+                isOpen={isManageCategoriesOpen}
+                onOpenChange={setIsManageCategoriesOpen}
+                newCategoryName={newCategoryName}
+                onNewCategoryNameChange={setNewCategoryName}
+                newCategoryType={newCategoryType}
+                onNewCategoryTypeChange={setNewCategoryType as any}
+                onAddCategory={handleAddCategory}
+                availableCategories={availableCategories}
+                onDeleteCategory={handleDeleteCategory}
+            />
 
-                        {/* Conversão Opcional (Apenas para Estoque) */}
-                        {(!newProduct.type || newProduct.type === 'stock') && (
-                            <div className="border rounded-md p-3 bg-zinc-50 space-y-3">
-                                <div className="flex items-center space-x-2">
-                                    <input
-                                        type="checkbox"
-                                        id="new-prod-conversion"
-                                        className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                                        checked={!!newProduct.unit_type}
-                                        onChange={(e) => {
-                                            if (e.target.checked) {
-                                                setNewProduct({ ...newProduct, unit_weight: 0, unit_type: 'g' });
-                                            } else {
-                                                setNewProduct({ ...newProduct, unit_weight: 1, unit_type: '' });
-                                            }
-                                        }}
-                                    />
-                                    <Label htmlFor="new-prod-conversion" className="text-sm font-medium cursor-pointer">
-                                        Habilitar conversão secundária (Receita)
-                                    </Label>
-                                </div>
-
-                                {(!!newProduct.unit_type) && (
-                                    <div className="grid grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2">
-                                        <div className="col-span-1 space-y-1">
-                                            <Label className="text-[10px]">Unid. Secundária</Label>
-                                            <Input
-                                                list="new-prod-sec-units"
-                                                value={newProduct.unit_type || ''}
-                                                onChange={(e) => setNewProduct({ ...newProduct, unit_type: e.target.value })}
-                                                className="h-8 text-xs"
-                                                placeholder="g, ml..."
-                                            />
-                                            <datalist id="new-prod-sec-units">
-                                                <option value="g" />
-                                                <option value="ml" />
-                                                <option value="fatias" />
-                                                <option value="un" />
-                                            </datalist>
-                                        </div>
-                                        <div className="col-span-2 space-y-1">
-                                            <Label className="text-[10px]">Fator de Conversão</Label>
-                                            <Input
-                                                type="number"
-                                                value={newProduct.unit_weight || ''}
-                                                onChange={(e) => setNewProduct({ ...newProduct, unit_weight: Number(e.target.value) })}
-                                                className="h-8 text-xs"
-                                                placeholder="Ex: 395"
-                                            />
-                                        </div>
-                                        <div className="col-span-3">
-                                            <p className="text-[11px] text-zinc-500 bg-white p-2 border rounded text-center italic">
-                                                "1 <strong>{newProduct.unit || '...'}</strong> equivale a <strong>{newProduct.unit_weight || '?'} {newProduct.unit_type || '...'}</strong>"
-                                            </p>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsProductDialogOpen(false)}>Cancelar</Button>
-                        <Button onClick={handleSaveProduct} disabled={!newProduct.name}>Criar Produto</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            {/* Modal: Create Supplier */}
-            <Dialog open={isSupplierDialogOpen} onOpenChange={setIsSupplierDialogOpen}>
-                <DialogContent>
-                    <DialogHeader><DialogTitle>Novo Fornecedor</DialogTitle></DialogHeader>
-                    <div className="py-4 space-y-4">
-                        <Label>Nome do Fornecedor</Label>
-                        <Input value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)} placeholder="Digite o nome..." />
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsSupplierDialogOpen(false)}>Cancelar</Button>
-                        <Button onClick={handleSaveSupplier} disabled={!newSupplierName.trim()}>Salvar</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-            {/* Dialog Gerenciar Categorias */}
-            <Dialog open={isManageCategoriesOpen} onOpenChange={setIsManageCategoriesOpen}>
-                <DialogContent>
-                    <DialogHeader><DialogTitle>Gerenciar Categorias</DialogTitle></DialogHeader>
-                    <div className="space-y-4 py-4">
-                        <div className="space-y-3 p-3 bg-zinc-50 rounded border">
-                            <Label>Adicionar Nova</Label>
-                            <Input
-                                placeholder="Nome da Categoria"
-                                value={newCategoryName}
-                                onChange={e => setNewCategoryName(e.target.value)}
-                            />
-                            <div className="flex gap-4">
-                                <label className="flex items-center space-x-2">
-                                    <input type="radio" checked={newCategoryType === 'stock'} onChange={() => setNewCategoryType('stock')} className="text-blue-600" />
-                                    <span className="text-sm">Estoque</span>
-                                </label>
-                                <label className="flex items-center space-x-2">
-                                    <input type="radio" checked={newCategoryType === 'expense'} onChange={() => setNewCategoryType('expense')} className="text-blue-600" />
-                                    <span className="text-sm">Despesa</span>
-                                </label>
-                            </div>
-                            <Button onClick={handleAddCategory} disabled={!newCategoryName} className="w-full">
-                                <Plus className="h-4 w-4 mr-2" /> Adicionar Categoria
-                            </Button>
-                        </div>
-
-                        <div className="border rounded-md p-2 max-h-[200px] overflow-y-auto space-y-1">
-                            <Label className="text-xs text-muted-foreground px-2">Categorias Existentes</Label>
-                            {availableCategories.map(c => (
-                                <div key={c.name} className="flex justify-between items-center bg-white border p-2 rounded text-sm">
-                                    <div className="flex flex-col">
-                                        <span>{c.name}</span>
-                                        <span className={`text-[10px] ${c.type === 'expense' ? 'text-purple-600' : 'text-blue-600'}`}>
-                                            {c.type === 'expense' ? 'Despesa' : 'Estoque'}
-                                        </span>
-                                    </div>
-                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400" onClick={() => handleDeleteCategory(c.name)}>
-                                        <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </DialogContent>
-            </Dialog>
-
-            {/* Dialog Gerenciar Unidades */}
-            <Dialog open={isManageUnitsOpen} onOpenChange={setIsManageUnitsOpen}>
-                <DialogContent>
-                    <DialogHeader><DialogTitle>Gerenciar Unidades</DialogTitle></DialogHeader>
-                    <div className="space-y-4 py-4">
-                        <div className="flex gap-2">
-                            <Input
-                                placeholder="Nova Unidade (Ex: barra)"
-                                value={newUnitName}
-                                onChange={e => setNewUnitName(e.target.value.toLowerCase())}
-                            />
-                            <Button onClick={handleAddUnit}><Plus className="h-4 w-4" /></Button>
-                        </div>
-                        <div className="border rounded-md p-2 max-h-[200px] overflow-y-auto space-y-1">
-                            {availableUnits.map(u => (
-                                <div key={u} className="flex justify-between items-center bg-zinc-50 p-2 rounded text-sm">
-                                    <span>{u}</span>
-                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400" onClick={() => handleDeleteUnit(u)}>
-                                        <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </DialogContent>
-            </Dialog>
-        </div>
+            <ManageUnitsDialog
+                isOpen={isManageUnitsOpen}
+                onOpenChange={setIsManageUnitsOpen}
+                newUnitName={newUnitName}
+                onNewUnitNameChange={setNewUnitName}
+                onAddUnit={handleAddUnit}
+                availableUnits={availableUnits}
+                onDeleteUnit={handleDeleteUnit}
+            />
+        </div >
     );
 }
 

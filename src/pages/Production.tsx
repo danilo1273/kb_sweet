@@ -76,6 +76,7 @@ export default function Production() {
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [isExecutionDialogOpen, setIsExecutionDialogOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [targetStock, setTargetStock] = useState<'danilo' | 'adriel'>('danilo');
 
     // Create Order State
     const [newOrderProduct, setNewOrderProduct] = useState("");
@@ -232,8 +233,15 @@ export default function Production() {
     async function saveOrderItems() {
         const updates = orderItems.map(item => ({
             id: item.id,
+            order_id: item.order_id,
+            type: item.type,
+            item_id: item.item_id,
+            name: item.name,
+            unit: item.unit,
+            quantity_planned: item.quantity_planned,
             quantity_used: item.quantity_used,
-            waste_quantity: item.waste_quantity
+            waste_quantity: item.waste_quantity,
+            unit_cost: item.unit_cost
         }));
 
         const { error } = await supabase.from('production_order_items').upsert(updates);
@@ -270,7 +278,8 @@ export default function Production() {
 
             const { error } = await supabase.rpc('close_production_order', {
                 p_order_id: selectedOrder.id,
-                p_actual_output_quantity: actualOutputQuantity
+                p_actual_output_quantity: actualOutputQuantity,
+                p_target_stock: targetStock
             });
 
             if (error) throw error;
@@ -669,6 +678,20 @@ export default function Production() {
                                     {selectedOrder?.products?.unit || 'un'}
                                 </div>
                             </div>
+                        </div>
+
+                        <div className="w-[200px]">
+                            <Label className="text-base font-semibold">Destino do Estoque</Label>
+                            <p className="text-xs text-muted-foreground mb-2">Onde o produto será armazenado?</p>
+                            <Select value={targetStock} onValueChange={(v: 'danilo' | 'adriel') => setTargetStock(v)}>
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="danilo">Estoque Danilo</SelectItem>
+                                    <SelectItem value="adriel">Estoque Adriel</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
                     </div>
 

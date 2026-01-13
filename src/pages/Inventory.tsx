@@ -9,26 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { Search, Loader2, Edit, Trash2, History, Settings, Plus } from "lucide-react";
+import { Search, Loader2, Edit, Trash2, History, Settings, Plus, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-interface Ingredient {
-    id: string;
-    name: string;
-    category: string;
-    unit: string;
-    stock_danilo: number;
-    stock_adriel: number;
-    cost: number;
-    cost_danilo: number;
-    cost_adriel: number;
-    min_stock: number;
-    unit_weight?: number;
-    unit_type?: string;
-    purchase_unit?: string;
-    purchase_unit_factor?: number;
-    type?: 'stock' | 'expense';
-}
+import { EmptyState } from "@/components/ui/empty-state";
+import { useIngredients } from "@/hooks/useIngredients";
+import { Ingredient, Category } from "@/types";
 
 interface PurchaseHistory {
     id: string;
@@ -44,6 +29,8 @@ interface PurchaseHistory {
         profiles?: { full_name: string };
     };
 }
+
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function Inventory() {
     const navigate = useNavigate();
@@ -65,7 +52,6 @@ export default function Inventory() {
     const [isAdmin, setIsAdmin] = useState(false);
 
     // Dynamic meta
-    interface Category { id: number; name: string; type: 'stock' | 'expense' }
     const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
     const [availableUnits, setAvailableUnits] = useState<string[]>([]);
 
@@ -74,6 +60,7 @@ export default function Inventory() {
     const [newUnitName, setNewUnitName] = useState("");
     const [categoryFilter, setCategoryFilter] = useState("all");
     const [stockFilter, setStockFilter] = useState("all");
+    const [typeFilter, setTypeFilter] = useState("all"); // 'all', 'stock' (insumo), 'product' (acabado)
 
     // Category State
     const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
@@ -177,33 +164,65 @@ export default function Inventory() {
 
     async function fetchIngredients() {
         setLoading(true);
-        const { data, error } = await supabase
+
+        const { data: ingData, error: ingError } = await supabase
             .from('ingredients')
             .select('*, type')
             .eq('is_active', true)
             .neq('type', 'expense')
             .order('name');
-        if (error) {
-            toast({ variant: "destructive", title: "Erro ao carregar estoque", description: error.message });
-        } else {
-            setIngredients(data || []);
+
+        const { data: prodData, error: prodError } = await supabase
+            .from('products')
+            .select('*')
+            .order('name');
+
+        if (ingError) {
+            console.error(ingError);
+            toast({ variant: "destructive", title: "Erro ao carregar insumos", description: ingError.message });
         }
+
+        if (prodError) {
+            console.error(prodError);
+        }
+
+        const mappedIngredients: Ingredient[] = (ingData || []).map((i: any) => ({
+            ...i,
+            type: i.type || 'stock'
+        }));
+
+        const mappedProducts: Ingredient[] = (prodData || []).map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            category: p.category || 'Produtos',
+            unit: p.unit || 'un',
+            stock_danilo: p.stock_danilo || 0,
+            stock_adriel: p.stock_adriel || 0,
+            cost: p.cost || 0,
+            cost_danilo: p.cost || 0,
+            cost_adriel: p.cost || 0,
+            min_stock: 0,
+            type: 'product',
+            // @ts-ignore
+            is_product_entity: true
+        }));
+
+        setIngredients([...mappedIngredients, ...mappedProducts]);
         setLoading(false);
     }
 
-    const filteredIngredients = ingredients.filter(i => {
-        const matchesSearch = i.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            i.category.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesCategory = categoryFilter === 'all' || i.category === categoryFilter;
-        const isNotExpense = i.type !== 'expense';
+    const filteredIngredients = ingredients.filter((ing) => {
+        const matchesSearch = ing.name.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesCategory = categoryFilter === 'all' || (ing.category && ing.category === categoryFilter);
+        const matchesStock = stockFilter === 'all' ||
+            (stockFilter === 'low' && (ing.stock_danilo <= ing.min_stock || ing.stock_adriel <= ing.min_stock)) ||
+            (stockFilter === 'available' && (ing.stock_danilo > 0 || ing.stock_adriel > 0));
 
-        const totalStock = (i.stock_danilo || 0) + (i.stock_adriel || 0);
-        const matchesStock =
-            stockFilter === 'all' ? true :
-                stockFilter === 'with_balance' ? totalStock > 0 :
-                    stockFilter === 'no_balance' ? totalStock <= 0 : true;
+        let matchesType = true;
+        if (typeFilter === 'product') matchesType = ing.type === 'product'; // Acabado
+        if (typeFilter === 'stock') matchesType = ing.type !== 'product'; // Insumos (stock or expense)
 
-        return matchesSearch && matchesCategory && isNotExpense && matchesStock;
+        return matchesSearch && matchesCategory && matchesStock && matchesType;
     });
 
     const uniqueCategories = Array.from(new Set(ingredients.map(i => i.category))).filter(Boolean).sort();
@@ -211,6 +230,11 @@ export default function Inventory() {
     async function handleSave() {
         setIsSaving(true);
         try {
+            if (currentIngredient.is_product_entity) {
+                toast({ variant: 'destructive', title: "Ação Inválida", description: "Produtos Acabados devem ser editados na tela de Receitas." });
+                return;
+            }
+
             // Apenas edição do Min Stock é permitida agora (e custo tecnicamente, mas vou travar)
             if (!currentIngredient.id) return; // Não cria mais aqui
 
@@ -247,17 +271,9 @@ export default function Inventory() {
         const option = prompt("Digite 'desativar' para ocultar ou 'EXCLUIR' para apagar permanentemente:");
 
         if (option === 'desativar') {
-            const { error } = await supabase.from('ingredients').update({ is_active: false }).eq('id', id);
-            if (error) toast({ variant: "destructive", title: "Erro ao desativar", description: error.message });
-            else { toast({ title: "Ingrediente desativado" }); fetchIngredients(); }
+            await deleteIngredient(id, 'deactivate');
         } else if (option === 'EXCLUIR') {
-            const { error } = await supabase.from('ingredients').delete().eq('id', id);
-            if (error) {
-                toast({ variant: "destructive", title: "Erro ao excluir permanentemente", description: "Não é possível excluir itens que possuem histórico de pedidos ou fichas técnicas. Tente desativar ao invés de excluir." });
-            } else {
-                toast({ title: "Ingrediente EXCLUÍDO definitivamente" });
-                fetchIngredients();
-            }
+            await deleteIngredient(id, 'delete');
         }
     }
 
@@ -361,7 +377,7 @@ export default function Inventory() {
                         <SelectItem value="no_balance">Sem Saldo</SelectItem>
                     </SelectContent>
                 </Select>
-            </div>
+            </div >
 
             <div className="rounded-md border bg-white shadow-sm overflow-hidden">
                 <Table>
@@ -397,80 +413,95 @@ export default function Inventory() {
                             </TableRow>
                         ) : filteredIngredients.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={10} className="text-center py-10 text-muted-foreground">
-                                    Nenhum ingrediente encontrado.
+                                <TableCell colSpan={10} className="h-64">
+                                    <EmptyState
+                                        icon={Package}
+                                        title="Nenhum ingrediente encontrado"
+                                        description="Tente ajustar sua busca ou filtros, ou adicione novos itens."
+                                        className="border-none shadow-none bg-transparent"
+                                    />
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            filteredIngredients.map((item) => {
-                                const totalQtd = (item.stock_danilo || 0) + (item.stock_adriel || 0);
-                                const totalVal = ((item.stock_danilo || 0) * (item.cost_danilo || 0)) + ((item.stock_adriel || 0) * (item.cost_adriel || 0));
+                            <AnimatePresence>
+                                {filteredIngredients.map((item) => {
+                                    const totalQtd = (item.stock_danilo || 0) + (item.stock_adriel || 0);
+                                    const totalVal = ((item.stock_danilo || 0) * (item.cost_danilo || 0)) + ((item.stock_adriel || 0) * (item.cost_adriel || 0));
 
-                                return (
-                                    <TableRow key={item.id} className={item.type === 'expense' ? 'bg-gray-50/50' : ''}>
-                                        <TableCell className="font-medium max-w-[200px] truncate" title={item.name}>
-                                            <div className="flex flex-col">
-                                                <span>{item.name}</span>
-                                                <div className="flex gap-2 items-center">
-                                                    <span className="text-[10px] text-zinc-400 font-normal truncate">{item.category}</span>
-                                                    {item.type === 'expense' && <span className="text-[9px] bg-purple-100 text-purple-700 px-1 rounded border border-purple-200">Despesa</span>}
+                                    return (
+                                        <motion.tr
+                                            key={item.id}
+                                            layoutId={item.id}
+                                            initial={{ opacity: 0 }}
+                                            animate={{ opacity: 1 }}
+                                            exit={{ opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            className={cn("border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted", item.type === 'expense' ? 'bg-gray-50/50' : '')}
+                                        >
+                                            <TableCell className="font-medium max-w-[200px] truncate" title={item.name}>
+                                                <div className="flex flex-col">
+                                                    <span>{item.name}</span>
+                                                    <div className="flex gap-2 items-center">
+                                                        <span className="text-[10px] text-zinc-400 font-normal truncate">{item.category}</span>
+                                                        {item.type === 'expense' && <span className="text-[9px] bg-purple-100 text-purple-700 px-1 rounded border border-purple-200">Despesa</span>}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell>{item.unit}</TableCell>
+                                            </TableCell>
+                                            <TableCell>{item.unit}</TableCell>
 
-                                        {/* Danilo Columns */}
-                                        <TableCell className={cn("text-right bg-blue-50/30", item.stock_danilo <= item.min_stock && item.type !== 'expense' ? "text-red-600 font-bold" : "")}>
-                                            {item.type === 'expense' ? '-' : `${item.stock_danilo} ${item.unit}`}
-                                        </TableCell>
-                                        <TableCell className="text-right text-xs bg-blue-50/30">
-                                            {item.type === 'expense' ? '-' : (
-                                                <>
-                                                    <div>R$ {item.cost_danilo?.toFixed(2) || '0.00'}</div>
-                                                    <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
-                                                </>
-                                            )}
-                                        </TableCell>
-                                        <TableCell className="text-right text-xs font-bold text-blue-700 bg-blue-50/30">
-                                            {item.type === 'expense' ? '-' : `R$ ${((item.stock_danilo || 0) * (item.cost_danilo || 0)).toFixed(2)}`}
-                                        </TableCell>
+                                            {/* Danilo Columns */}
+                                            <TableCell className={cn("text-right bg-blue-50/30", item.stock_danilo <= item.min_stock && item.type !== 'expense' ? "text-red-600 font-bold" : "")}>
+                                                {item.type === 'expense' ? '-' : `${item.stock_danilo} ${item.unit}`}
+                                            </TableCell>
+                                            <TableCell className="text-right text-xs bg-blue-50/30">
+                                                {item.type === 'expense' ? '-' : (
+                                                    <>
+                                                        <div>R$ {item.cost_danilo?.toFixed(2) || '0.00'}</div>
+                                                        <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                                    </>
+                                                )}
+                                            </TableCell>
+                                            <TableCell className="text-right text-xs font-bold text-blue-700 bg-blue-50/30">
+                                                {item.type === 'expense' ? '-' : `R$ ${((item.stock_danilo || 0) * (item.cost_danilo || 0)).toFixed(2)}`}
+                                            </TableCell>
 
-                                        {/* Adriel Columns */}
-                                        <TableCell className="text-right bg-amber-50/30">
-                                            {item.type === 'expense' ? '-' : `${item.stock_adriel} ${item.unit}`}
-                                        </TableCell>
-                                        <TableCell className="text-right text-xs bg-amber-50/30">
-                                            {item.type === 'expense' ? '-' : (
-                                                <>
-                                                    <div>R$ {item.cost_adriel?.toFixed(2) || '0.00'}</div>
-                                                    <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
-                                                </>
-                                            )}
-                                        </TableCell>
-                                        <TableCell className="text-right text-xs font-bold text-amber-700 bg-amber-50/30">
-                                            {item.type === 'expense' ? '-' : `R$ ${((item.stock_adriel || 0) * (item.cost_adriel || 0)).toFixed(2)}`}
-                                        </TableCell>
+                                            {/* Adriel Columns */}
+                                            <TableCell className="text-right bg-amber-50/30">
+                                                {item.type === 'expense' ? '-' : `${item.stock_adriel} ${item.unit}`}
+                                            </TableCell>
+                                            <TableCell className="text-right text-xs bg-amber-50/30">
+                                                {item.type === 'expense' ? '-' : (
+                                                    <>
+                                                        <div>R$ {item.cost_adriel?.toFixed(2) || '0.00'}</div>
+                                                        <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                                    </>
+                                                )}
+                                            </TableCell>
+                                            <TableCell className="text-right text-xs font-bold text-amber-700 bg-amber-50/30">
+                                                {item.type === 'expense' ? '-' : `R$ ${((item.stock_adriel || 0) * (item.cost_adriel || 0)).toFixed(2)}`}
+                                            </TableCell>
 
-                                        {/* Total Geral Columns */}
-                                        <TableCell className="text-right font-bold bg-zinc-50">{item.type === 'expense' ? '-' : `${totalQtd} ${item.unit}`}</TableCell>
-                                        <TableCell className="text-right font-bold text-green-700 bg-zinc-50">{item.type === 'expense' ? '-' : `R$ ${totalVal.toFixed(2)}`}</TableCell>
+                                            {/* Total Geral Columns */}
+                                            <TableCell className="text-right font-bold bg-zinc-50">{item.type === 'expense' ? '-' : `${totalQtd} ${item.unit}`}</TableCell>
+                                            <TableCell className="text-right font-bold text-green-700 bg-zinc-50">{item.type === 'expense' ? '-' : `R$ ${totalVal.toFixed(2)}`}</TableCell>
 
-                                        <TableCell className="text-right space-x-1">
-                                            <Button variant="ghost" size="icon" onClick={() => openHistory(item)} title="Histórico de Compras">
-                                                <History className="h-4 w-4 text-blue-500" />
-                                            </Button>
-                                            <Button variant="ghost" size="icon" onClick={() => openEdit(item)} title="Editar">
-                                                <Edit className="h-4 w-4 text-zinc-500" />
-                                            </Button>
-                                            {isAdmin && (
-                                                <Button variant="ghost" size="icon" onClick={() => handleDelete(item.id)} title="Excluir (Admin)">
-                                                    <Trash2 className="h-4 w-4 text-red-500" />
+                                            <TableCell className="text-right space-x-1">
+                                                <Button variant="ghost" size="icon" onClick={() => openHistory(item)} title="Histórico de Compras">
+                                                    <History className="h-4 w-4 text-blue-500" />
                                                 </Button>
-                                            )}
-                                        </TableCell>
-                                    </TableRow>
-                                );
-                            })
+                                                <Button variant="ghost" size="icon" onClick={() => openEdit(item)} title="Editar">
+                                                    <Edit className="h-4 w-4 text-zinc-500" />
+                                                </Button>
+                                                {isAdmin && (
+                                                    <Button variant="ghost" size="icon" onClick={() => handleDelete(item.id)} title="Excluir (Admin)">
+                                                        <Trash2 className="h-4 w-4 text-red-500" />
+                                                    </Button>
+                                                )}
+                                            </TableCell>
+                                        </motion.tr>
+                                    );
+                                })}
+                            </AnimatePresence>
                         )}
                     </TableBody>
                 </Table>

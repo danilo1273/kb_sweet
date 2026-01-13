@@ -11,14 +11,16 @@ import Recipes from '@/pages/Recipes';
 import Financial from '@/pages/Financial';
 import Purchases from '@/pages/Purchases';
 import Production from '@/pages/Production';
-import PlaceholderPage from '@/pages/PlaceholderPage';
 import { Sidebar } from '@/components/Sidebar';
 import { UserProfileHeader } from '@/components/UserProfileHeader';
 import { Session } from '@supabase/supabase-js';
-import { Loader2, ShoppingCart } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 const AdminUsers = lazy(() => import('@/pages/AdminUsers'));
 const AdminRegisters = lazy(() => import('@/pages/AdminRegisters'));
+const Clients = lazy(() => import('@/pages/Clients'));
+const Sales = lazy(() => import('@/pages/Sales'));
+const POS = lazy(() => import('@/pages/POS'));
 
 function App() {
     const [session, setSession] = useState<Session | null>(null);
@@ -52,7 +54,9 @@ function App() {
                     <Route path="/dashboard" element={<Dashboard />} />
                     <Route path="/profile" element={<Profile />} />
 
-                    <Route path="/sales" element={<PlaceholderPage title="Vendas" icon={ShoppingCart} description="PDV e Registro de Vendas." />} />
+                    <Route path="/clients" element={<Clients />} />
+                    <Route path="/sales" element={<Sales />} />
+                    <Route path="/pos" element={<POS />} />
                     <Route path="/inventory" element={<Inventory />} />
                     <Route path="/recipes" element={<Recipes />} />
                     <Route path="/financial" element={<Financial />} />

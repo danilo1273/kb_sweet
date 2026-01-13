@@ -56,6 +56,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         { name: "Estoque", href: "/inventory", icon: Package, roles: ['admin', 'buyer', 'approver', 'seller'] },
         { name: "Compras", href: "/purchases", icon: ClipboardList, roles: ['admin', 'buyer', 'approver', 'financial'] },
         { name: "Vendas", href: "/sales", icon: ShoppingCart, roles: ['admin', 'seller'] },
+        { name: "Clientes", href: "/clients", icon: User, roles: ['admin', 'seller'] },
         { name: "Financeiro", href: "/financial", icon: DollarSign, roles: ['admin', 'financial'] },
         { name: "Cadastros", href: "/admin/registers", icon: Database, roles: ['admin'] },
         { name: "Usuários", href: "/admin", icon: User, roles: ['admin'] },

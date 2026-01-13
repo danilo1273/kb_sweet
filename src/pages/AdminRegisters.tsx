@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus, Pencil, Trash2, Search, Database, RefreshCw, Calculator, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Ingredient, Category, Supplier } from "@/types";
 
 export default function AdminRegisters() {
     const { toast } = useToast();
@@ -20,7 +21,7 @@ export default function AdminRegisters() {
     const [searchTerm, setSearchTerm] = useState("");
 
     // Aux Data for Dropdowns
-    const [availableCategories, setAvailableCategories] = useState<{ id: string, name: string, type: string }[]>([]);
+    const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
     const [availableUnits, setAvailableUnits] = useState<{ id: string, name: string }[]>([]);
 
     // Form Dialog States
@@ -52,7 +53,7 @@ export default function AdminRegisters() {
         // Always fetch these for the dropdowns, or optimize to fetch only when needed. 
         // For simplicity and small data size, fetching on load/tab change is fine.
         const { data: cats } = await supabase.from('custom_categories').select('*').order('name');
-        if (cats) setAvailableCategories(cats);
+        if (cats) setAvailableCategories(cats as Category[]);
 
         const { data: units } = await supabase.from('custom_units').select('*').order('name');
         if (units) setAvailableUnits(units);

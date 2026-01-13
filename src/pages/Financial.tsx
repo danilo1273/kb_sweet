@@ -3,17 +3,16 @@ import { supabase } from "@/supabaseClient";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, CheckCircle, ArrowDownCircle, RotateCcw, Trash2, Filter, ChevronDown, ChevronUp, Layers, Calculator } from "lucide-react";
+import { Loader2, CheckCircle, ArrowDownCircle, RotateCcw, Trash2, Filter, ChevronDown, ChevronUp, Layers, Calculator, TrendingUp, TrendingDown } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { FinancialMovement, BatchGroup } from "@/types";
 import { calculateTotalPending, calculateTotalPaid } from "@/lib/financialUtils";
-
-// Interfaces moved to src/types.ts
 
 export default function Financial() {
     const [movements, setMovements] = useState<FinancialMovement[]>([]);
@@ -21,6 +20,9 @@ export default function Financial() {
     const [loading, setLoading] = useState(true);
     const [isAdmin, setIsAdmin] = useState(false);
     const [isFinancial, setIsFinancial] = useState(false);
+
+    // Tab State
+    const [activeTab, setActiveTab] = useState("payable");
 
     // Filters
     const [filterBuyer, setFilterBuyer] = useState<string>('all');
@@ -33,7 +35,7 @@ export default function Financial() {
 
     // Expansion & Selection
     const [expandedBatches, setExpandedBatches] = useState<Record<string, boolean>>({});
-    const [selectedBatches, setSelectedBatches] = useState<Record<string, boolean>>({}); // IDs das batches selecionadas para subtotal
+    const [selectedBatches, setSelectedBatches] = useState<Record<string, boolean>>({});
 
     const { toast } = useToast();
 
@@ -54,7 +56,6 @@ export default function Financial() {
 
     async function fetchMovements() {
         setLoading(true);
-        // 1. Fetch Movements
         const { data: movs, error } = await supabase
             .from('financial_movements')
             .select('*')
@@ -68,7 +69,7 @@ export default function Financial() {
 
         let enrichedMovements: FinancialMovement[] = movs || [];
 
-        // 2. Fetch Related Data (Purchases & Profiles) to enrich
+        // Fetch Related Data
         const purchaseIds = enrichedMovements.map(m => m.related_purchase_id).filter(Boolean);
         if (purchaseIds.length > 0) {
             const { data: requests } = await supabase
@@ -81,7 +82,6 @@ export default function Financial() {
             if (orderIds.length > 0) {
                 const { data: orders } = await supabase.from('purchase_orders').select('id, supplier_id, nickname').in('id', orderIds);
                 if (orders) {
-                    // Fetch suppliers
                     const supplierIds = orders.map(o => o.supplier_id).filter(Boolean);
                     const { data: suppliers } = await supabase.from('suppliers').select('id, name').in('id', supplierIds);
 
@@ -92,7 +92,6 @@ export default function Financial() {
                 }
             }
 
-            // Fetch Profiles for Buyers
             const userIds = requests?.map(r => r.user_id).filter(Boolean) || [];
             let profilesMap: Record<string, string> = {};
             if (userIds.length > 0) {
@@ -100,7 +99,6 @@ export default function Financial() {
                 profiles?.forEach(p => profilesMap[p.id] = p.full_name || p.email);
             }
 
-            // Map back to movements
             enrichedMovements = enrichedMovements.map(m => {
                 const req = requests?.find(r => r.id === m.related_purchase_id);
                 let buyerName = 'Sistema';
@@ -122,6 +120,38 @@ export default function Financial() {
                 }
                 return { ...m, detail_buyer: buyerName, detail_supplier: supplierName, detail_order_nickname: orderNickname, detail_order_id: orderId };
             });
+
+            // Fetch Sales Details for Income items that are likely Sales
+            const saleIds = enrichedMovements
+                .filter(m => !m.related_purchase_id && m.detail_order_id)
+                .map(m => m.detail_order_id!)
+                .filter(Boolean);
+
+            if (saleIds.length > 0) {
+                const { data: sales, error: salesError } = await supabase
+                    .from('sales')
+                    .select('id, client_id, clients(name)')
+                    .in('id', saleIds);
+
+                if (sales) {
+                    enrichedMovements = enrichedMovements.map(m => {
+                        if (!m.related_purchase_id && m.detail_order_id) {
+                            const sale = sales.find(s => s.id === m.detail_order_id);
+                            if (sale) {
+                                // It's a sale
+                                const clientName = (sale.clients as any)?.name || 'Consumidor Final';
+                                return {
+                                    ...m,
+                                    description: `Venda - ${clientName} - ${m.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                                    detail_buyer: clientName === 'Consumidor Final' ? 'Balcão' : clientName,
+                                    detail_supplier: 'Loja' // Income source
+                                };
+                            }
+                        }
+                        return m;
+                    });
+                }
+            }
         }
 
         setMovements(enrichedMovements);
@@ -131,7 +161,7 @@ export default function Financial() {
         const looseItems: FinancialMovement[] = [];
 
         enrichedMovements.forEach(m => {
-            if (m.detail_order_id) {
+            if (m.detail_order_id && m.related_purchase_id) {
                 if (!grouped[m.detail_order_id]) {
                     grouped[m.detail_order_id] = {
                         order_id: m.detail_order_id,
@@ -144,36 +174,63 @@ export default function Financial() {
                     };
                 }
                 grouped[m.detail_order_id].movements.push(m);
-                // Keep buyer_name if not set, or if it's "Desconhecido" and we found a better one? 
-                // Simple approach: First one wins, usually consistent per order.
-
-                if (m.type === 'expense') {
-                    if (m.status === 'pending') grouped[m.detail_order_id].total_pending += m.amount;
-                    else grouped[m.detail_order_id].total_paid += m.amount;
-                }
+                if (m.status === 'pending') grouped[m.detail_order_id].total_pending += m.amount;
+                else grouped[m.detail_order_id].total_paid += m.amount;
             } else {
                 looseItems.push(m);
             }
         });
 
-        // Add "Avulsos" group if any
+        // AVULSOS Handling
+        // We might want to group avulsos by TYPE (Income vs Expense) to avoid mixing in the same "Avulso" batch?
+        // Or just keep them together and let the filter handle it.
+        // Let's split loose items by type effectively creating two "Avulso" groups if needed, or just one mixed.
+        // Actually, for the Tab separation to work clean, the "Avulso" batch should probably be respecting the type filter later.
+        // But if we have one batch with mixed types, the batch total will be weird.
+        // Let's create separate "Avulso Expense" and "Avulso Income" groups to be safe?
+        // Or simpler: Just put them in 'avulso' and the filter logic downstream will hide the irrelevant ones.
+
         if (looseItems.length > 0) {
-            const loosePending = looseItems.filter(m => m.type === 'expense' && m.status === 'pending').reduce((a, b) => a + b.amount, 0);
-            const loosePaid = looseItems.filter(m => m.type === 'expense' && m.status === 'paid').reduce((a, b) => a + b.amount, 0);
-            grouped['avulso'] = {
-                order_id: 'avulso',
-                order_nickname: 'Lançamentos Avulsos',
-                supplier_name: '-',
-                movements: looseItems,
-                total_pending: loosePending,
-                total_paid: loosePaid,
-                buyer_name: '-'
-            };
+            looseItems.forEach(item => {
+                const dateKey = item.due_date ? new Date(item.due_date).toLocaleDateString() : 'Sem Data';
+                // Create a sortable key for ordering: YYYY-MM-DD
+                const sortKey = item.due_date ? item.due_date.split('T')[0] : '0000-00-00';
+                const groupId = `avulso_${sortKey}`;
+
+                if (!grouped[groupId]) {
+                    grouped[groupId] = {
+                        order_id: groupId,
+                        order_nickname: `Avulsos - ${dateKey}`,
+                        supplier_name: '-', // Mixed
+                        movements: [],
+                        total_pending: 0,
+                        total_paid: 0,
+                        buyer_name: '-'
+                    };
+                }
+                grouped[groupId].movements.push(item);
+                if (item.status === 'pending') grouped[groupId].total_pending += item.amount;
+                else grouped[groupId].total_paid += item.amount;
+            });
         }
 
-        setBatches(Object.values(grouped));
+        setBatches(Object.values(grouped).sort((a, b) => {
+            // Sort logic: 
+            // 1. "Avulso" batches by date descending
+            // 2. Named batches by nickname
+            const aIsAvulso = a.order_id.startsWith('avulso_');
+            const bIsAvulso = b.order_id.startsWith('avulso_');
 
-        // Filters UI
+            if (aIsAvulso && bIsAvulso) {
+                return b.order_id.localeCompare(a.order_id); // Descending date (avulso_YYYY-MM-DD)
+            }
+            if (aIsAvulso) return 1; // Avulso at bottom? Or top? User asked for "Data do dia", let's put recent dates at top.
+            if (bIsAvulso) return -1;
+
+            return a.order_nickname.localeCompare(b.order_nickname);
+        }));
+
+        // Filters UI Data
         const buyers = Array.from(new Set(enrichedMovements.map(m => m.detail_buyer).filter(Boolean))) as string[];
         const suppliers = Array.from(new Set(enrichedMovements.map(m => m.detail_supplier).filter(Boolean))) as string[];
         setAvailableBuyers(buyers.sort());
@@ -203,120 +260,117 @@ export default function Financial() {
         else { toast({ title: "Pagamento estornado" }); fetchMovements(); }
     }
 
-    async function handleBatchPay() {
+    // --- Bulk Actions ---
+    async function processBatchAction(action: 'pay' | 'reverse') {
         const selectedIds = Object.keys(selectedBatches).filter(id => selectedBatches[id]);
         if (selectedIds.length === 0) return;
-        if (!confirm(`Confirma a baixa (pagamento) de todos os itens pendentes nos ${selectedIds.length} lotes selecionados?`)) return;
+
+        const isPay = action === 'pay';
+        const confirmMsg = isPay
+            ? `Confirma a BAIXA de todos os itens PENDENTES nos ${selectedIds.length} lotes?`
+            : `Confirma o ESTORNO de todos os itens BAIXADOS nos ${selectedIds.length} lotes?`;
+
+        if (!confirm(confirmMsg)) return;
 
         setLoading(true);
         try {
-            // Find all pending movements in selected batches
-            const movementsToPay: string[] = [];
+            const targetStatus = isPay ? 'pending' : 'paid';
+            const newStatus = isPay ? 'paid' : 'pending';
+            const paymentDate = isPay ? new Date().toISOString() : null;
+
+            const idsToUpdate: string[] = [];
+
             selectedIds.forEach(batchId => {
                 const batch = batches.find(b => b.order_id === batchId);
                 if (batch) {
                     batch.movements.forEach(m => {
-                        if (m.type === 'expense' && m.status === 'pending') movementsToPay.push(m.id);
+                        // IMPORTANT: Only affect items visible in current tab?
+                        // Ideally yes. So we should check the movement type matches the active tab.
+                        const isExpense = m.type === 'expense';
+                        const isIncome = m.type === 'income';
+                        const matchesTab = activeTab === 'payable' ? isExpense : isIncome;
+
+                        if (m.status === targetStatus && matchesTab) {
+                            idsToUpdate.push(m.id);
+                        }
                     });
                 }
             });
 
-            if (movementsToPay.length === 0) {
-                toast({ title: "Nada pendente nos lotes selecionados." });
+            if (idsToUpdate.length === 0) {
+                toast({ title: "Nenhum item elegível para esta ação nos lotes selecionados." });
                 setLoading(false);
                 return;
             }
 
             const { error } = await supabase
                 .from('financial_movements')
-                .update({ status: 'paid', payment_date: new Date().toISOString() })
-                .in('id', movementsToPay);
+                .update({ status: newStatus, payment_date: paymentDate })
+                .in('id', idsToUpdate);
 
             if (error) throw error;
 
-            toast({ title: "Baixa realizada com sucesso!", description: `${movementsToPay.length} lançamentos atualizados.` });
-            setSelectedBatches({}); // Clear selection
+            toast({ title: "Sucesso!", description: `${idsToUpdate.length} lançamentos atualizados.` });
+            setSelectedBatches({});
             fetchMovements();
         } catch (e: any) {
-            toast({ variant: 'destructive', title: "Erro na baixa em lote", description: e.message });
+            toast({ variant: 'destructive', title: "Erro na ação em lote", description: e.message });
             setLoading(false);
         }
     }
 
-    async function handleBatchReverse() {
-        const selectedIds = Object.keys(selectedBatches).filter(id => selectedBatches[id]);
-        if (selectedIds.length === 0) return;
-        if (!confirm(`Confirma o ESTORNO (cancelar baixa) de todos os itens pagos nos ${selectedIds.length} lotes selecionados?`)) return;
+    // --- Filtering Logic ---
+    const getFilteredBatches = (type: 'expense' | 'income') => {
+        return batches.map(batch => {
+            const filteredMovements = batch.movements.filter(m => {
+                // Type Filter (Core of Tabs)
+                if (m.type !== type) return false;
 
-        setLoading(true);
-        try {
-            // Find all paid movements in selected batches
-            const movementsToReverse: string[] = [];
-            selectedIds.forEach(batchId => {
-                const batch = batches.find(b => b.order_id === batchId);
-                if (batch) {
-                    batch.movements.forEach(m => {
-                        if (m.type === 'expense' && m.status === 'paid') movementsToReverse.push(m.id);
-                    });
+                // Standard Filters
+                const matchBuyer = filterBuyer === 'all' || m.detail_buyer === filterBuyer;
+                const matchSupplier = filterSupplier === 'all' || m.detail_supplier === filterSupplier;
+                const matchStatus = filterStatus === 'all' || m.status === filterStatus;
+
+                // Date Filter
+                let dateMatches = true;
+                if (startDate || endDate) {
+                    const refDate = (m.status === 'paid' && m.payment_date) ? m.payment_date : m.due_date;
+                    if (refDate) {
+                        const d = new Date(refDate).toISOString().split('T')[0];
+                        if (startDate && d < startDate) dateMatches = false;
+                        if (endDate && d > endDate) dateMatches = false;
+                    } else {
+                        dateMatches = false;
+                    }
                 }
+
+                return matchBuyer && matchSupplier && matchStatus && dateMatches;
             });
 
-            if (movementsToReverse.length === 0) {
-                toast({ title: "Nada pago nos lotes selecionados para estornar." });
-                setLoading(false);
-                return;
-            }
+            // Re-calculate totals for this filtered batch view
+            // This ensures the card shows only the totals for the relevant items (e.g. only expenses)
+            const pending = filteredMovements.filter(m => m.status === 'pending').reduce((a, b) => a + b.amount, 0);
+            const paid = filteredMovements.filter(m => m.status === 'paid').reduce((a, b) => a + b.amount, 0);
 
-            const { error } = await supabase
-                .from('financial_movements')
-                .update({ status: 'pending', payment_date: null })
-                .in('id', movementsToReverse);
+            return {
+                ...batch,
+                movements: filteredMovements,
+                visual_total_pending: pending,
+                visual_total_paid: paid
+            };
+        }).filter(batch => batch.movements.length > 0);
+    };
 
-            if (error) throw error;
+    const currentType = activeTab === 'payable' ? 'expense' : 'income';
+    const filteredBatches = getFilteredBatches(currentType);
 
-            toast({ title: "Estorno realizado com sucesso!", description: `${movementsToReverse.length} lançamentos voltaram para pendente.` });
-            setSelectedBatches({}); // Clear selection
-            fetchMovements();
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: "Erro no estorno em lote", description: e.message });
-            setLoading(false);
-        }
-    }
+    // Totals for Cards
+    const totalPending = filteredBatches.reduce((acc, b) => acc + b.visual_total_pending, 0);
+    const totalPaid = filteredBatches.reduce((acc, b) => acc + b.visual_total_paid, 0);
 
-    // --- Derived State ---
-    const filteredBatches = batches.map(batch => {
-        const filteredMovements = batch.movements.filter(m => {
-            const matchBuyer = filterBuyer === 'all' || m.detail_buyer === filterBuyer;
-            const matchSupplier = filterSupplier === 'all' || m.detail_supplier === filterSupplier;
-            const matchStatus = filterStatus === 'all' || m.status === filterStatus;
-
-            // Date Filter
-            let dateMatches = true;
-            if (startDate || endDate) {
-                const refDate = (m.status === 'paid' && m.payment_date) ? m.payment_date : m.due_date;
-                if (!refDate) {
-                    dateMatches = false;
-                } else {
-                    const d = new Date(refDate).toISOString().split('T')[0];
-                    if (startDate && d < startDate) dateMatches = false;
-                    if (endDate && d > endDate) dateMatches = false;
-                }
-            }
-
-            return matchBuyer && matchSupplier && matchStatus && dateMatches;
-        });
-
-        return { ...batch, movements: filteredMovements };
-    }).filter(batch => batch.movements.length > 0);
-
-    // Calculate Subtotal from SELECTED batches
-    const selectedBatchesTotal = batches
-        .filter(b => selectedBatches[b.order_id])
-        .reduce((acc, b) => acc + b.total_pending, 0);
-
-    // Check if selection has pending or paid items to show appropriate buttons
-    const selectionHasPending = batches.some(b => selectedBatches[b.order_id] && Math.abs(b.total_pending) > 0.01);
-    const selectionHasPaid = batches.some(b => selectedBatches[b.order_id] && Math.abs(b.total_paid) > 0.01);
+    // Selection Totals
+    const selectedBatchesList = filteredBatches.filter(b => selectedBatches[b.order_id]);
+    const selectionTotal = selectedBatchesList.reduce((acc, b) => acc + b.visual_total_pending, 0);
 
     const toggleBatchSelection = (id: string, checked: boolean) => {
         setSelectedBatches(prev => ({ ...prev, [id]: checked }));
@@ -326,263 +380,202 @@ export default function Financial() {
         setExpandedBatches(prev => ({ ...prev, [id]: !prev[id] }));
     }
 
-    const totalPendingGlobal = calculateTotalPending(movements);
-    const totalPaidGlobal = calculateTotalPaid(movements);
-
-    // Calculate Breakdowns for Selected Batches
-    const selectedBatchesList = batches.filter(b => selectedBatches[b.order_id]);
-
-    // Group selected totals by Supplier
-    const selectedBySupplier: Record<string, number> = {};
-    selectedBatchesList.forEach(b => {
-        const sup = b.supplier_name || 'Outros';
-        const pendingInBatch = b.movements.filter(m => m.type === 'expense' && m.status === 'pending').reduce((acc, c) => acc + Math.abs(c.amount), 0);
-        if (pendingInBatch > 0) {
-            selectedBySupplier[sup] = (selectedBySupplier[sup] || 0) + pendingInBatch;
-        }
-    });
-
-    // Group selected totals by Buyer
-    const selectedByBuyer: Record<string, number> = {};
-    selectedBatchesList.forEach(b => {
-        const buy = b.buyer_name || 'Outros';
-        const pendingInBatch = b.movements.filter(m => m.type === 'expense' && m.status === 'pending').reduce((acc, c) => acc + Math.abs(c.amount), 0);
-        if (pendingInBatch > 0) {
-            selectedByBuyer[buy] = (selectedByBuyer[buy] || 0) + pendingInBatch;
-        }
-    });
-
     return (
         <div className="flex-1 p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-3xl font-bold tracking-tight">Financeiro (Por Lote)</h2>
-                    <p className="text-zinc-500">Contas a pagar agrupadas.</p>
+                    <h2 className="text-3xl font-bold tracking-tight">Financeiro</h2>
+                    <p className="text-zinc-500">Gestão de Contas a Pagar e Receber</p>
                 </div>
                 <div className="flex gap-2">
-                    <Button variant="outline" onClick={async () => { await fetchMovements(); toast({ title: "Sincronizado!", description: "Dados atualizados." }) }} className="text-orange-600 border-orange-200">
-                        <RotateCcw className="mr-2 h-4 w-4" /> Sincronizar
+                    <Button variant="outline" onClick={async () => { await fetchMovements(); toast({ title: "Sincronizado!" }) }} className="text-orange-600 border-orange-200">
+                        <RotateCcw className="mr-2 h-4 w-4" /> Atualizar
                     </Button>
                 </div>
             </div>
 
-            {/* Filters & Actions */}
-            <div className="flex flex-wrap gap-4 items-center bg-white p-4 rounded-lg shadow-sm border sticky top-0 z-10">
-                <div className="flex items-center gap-2 text-sm text-zinc-500"><Filter className="h-4 w-4" /> Filtros:</div>
-                <Select value={filterBuyer} onValueChange={setFilterBuyer}>
-                    <SelectTrigger className="w-[180px]"><SelectValue placeholder="Comprador" /></SelectTrigger>
-                    <SelectContent><SelectItem value="all">Todos Compradores</SelectItem>{availableBuyers.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
-                </Select>
-                <Select value={filterSupplier} onValueChange={setFilterSupplier}>
-                    <SelectTrigger className="w-[180px]"><SelectValue placeholder="Fornecedor" /></SelectTrigger>
-                    <SelectContent><SelectItem value="all">Todos Fornecedores</SelectItem>{availableSuppliers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                </Select>
-                <Select value={filterStatus} onValueChange={setFilterStatus}>
-                    <SelectTrigger className="w-[180px]"><SelectValue placeholder="Status" /></SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">Todos Status</SelectItem>
-                        <SelectItem value="pending">Pendentes</SelectItem>
-                        <SelectItem value="paid">Baixados / Pagos</SelectItem>
-                    </SelectContent>
-                </Select>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+                <TabsList className="bg-white border text-zinc-500">
+                    <TabsTrigger value="payable" className="data-[state=active]:bg-red-50 data-[state=active]:text-red-700">
+                        <TrendingDown className="mr-2 h-4 w-4" /> Contas a Pagar
+                    </TabsTrigger>
+                    <TabsTrigger value="receivable" className="data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
+                        <TrendingUp className="mr-2 h-4 w-4" /> Contas a Receber
+                    </TabsTrigger>
+                </TabsList>
 
-                {/* Date Range */}
-                <div className="flex items-center gap-2">
-                    <Input
-                        type="date"
-                        value={startDate}
-                        onChange={(e) => setStartDate(e.target.value)}
-                        className="w-min"
-                        title="Data Inicial"
-                    />
-                    <span className="text-zinc-400">-</span>
-                    <Input
-                        type="date"
-                        value={endDate}
-                        onChange={(e) => setEndDate(e.target.value)}
-                        className="w-min"
-                        title="Data Final"
-                    />
-                </div>
+                {/* Shared Filters Bar */}
+                <div className="flex flex-wrap gap-4 items-center bg-white p-4 rounded-lg shadow-sm border">
+                    <div className="flex items-center gap-2 text-sm text-zinc-500"><Filter className="h-4 w-4" /> Filtros:</div>
+                    <Select value={filterBuyer} onValueChange={setFilterBuyer}>
+                        <SelectTrigger className="w-[180px]"><SelectValue placeholder="Comprador" /></SelectTrigger>
+                        <SelectContent><SelectItem value="all">Todos</SelectItem>{availableBuyers.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
+                    </Select>
 
-                {/* Selection Subtotal */}
-                <div className="ml-auto flex items-center gap-4">
-                    {Object.values(selectedBatches).some(Boolean) ? (
-                        <div className="bg-blue-50 text-blue-700 px-4 py-2 rounded-md font-medium border border-blue-100 flex items-center gap-2 animate-in fade-in">
-                            <Calculator className="h-4 w-4" />
-                            <span>Selecionados: </span>
-                            <span className="text-lg font-bold">R$ {Math.abs(selectedBatchesTotal).toFixed(2)}</span>
+                    {/* Only show Supplier filter for Payable? Or rename? */}
+                    {activeTab === 'payable' && (
+                        <Select value={filterSupplier} onValueChange={setFilterSupplier}>
+                            <SelectTrigger className="w-[180px]"><SelectValue placeholder="Fornecedor" /></SelectTrigger>
+                            <SelectContent><SelectItem value="all">Todos</SelectItem>{availableSuppliers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                        </Select>
+                    )}
 
-                            {selectionHasPending && (
-                                <Button size="sm" onClick={handleBatchPay} className="ml-4 h-7 bg-blue-600 hover:bg-blue-700 text-white" title="Baixar itens pendentes da seleção">
-                                    <CheckCircle className="mr-2 h-3 w-3" /> Baixar
-                                </Button>
-                            )}
+                    <Select value={filterStatus} onValueChange={setFilterStatus}>
+                        <SelectTrigger className="w-[180px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Todos Status</SelectItem>
+                            <SelectItem value="pending">Pendentes</SelectItem>
+                            <SelectItem value="paid">Baixados / Realizados</SelectItem>
+                        </SelectContent>
+                    </Select>
 
-                            {selectionHasPaid && (
-                                <Button size="sm" variant="destructive" onClick={handleBatchReverse} className="ml-2 h-7" title="Estornar itens pagos da seleção">
-                                    <RotateCcw className="mr-2 h-3 w-3" /> Estornar
-                                </Button>
-                            )}
+                    <div className="flex items-center gap-2 border-l pl-4 ml-2">
+                        <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-min" />
+                        <span className="text-zinc-300">-</span>
+                        <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-min" />
+                    </div>
+
+                    {/* Quick Stats for Selection */}
+                    {selectionTotal > 0 && (
+                        <div className="ml-auto flex items-center gap-4 animate-in fade-in slide-in-from-right-5">
+                            <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded text-sm font-medium border border-blue-100">
+                                Seleção: R$ {selectionTotal.toFixed(2)}
+                            </div>
+                            <Button size="sm" onClick={() => processBatchAction('pay')} className={activeTab === 'payable' ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"}>
+                                <CheckCircle className="mr-2 h-3 w-3" /> {activeTab === 'payable' ? 'Baixar' : 'Receber'}
+                            </Button>
                         </div>
-                    ) : (
-                        <div className="text-sm text-zinc-400 italic">Selecione lotes para somar</div>
                     )}
                 </div>
-            </div>
 
-            {/* Cards de Resumo */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Global Pendente</CardTitle>
-                        <ArrowDownCircle className="h-4 w-4 text-red-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-red-600">R$ {Math.abs(totalPendingGlobal).toFixed(2)}</div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Global Pago</CardTitle>
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-green-600">R$ {Math.abs(totalPaidGlobal).toFixed(2)}</div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Por Fornecedor (Pendente)</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        {Object.keys(selectedBySupplier).length === 0 ? (
-                            <span className="text-xs text-muted-foreground whitespace-pre-wrap">Selecione lotes...</span>
-                        ) : (
-                            <div className="space-y-1 max-h-[100px] overflow-y-auto">
-                                {Object.entries(selectedBySupplier).map(([sup, amount]) => (
-                                    <div key={sup} className="flex justify-between text-xs">
-                                        <span>{sup}</span>
-                                        <span className="font-bold text-red-500">R$ {amount.toFixed(2)}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Por Comprador (Pendente)</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        {Object.keys(selectedByBuyer).length === 0 ? (
-                            <span className="text-xs text-muted-foreground">Selecione lotes...</span>
-                        ) : (
-                            <div className="space-y-1 max-h-[100px] overflow-y-auto">
-                                {Object.entries(selectedByBuyer).map(([buy, amount]) => (
-                                    <div key={buy} className="flex justify-between text-xs">
-                                        <span>{buy}</span>
-                                        <span className="font-bold text-red-500">R$ {amount.toFixed(2)}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* Batch List */}
-            {loading ? <Loader2 className="animate-spin h-8 w-8 mx-auto" /> : (
-                <div className="space-y-4">
-                    {filteredBatches.length === 0 && <div className="text-center py-10 text-muted-foreground">Nenhum lote encontrado.</div>}
-
-                    {filteredBatches.map(batch => (
-                        <Card key={batch.order_id} className={`overflow-hidden transition-all ${selectedBatches[batch.order_id] ? 'ring-2 ring-blue-500 shadow-md' : 'shadow-sm hover:shadow'}`}>
-                            {/* Header */}
-                            <div className="flex items-center p-4 bg-zinc-50 border-b gap-4">
-                                <Checkbox
-                                    id={`check-${batch.order_id}`}
-                                    checked={!!selectedBatches[batch.order_id]}
-                                    onCheckedChange={(c) => toggleBatchSelection(batch.order_id, c as boolean)}
-                                />
-                                <div className="flex-1 cursor-pointer" onClick={() => toggleExpand(batch.order_id)}>
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
-                                            <Layers className="h-4 w-4 text-zinc-400" />
-                                            <h3 className="font-semibold text-lg">{batch.order_nickname}</h3>
-                                            <Badge variant="outline">{batch.supplier_name}</Badge>
-                                            <Badge variant="secondary" className="bg-zinc-100 text-zinc-600">{batch.buyer_name}</Badge>
-                                        </div>
-                                        <div className="flex items-center gap-6">
-                                            <div className="text-right">
-                                                <div className="text-xs text-zinc-500">Pendente</div>
-                                                <div className={`font-bold ${batch.total_pending !== 0 ? 'text-red-500' : 'text-zinc-400'}`}>R$ {Math.abs(batch.total_pending).toFixed(2)}</div>
-                                            </div>
-                                            <div className="text-right">
-                                                <div className="text-xs text-zinc-500">Pago</div>
-                                                <div className="font-bold text-green-600">R$ {Math.abs(batch.total_paid).toFixed(2)}</div>
-                                            </div>
-                                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                                                {expandedBatches[batch.order_id] ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Expandable Content (Table) */}
-                            {expandedBatches[batch.order_id] && (
-                                <div className="p-0 animate-in slide-in-from-top-2">
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>Vencimento</TableHead>
-                                                <TableHead>Descrição</TableHead>
-                                                <TableHead>Comprador</TableHead>
-                                                <TableHead>Valor</TableHead>
-                                                <TableHead>Status</TableHead>
-                                                <TableHead className="text-right">Ações</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {batch.movements.map(mov => (
-                                                <TableRow key={mov.id} className="hover:bg-zinc-50">
-                                                    <TableCell>{mov.due_date ? new Date(mov.due_date).toLocaleDateString() : '-'}</TableCell>
-                                                    <TableCell className="font-medium">{mov.description}</TableCell>
-                                                    <TableCell className="text-zinc-600">{mov.detail_buyer}</TableCell>
-                                                    <TableCell className="font-bold">R$ {Math.abs(mov.amount).toFixed(2)}</TableCell>
-                                                    <TableCell>
-                                                        <Badge variant={mov.status === 'paid' ? 'default' : 'secondary'} className={mov.status === 'paid' ? 'bg-green-600' : 'bg-yellow-500 text-white'}>
-                                                            {mov.status === 'paid' ? 'Pago' : 'Pendente'}
-                                                        </Badge>
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        {mov.status === 'pending' && (
-                                                            <Button size="sm" variant="ghost" onClick={() => markAsPaid(mov.id)} title="Baixar">
-                                                                <CheckCircle className="h-4 w-4 text-green-600" />
-                                                            </Button>
-                                                        )}
-                                                        {mov.status === 'paid' && (isAdmin || isFinancial) && (
-                                                            <Button size="sm" variant="ghost" className="text-orange-500 hover:text-orange-700" onClick={() => handleReversePayment(mov.id)} title="Estornar Baixa">
-                                                                <RotateCcw className="h-4 w-4" />
-                                                            </Button>
-                                                        )}
-                                                        {isAdmin && (
-                                                            <Button size="sm" variant="ghost" onClick={() => deleteMovement(mov.id)} title="Excluir">
-                                                                <Trash2 className="h-4 w-4 text-red-400" />
-                                                            </Button>
-                                                        )}
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                </div>
-                            )}
-                        </Card>
-                    ))}
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">Total Pendente</CardTitle>
+                            <ArrowDownCircle className={`h-4 w-4 ${activeTab === 'payable' ? 'text-red-500' : 'text-zinc-500'}`} />
+                        </CardHeader>
+                        <CardContent>
+                            <div className={`text-2xl font-bold ${activeTab === 'payable' ? 'text-red-600' : 'text-zinc-700'}`}>R$ {totalPending.toFixed(2)}</div>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">Total Realizado</CardTitle>
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-green-600">R$ {totalPaid.toFixed(2)}</div>
+                        </CardContent>
+                    </Card>
                 </div>
-            )}
+
+                {loading ? <div className="p-10 flex justify-center"><Loader2 className="animate-spin h-8 w-8 text-zinc-400" /></div> : (
+                    <TabsContent value={activeTab} className="space-y-4 mt-0">
+                        {filteredBatches.length === 0 && (
+                            <div className="text-center py-12 bg-white rounded-lg border border-dashed text-zinc-400">
+                                Nenhum lançamento encontrado para esta visão.
+                            </div>
+                        )}
+
+                        {filteredBatches.map(batch => (
+                            <Card key={batch.order_id} className={`overflow-hidden transition-all duration-200 ${selectedBatches[batch.order_id] ? 'ring-2 ring-blue-500 shadow-md' : 'hover:shadow-md'}`}>
+                                <div className="flex items-center p-4 bg-white border-b gap-4">
+                                    <Checkbox
+                                        checked={!!selectedBatches[batch.order_id]}
+                                        onCheckedChange={(c) => toggleBatchSelection(batch.order_id, c as boolean)}
+                                    />
+                                    <div className="flex-1 cursor-pointer" onClick={() => toggleExpand(batch.order_id)}>
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <Layers className="h-4 w-4 text-zinc-400" />
+                                                <div className="flex flex-col">
+                                                    <h3 className="font-semibold text-zinc-800">{batch.order_nickname}</h3>
+                                                    <span className="text-xs text-zinc-500">ID: {batch.order_id.slice(0, 8)}...</span>
+                                                </div>
+                                                {batch.supplier_name !== '-' && <Badge variant="outline">{batch.supplier_name}</Badge>}
+                                                {batch.buyer_name !== '-' && <Badge variant="secondary">{batch.buyer_name}</Badge>}
+                                            </div>
+
+                                            <div className="flex items-center gap-8">
+                                                <div className="text-right min-w-[100px]">
+                                                    <div className="text-[10px] uppercase font-bold text-zinc-400">Pendente</div>
+                                                    <div className={`text-lg font-bold ${batch.visual_total_pending > 0 ? (activeTab === 'payable' ? 'text-red-600' : 'text-blue-600') : 'text-zinc-300'}`}>
+                                                        R$ {batch.visual_total_pending.toFixed(2)}
+                                                    </div>
+                                                </div>
+                                                <div className="text-right min-w-[100px]">
+                                                    <div className="text-[10px] uppercase font-bold text-zinc-400">Realizado</div>
+                                                    <div className="text-lg font-bold text-green-600">
+                                                        R$ {batch.visual_total_paid.toFixed(2)}
+                                                    </div>
+                                                </div>
+                                                <div className={`transition-transform duration-200 ${expandedBatches[batch.order_id] ? 'rotate-180' : ''}`}>
+                                                    <ChevronDown className="h-5 w-5 text-zinc-400" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {expandedBatches[batch.order_id] && (
+                                    <div className="animate-in slide-in-from-top-1 bg-zinc-50/50">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow className="hover:bg-transparent">
+                                                    <TableHead className="w-[120px]">Vencimento</TableHead>
+                                                    <TableHead>Descrição</TableHead>
+                                                    <TableHead>Conta</TableHead>
+                                                    <TableHead className="text-right">Valor</TableHead>
+                                                    <TableHead className="text-center w-[100px]">Status</TableHead>
+                                                    <TableHead className="text-right w-[100px]">Ações</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {batch.movements.map(mov => (
+                                                    <TableRow key={mov.id} className="group hover:bg-white">
+                                                        <TableCell className="text-xs font-medium text-zinc-600">
+                                                            {mov.due_date ? new Date(mov.due_date).toLocaleDateString() : '-'}
+                                                        </TableCell>
+                                                        <TableCell className="text-sm font-medium text-zinc-700">{mov.description}</TableCell>
+                                                        <TableCell className="text-xs text-zinc-500">{mov.detail_buyer}</TableCell>
+                                                        <TableCell className="text-right font-bold text-sm">
+                                                            R$ {mov.amount.toFixed(2)}
+                                                        </TableCell>
+                                                        <TableCell className="text-center">
+                                                            <Badge variant={mov.status === 'paid' ? 'default' : 'outline'} className={mov.status === 'paid' ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-100' : 'text-yellow-600 border-yellow-200 bg-yellow-50 hover:bg-yellow-50'}>
+                                                                {mov.status === 'paid' ? 'Pago' : 'Pendente'}
+                                                            </Badge>
+                                                        </TableCell>
+                                                        <TableCell className="text-right">
+                                                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                {mov.status === 'pending' && (
+                                                                    <Button size="icon" variant="ghost" className="h-6 w-6 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => markAsPaid(mov.id)} title="Baixar">
+                                                                        <CheckCircle className="h-4 w-4" />
+                                                                    </Button>
+                                                                )}
+                                                                {mov.status === 'paid' && (isAdmin || isFinancial) && (
+                                                                    <Button size="icon" variant="ghost" className="h-6 w-6 text-orange-500 hover:text-orange-700 hover:bg-orange-50" onClick={() => handleReversePayment(mov.id)} title="Estornar">
+                                                                        <RotateCcw className="h-4 w-4" />
+                                                                    </Button>
+                                                                )}
+                                                                {isAdmin && (
+                                                                    <Button size="icon" variant="ghost" className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => deleteMovement(mov.id)} title="Excluir">
+                                                                        <Trash2 className="h-4 w-4" />
+                                                                    </Button>
+                                                                )}
+                                                            </div>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                )}
+                            </Card>
+                        ))}
+                    </TabsContent>
+                )}
+            </Tabs>
         </div>
     );
 }

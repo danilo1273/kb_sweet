@@ -24,3 +24,117 @@ export interface BatchGroup {
     total_paid: number;
     buyer_name?: string;
 }
+
+export interface Ingredient {
+    id: string;
+    name: string;
+    category?: string;
+    unit: string;
+    stock_danilo: number;
+    stock_adriel: number;
+    cost: number;
+    cost_danilo?: number;
+    cost_adriel?: number;
+    min_stock: number;
+    unit_weight?: number; // Conversion factor
+    unit_type?: string;   // Secondary unit (e.g. 'g')
+    purchase_unit?: string;
+    purchase_unit_factor?: number;
+    type?: 'stock' | 'expense' | 'product';
+    is_product_entity?: boolean;
+}
+
+export interface PurchaseRequest {
+    id: string;
+    order_id: string;
+    item_name: string;
+    ingredient_id?: string;
+    quantity: number;
+    unit: string;
+    status: 'pending' | 'approved' | 'rejected' | 'edit_requested' | 'edit_approved';
+    cost: number;
+    supplier?: string;
+    destination?: 'danilo' | 'adriel';
+    created_at: string;
+    user_id?: string;
+    requested_by?: string;
+    change_reason?: string;
+    financial_status?: 'pending' | 'paid' | 'none';
+}
+
+export interface PurchaseOrder {
+    id: string;
+    nickname: string;
+    supplier_id?: string;
+    created_at: string;
+    created_by: string;
+    status: 'open' | 'closed' | 'partial';
+    total_value: number;
+    requests: PurchaseRequest[];
+    creator_name?: string;
+    suppliers?: { name: string }; // Join result
+    profiles?: { full_name: string }; // Join result
+}
+
+export interface Supplier {
+    id: string;
+    name: string;
+
+}
+
+export interface Category {
+    id: number;
+    name: string;
+    type: 'stock' | 'expense';
+}
+
+export interface ItemDraft {
+    item_name: string;
+    ingredient_id?: string;
+    quantity: number;
+    unit: string;
+    cost: number;
+    destination: 'danilo' | 'adriel';
+}
+
+export interface Sale {
+    id: string;
+    client_id?: string;
+    user_id: string;
+    total: number;
+    discount: number;
+    payment_method: string;
+    status: 'completed' | 'pending' | 'cancelled';
+    stock_source: 'danilo' | 'adriel';
+    created_at: string;
+    clients?: { name: string };
+    sale_items?: SaleItem[];
+}
+
+export interface SaleItem {
+    id: string;
+    sale_id: string;
+    product_id: string;
+    quantity: number;
+    unit_price: number;
+    cost_price_snapshot: number;
+    products?: { name: string };
+}
+
+export interface POSProduct {
+    id: string;
+    name: string;
+    price: number;
+    cost: number;
+    category: string;
+    stock_danilo: number;
+    stock_adriel: number;
+}
+
+export interface POSOrderItem {
+    tempId: string;
+    product: POSProduct;
+    quantity: number;
+    unit_price: number;
+    total: number;
+}
