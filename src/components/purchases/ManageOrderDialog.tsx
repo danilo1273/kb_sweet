@@ -179,48 +179,96 @@ export function ManageOrderDialog({
 
                         <div className="space-y-2">
                             <h4 className="font-semibold text-sm text-zinc-700">Itens neste Lote ({order.requests?.length || 0})</h4>
-                            <div className="border rounded bg-white overflow-auto max-h-[300px]">
-                                <Table>
-                                    <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qtd</TableHead><TableHead>Custo</TableHead><TableHead>Status</TableHead>{!isReadOnly && <TableHead className="text-right">Ação</TableHead>}</TableRow></TableHeader>
-                                    <TableBody>
-                                        {order.requests?.map((item: any) => (
-                                            <TableRow key={item.id}>
-                                                <TableCell>{item.item_name}</TableCell>
-                                                <TableCell>{item.quantity} {item.unit}</TableCell>
-                                                <TableCell>{formatCurrency(Number(item.cost))}</TableCell>
-                                                <TableCell>
-                                                    {item.financial_status === 'paid' ? <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge> : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>}
-                                                </TableCell>
-                                                {!isReadOnly && (
-                                                    <TableCell className="text-right flex justify-end gap-1">
-                                                        {item.status === 'pending' && (
-                                                            <>
-                                                                <Button variant="ghost" size="sm" onClick={() => approveRequest(item, true)} className="h-6 w-6 p-0 text-green-600 hover:text-green-700 hover:bg-green-50" title="Aprovar">
-                                                                    <Check className="h-4 w-4" />
-                                                                </Button>
-                                                                <Button variant="ghost" size="sm" onClick={() => approveRequest(item, false)} className="h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-50" title="Rejeitar">
-                                                                    <Ban className="h-4 w-4" />
-                                                                </Button>
-                                                            </>
-                                                        )}
-                                                        {item.financial_status !== 'paid' && (
-                                                            <>
-                                                                <Button variant="ghost" size="sm" onClick={() => onEditItem(item)} className="h-6 w-6 p-0 text-blue-500">
-                                                                    <Pencil className="h-3 w-3" />
-                                                                </Button>
-                                                                <Button variant="ghost" size="sm" onClick={() => handleDeleteItem(item.id, item.status)} className="h-6 w-6 p-0 text-red-400">
-                                                                    <Trash2 className="h-3 w-3" />
-                                                                </Button>
-                                                            </>
-                                                        )}
+                            <div className="rounded bg-white overflow-hidden max-h-[300px] overflow-y-auto">
+                                {/* Mobile View: Cards */}
+                                <div className="md:hidden space-y-2 p-1">
+                                    {order.requests?.map((item: any) => (
+                                        <div key={item.id} className="p-3 border rounded-md shadow-sm bg-white space-y-2">
+                                            <div className="flex justify-between items-start">
+                                                <div className="font-medium text-sm w-[60%]">{item.item_name}</div>
+                                                <div className="text-right font-bold text-sm w-[40%]">{formatCurrency(Number(item.cost))}</div>
+                                            </div>
+                                            <div className="flex justify-between items-center text-xs text-zinc-500">
+                                                <span>{item.quantity} {item.unit}</span>
+                                                {item.financial_status === 'paid' ?
+                                                    <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge>
+                                                    : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>
+                                                }
+                                            </div>
+                                            {!isReadOnly && (
+                                                <div className="flex justify-end gap-2 pt-2 border-t mt-1">
+                                                    {item.status === 'pending' && (
+                                                        <>
+                                                            <Button variant="ghost" size="sm" onClick={() => approveRequest(item, true)} className="h-8 w-8 p-0 text-green-600 bg-green-50">
+                                                                <Check className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button variant="ghost" size="sm" onClick={() => approveRequest(item, false)} className="h-8 w-8 p-0 text-red-600 bg-red-50">
+                                                                <Ban className="h-4 w-4" />
+                                                            </Button>
+                                                        </>
+                                                    )}
+                                                    {item.financial_status !== 'paid' && (
+                                                        <>
+                                                            <Button variant="ghost" size="sm" onClick={() => onEditItem(item)} className="h-8 w-8 p-0 text-blue-500 bg-blue-50">
+                                                                <Pencil className="h-3 w-3" />
+                                                            </Button>
+                                                            <Button variant="ghost" size="sm" onClick={() => handleDeleteItem(item.id, item.status)} className="h-8 w-8 p-0 text-red-400 bg-red-50">
+                                                                <Trash2 className="h-3 w-3" />
+                                                            </Button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Desktop View: Table */}
+                                <div className="hidden md:block">
+                                    <Table>
+                                        <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qtd</TableHead><TableHead>Custo</TableHead><TableHead>Status</TableHead>{!isReadOnly && <TableHead className="text-right">Ação</TableHead>}</TableRow></TableHeader>
+                                        <TableBody>
+                                            {order.requests?.map((item: any) => (
+                                                <TableRow key={item.id}>
+                                                    <TableCell>{item.item_name}</TableCell>
+                                                    <TableCell>{item.quantity} {item.unit}</TableCell>
+                                                    <TableCell>{formatCurrency(Number(item.cost))}</TableCell>
+                                                    <TableCell>
+                                                        {item.financial_status === 'paid' ? <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge> : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>}
                                                     </TableCell>
-                                                )}
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
+                                                    {!isReadOnly && (
+                                                        <TableCell className="text-right flex justify-end gap-1">
+                                                            {item.status === 'pending' && (
+                                                                <>
+                                                                    <Button variant="ghost" size="sm" onClick={() => approveRequest(item, true)} className="h-6 w-6 p-0 text-green-600 hover:text-green-700 hover:bg-green-50" title="Aprovar">
+                                                                        <Check className="h-4 w-4" />
+                                                                    </Button>
+                                                                    <Button variant="ghost" size="sm" onClick={() => approveRequest(item, false)} className="h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-50" title="Rejeitar">
+                                                                        <Ban className="h-4 w-4" />
+                                                                    </Button>
+                                                                </>
+                                                            )}
+                                                            {item.financial_status !== 'paid' && (
+                                                                <>
+                                                                    <Button variant="ghost" size="sm" onClick={() => onEditItem(item)} className="h-6 w-6 p-0 text-blue-500">
+                                                                        <Pencil className="h-3 w-3" />
+                                                                    </Button>
+                                                                    <Button variant="ghost" size="sm" onClick={() => handleDeleteItem(item.id, item.status)} className="h-6 w-6 p-0 text-red-400">
+                                                                        <Trash2 className="h-3 w-3" />
+                                                                    </Button>
+                                                                </>
+                                                            )}
+                                                        </TableCell>
+                                                    )}
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
                             </div>
                         </div>
+
+
 
                         {!isReadOnly && (
                             <div className="pt-4 border-t space-y-3">
@@ -300,6 +348,7 @@ export function ManageOrderDialog({
                     </div>
                 )}
 
+
                 <DialogFooter className="sm:justify-between">
                     {order && !isReadOnly && (
                         <div className="flex gap-2">
@@ -322,11 +371,7 @@ export function ManageOrderDialog({
                     )}
                     <Button variant="outline" onClick={() => onOpenChange(false)}>Fechar</Button>
                 </DialogFooter>
-
-                <DialogFooter>
-                    <Button variant="outline" onClick={() => onOpenChange(false)}>Fechar</Button>
-                </DialogFooter>
-            </DialogContent>
+            </DialogContent >
         </Dialog >
     );
 }

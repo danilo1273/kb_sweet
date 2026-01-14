@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Loader2, Plus, ShoppingCart, TrendingUp, Edit, X, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -144,7 +145,105 @@ export default function Sales() {
                 </Card>
             </div>
 
-            <div className="bg-white rounded-lg border shadow-sm">
+            {/* Mobile View: Cards */}
+            <div className="md:hidden space-y-3 mb-4">
+                {loading ? (
+                    <div className="text-center py-8"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>
+                ) : sales.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">Nenhuma venda registrada.</div>
+                ) : (
+                    sales.map(sale => (
+                        <div key={sale.id} className="bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3">
+                            <div className="flex justify-between items-start">
+                                <div>
+                                    <div className="text-xs text-zinc-500">{new Date(sale.created_at).toLocaleString()}</div>
+                                    <div className="font-bold text-zinc-900">{sale.clients?.name || 'Consumidor Final'}</div>
+                                </div>
+                                <div className="flex flex-col items-end gap-1">
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${sale.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                        sale.status === 'canceled' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
+                                        }`}>
+                                        {sale.status === 'completed' ? 'Concluída' : sale.status === 'canceled' ? 'Cancelada' : sale.status}
+                                    </span>
+                                    {sale.edit_status === 'approved' && (
+                                        <span className="text-[10px] text-green-600 font-medium">Edição OK</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="flex gap-2 flex-wrap">
+                                <Badge variant="outline" className="text-xs capitalize">{sale.payment_method === 'money' ? 'Dinheiro' : sale.payment_method}</Badge>
+                                <Badge variant="secondary" className={`text-xs ${sale.stock_source === 'danilo' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                                    Estoque {sale.stock_source === 'danilo' ? 'DANILO' : 'ADRIEL'}
+                                </Badge>
+                            </div>
+
+                            <div className="flex justify-between items-center pt-3 border-t mt-1">
+                                <div className="font-bold text-lg text-green-600">R$ {Number(sale.total).toFixed(2)}</div>
+                                <div className="flex gap-2">
+                                    {sale.edit_status === 'requested' && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-8 text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200"
+                                            onClick={async () => {
+                                                if (!confirm("Autorizar edição desta venda?")) return;
+                                                await supabase.from('sales').update({ edit_status: 'approved' }).eq('id', sale.id);
+                                                toast({ title: "Edição Autorizada" });
+                                                fetchSales();
+                                            }}
+                                        >
+                                            Autorizar
+                                        </Button>
+                                    )}
+
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500 bg-blue-50" onClick={() => handleEditClick(sale)}>
+                                        <Edit className="h-4 w-4" />
+                                    </Button>
+                                    {sale.status !== 'canceled' && (
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 text-red-500 bg-red-50"
+                                            onClick={async () => {
+                                                if (!confirm('Tem certeza que deseja EXCLUIR permanentemente? O estoque será devolvido.')) return;
+                                                setLoading(true);
+                                                try {
+                                                    const { data: items } = await supabase.from('sale_items').select('*').eq('sale_id', sale.id);
+                                                    if (items) {
+                                                        for (const item of items) {
+                                                            const { data: prod } = await supabase.from('products').select('*').eq('id', item.product_id).single();
+                                                            if (prod) {
+                                                                const field = sale.stock_source === 'danilo' ? 'stock_danilo' : 'stock_adriel';
+                                                                const newStock = (prod[field] || 0) + item.quantity;
+                                                                await supabase.from('products').update({ [field]: newStock }).eq('id', item.product_id);
+                                                            }
+                                                        }
+                                                    }
+                                                    await supabase.from('financial_movements').delete().eq('detail_order_id', sale.id);
+                                                    await supabase.from('sale_items').delete().eq('sale_id', sale.id);
+                                                    const { error } = await supabase.from('sales').delete().eq('id', sale.id);
+                                                    if (error) throw error;
+                                                    toast({ title: "Venda excluída!" });
+                                                    fetchSales();
+                                                } catch (e: any) {
+                                                    alert('Erro: ' + e.message);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }}
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    ))
+                )}
+            </div>
+
+            <div className="hidden md:block bg-white rounded-lg border shadow-sm">
                 <Table>
                     <TableHeader>
                         <TableRow>

@@ -381,7 +381,7 @@ export default function Financial() {
     }
 
     return (
-        <div className="flex-1 p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
+        <div className="flex-1 p-4 md:p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
             <div className="flex items-center justify-between">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight">Financeiro</h2>
@@ -519,56 +519,98 @@ export default function Financial() {
 
                                 {expandedBatches[batch.order_id] && (
                                     <div className="animate-in slide-in-from-top-1 bg-zinc-50/50">
-                                        <Table>
-                                            <TableHeader>
-                                                <TableRow className="hover:bg-transparent">
-                                                    <TableHead className="w-[120px]">Vencimento</TableHead>
-                                                    <TableHead>Descrição</TableHead>
-                                                    <TableHead>Conta</TableHead>
-                                                    <TableHead className="text-right">Valor</TableHead>
-                                                    <TableHead className="text-center w-[100px]">Status</TableHead>
-                                                    <TableHead className="text-right w-[100px]">Ações</TableHead>
-                                                </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {batch.movements.map(mov => (
-                                                    <TableRow key={mov.id} className="group hover:bg-white">
-                                                        <TableCell className="text-xs font-medium text-zinc-600">
-                                                            {mov.due_date ? new Date(mov.due_date).toLocaleDateString() : '-'}
-                                                        </TableCell>
-                                                        <TableCell className="text-sm font-medium text-zinc-700">{mov.description}</TableCell>
-                                                        <TableCell className="text-xs text-zinc-500">{mov.detail_buyer}</TableCell>
-                                                        <TableCell className="text-right font-bold text-sm">
-                                                            R$ {mov.amount.toFixed(2)}
-                                                        </TableCell>
-                                                        <TableCell className="text-center">
-                                                            <Badge variant={mov.status === 'paid' ? 'default' : 'outline'} className={mov.status === 'paid' ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-100' : 'text-yellow-600 border-yellow-200 bg-yellow-50 hover:bg-yellow-50'}>
-                                                                {mov.status === 'paid' ? 'Pago' : 'Pendente'}
-                                                            </Badge>
-                                                        </TableCell>
-                                                        <TableCell className="text-right">
-                                                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                {mov.status === 'pending' && (
-                                                                    <Button size="icon" variant="ghost" className="h-6 w-6 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => markAsPaid(mov.id)} title="Baixar">
-                                                                        <CheckCircle className="h-4 w-4" />
-                                                                    </Button>
-                                                                )}
-                                                                {mov.status === 'paid' && (isAdmin || isFinancial) && (
-                                                                    <Button size="icon" variant="ghost" className="h-6 w-6 text-orange-500 hover:text-orange-700 hover:bg-orange-50" onClick={() => handleReversePayment(mov.id)} title="Estornar">
-                                                                        <RotateCcw className="h-4 w-4" />
-                                                                    </Button>
-                                                                )}
-                                                                {isAdmin && (
-                                                                    <Button size="icon" variant="ghost" className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => deleteMovement(mov.id)} title="Excluir">
-                                                                        <Trash2 className="h-4 w-4" />
-                                                                    </Button>
-                                                                )}
-                                                            </div>
-                                                        </TableCell>
+                                        {/* Mobile View: Cards */}
+                                        <div className="md:hidden space-y-2 p-2">
+                                            {batch.movements.map(mov => (
+                                                <div key={mov.id} className="bg-white p-3 rounded-lg border shadow-sm flex flex-col gap-3">
+                                                    <div className="flex justify-between items-start">
+                                                        <div>
+                                                            <div className="font-medium text-sm text-zinc-900">{mov.description}</div>
+                                                            <div className="text-xs text-zinc-500">{mov.due_date ? new Date(mov.due_date).toLocaleDateString() : '-'} • {mov.detail_buyer}</div>
+                                                        </div>
+                                                        <div className="font-bold text-zinc-900">R$ {mov.amount.toFixed(2)}</div>
+                                                    </div>
+
+                                                    <div className="flex justify-between items-center border-t pt-2 mt-1">
+                                                        <Badge variant={mov.status === 'paid' ? 'default' : 'outline'} className={mov.status === 'paid' ? 'bg-green-100 text-green-700 hover:bg-green-100' : 'text-yellow-700 bg-yellow-50 mobile-badge'}>
+                                                            {mov.status === 'paid' ? 'Pago' : 'Pendente'}
+                                                        </Badge>
+
+                                                        <div className="flex gap-2">
+                                                            {mov.status === 'pending' && (
+                                                                <Button size="sm" variant="ghost" className="h-8 w-8 text-green-600 bg-green-50" onClick={() => markAsPaid(mov.id)}>
+                                                                    <CheckCircle className="h-4 w-4" />
+                                                                </Button>
+                                                            )}
+                                                            {mov.status === 'paid' && (isAdmin || isFinancial) && (
+                                                                <Button size="sm" variant="ghost" className="h-8 w-8 text-orange-600 bg-orange-50" onClick={() => handleReversePayment(mov.id)}>
+                                                                    <RotateCcw className="h-4 w-4" />
+                                                                </Button>
+                                                            )}
+                                                            {isAdmin && (
+                                                                <Button size="sm" variant="ghost" className="h-8 w-8 text-red-600 bg-red-50" onClick={() => deleteMovement(mov.id)}>
+                                                                    <Trash2 className="h-4 w-4" />
+                                                                </Button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* Desktop View: Table */}
+                                        <div className="hidden md:block">
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow className="hover:bg-transparent">
+                                                        <TableHead className="w-[120px]">Vencimento</TableHead>
+                                                        <TableHead>Descrição</TableHead>
+                                                        <TableHead>Conta</TableHead>
+                                                        <TableHead className="text-right">Valor</TableHead>
+                                                        <TableHead className="text-center w-[100px]">Status</TableHead>
+                                                        <TableHead className="text-right w-[100px]">Ações</TableHead>
                                                     </TableRow>
-                                                ))}
-                                            </TableBody>
-                                        </Table>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {batch.movements.map(mov => (
+                                                        <TableRow key={mov.id} className="group hover:bg-white">
+                                                            <TableCell className="text-xs font-medium text-zinc-600">
+                                                                {mov.due_date ? new Date(mov.due_date).toLocaleDateString() : '-'}
+                                                            </TableCell>
+                                                            <TableCell className="text-sm font-medium text-zinc-700">{mov.description}</TableCell>
+                                                            <TableCell className="text-xs text-zinc-500">{mov.detail_buyer}</TableCell>
+                                                            <TableCell className="text-right font-bold text-sm">
+                                                                R$ {mov.amount.toFixed(2)}
+                                                            </TableCell>
+                                                            <TableCell className="text-center">
+                                                                <Badge variant={mov.status === 'paid' ? 'default' : 'outline'} className={mov.status === 'paid' ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-100' : 'text-yellow-600 border-yellow-200 bg-yellow-50 hover:bg-yellow-50'}>
+                                                                    {mov.status === 'paid' ? 'Pago' : 'Pendente'}
+                                                                </Badge>
+                                                            </TableCell>
+                                                            <TableCell className="text-right">
+                                                                <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                    {mov.status === 'pending' && (
+                                                                        <Button size="icon" variant="ghost" className="h-6 w-6 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => markAsPaid(mov.id)} title="Baixar">
+                                                                            <CheckCircle className="h-4 w-4" />
+                                                                        </Button>
+                                                                    )}
+                                                                    {mov.status === 'paid' && (isAdmin || isFinancial) && (
+                                                                        <Button size="icon" variant="ghost" className="h-6 w-6 text-orange-500 hover:text-orange-700 hover:bg-orange-50" onClick={() => handleReversePayment(mov.id)} title="Estornar">
+                                                                            <RotateCcw className="h-4 w-4" />
+                                                                        </Button>
+                                                                    )}
+                                                                    {isAdmin && (
+                                                                        <Button size="icon" variant="ghost" className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => deleteMovement(mov.id)} title="Excluir">
+                                                                            <Trash2 className="h-4 w-4" />
+                                                                        </Button>
+                                                                    )}
+                                                                </div>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                </TableBody>
+                                            </Table>
+                                        </div>
                                     </div>
                                 )}
                             </Card>
