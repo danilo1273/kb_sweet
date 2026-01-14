@@ -244,59 +244,99 @@ export default function AdminUsers() {
             </div>
 
             <div className="rounded-md border bg-white shadow-sm overflow-hidden">
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Nome</TableHead>
-                            <TableHead>Email</TableHead>
-                            <TableHead>ID (Ref)</TableHead>
-                            <TableHead>Funções (Roles)</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead className="text-right">Ações</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {loading ? (
-                            <TableRow><TableCell colSpan={6} className="text-center"><Loader2 className="animate-spin mx-auto" /></TableCell></TableRow>
-                        ) : users.map(u => (
-                            <TableRow key={u.id}>
-                                <TableCell className="font-medium">
-                                    <div className="flex flex-col">
-                                        <span>{u.full_name || 'Sem nome'}</span>
-                                    </div>
-                                </TableCell>
-                                <TableCell>{u.email || '-'}</TableCell>
-                                <TableCell className="font-mono text-xs text-muted-foreground">{u.id.substring(0, 8)}...</TableCell>
-                                <TableCell>
-                                    <div className="flex flex-wrap gap-1">
-                                        {(u.roles || [])
-                                            .filter(r => r !== 'pending' || (u.roles || []).length === 1) // Esconde 'pending' se tiver outros cargos
-                                            .map(r => (
-                                                <Badge key={r} variant="outline" className="text-xs">
-                                                    {ROLE_LABELS[r] || r}
-                                                </Badge>
-                                            ))}
-                                    </div>
-                                </TableCell>
-                                <TableCell>
-                                    <Badge variant={u.status === 'active' ? 'default' : 'secondary'} className={u.status === 'active' ? 'bg-green-600' : ''}>
-                                        {u.status || 'active'}
-                                    </Badge>
-                                </TableCell>
-                                <TableCell className="text-right">
-                                    <div className="flex justify-end gap-1">
-                                        <Button variant="ghost" size="icon" onClick={() => openEditRoles(u)} title="Editar Usuário">
-                                            <Pencil className="h-4 w-4" />
-                                        </Button>
-                                        <Button variant="ghost" size="icon" title="Em breve: Bloquear">
-                                            <Shield className="h-4 w-4 text-zinc-400" />
-                                        </Button>
-                                    </div>
-                                </TableCell>
+                <div className="hidden md:block">
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>Nome</TableHead>
+                                <TableHead>Email</TableHead>
+                                <TableHead>ID (Ref)</TableHead>
+                                <TableHead>Funções (Roles)</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead className="text-right">Ações</TableHead>
                             </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
+                        </TableHeader>
+                        <TableBody>
+                            {loading ? (
+                                <TableRow><TableCell colSpan={6} className="text-center"><Loader2 className="animate-spin mx-auto" /></TableCell></TableRow>
+                            ) : users.map(u => (
+                                <TableRow key={u.id}>
+                                    <TableCell className="font-medium">
+                                        <div className="flex flex-col">
+                                            <span>{u.full_name || 'Sem nome'}</span>
+                                        </div>
+                                    </TableCell>
+                                    <TableCell>{u.email || '-'}</TableCell>
+                                    <TableCell className="font-mono text-xs text-muted-foreground">{u.id.substring(0, 8)}...</TableCell>
+                                    <TableCell>
+                                        <div className="flex flex-wrap gap-1">
+                                            {(u.roles || [])
+                                                .filter(r => r !== 'pending' || (u.roles || []).length === 1) // Esconde 'pending' se tiver outros cargos
+                                                .map(r => (
+                                                    <Badge key={r} variant="outline" className="text-xs">
+                                                        {ROLE_LABELS[r] || r}
+                                                    </Badge>
+                                                ))}
+                                        </div>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Badge variant={u.status === 'active' ? 'default' : 'secondary'} className={u.status === 'active' ? 'bg-green-600' : ''}>
+                                            {u.status || 'active'}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        <div className="flex justify-end gap-1">
+                                            <Button variant="ghost" size="icon" onClick={() => openEditRoles(u)} title="Editar Usuário">
+                                                <Pencil className="h-4 w-4" />
+                                            </Button>
+                                            <Button variant="ghost" size="icon" title="Em breve: Bloquear">
+                                                <Shield className="h-4 w-4 text-zinc-400" />
+                                            </Button>
+                                        </div>
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </div>
+
+                {/* Mobile Cards */}
+                <div className="md:hidden space-y-2 p-2 bg-zinc-50">
+                    {loading ? (
+                        <div className="flex justify-center p-4"><Loader2 className="animate-spin" /></div>
+                    ) : users.map(u => (
+                        <div key={u.id} className="bg-white p-3 rounded border shadow-sm flex flex-col gap-3">
+                            <div className="flex justify-between items-start">
+                                <div>
+                                    <div className="font-bold text-zinc-900">{u.full_name || 'Sem nome'}</div>
+                                    <div className="text-xs text-zinc-500">{u.email || '-'}</div>
+                                    <div className="text-[10px] text-zinc-400 font-mono mt-0.5">{u.id.substring(0, 8)}</div>
+                                </div>
+                                <div className="flex gap-1">
+                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditRoles(u)}>
+                                        <Pencil className="h-4 w-4 text-zinc-500" />
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 items-center justify-between border-t pt-2">
+                                <div className="flex flex-wrap gap-1">
+                                    {(u.roles || [])
+                                        .filter(r => r !== 'pending' || (u.roles || []).length === 1)
+                                        .map(r => (
+                                            <Badge key={r} variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-100">
+                                                {ROLE_LABELS[r] || r}
+                                            </Badge>
+                                        ))}
+                                </div>
+
+                                <Badge variant={u.status === 'active' ? 'default' : 'secondary'} className={u.status === 'active' ? 'bg-green-600' : ''}>
+                                    {u.status || 'active'}
+                                </Badge>
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
 
             {/* Criar Usuário Dialog */}

@@ -13,6 +13,15 @@ export interface FinancialMovement {
     detail_buyer?: string;
     detail_order_nickname?: string;
     detail_order_id?: string;
+    bank_account_id?: string; // Link to BankAccount
+    detail_bank_name?: string; // Enriched
+}
+
+export interface BankAccount {
+    id: string;
+    name: string;
+    initial_balance: number;
+    created_at: string;
 }
 
 export interface BatchGroup {
@@ -68,10 +77,11 @@ export interface PurchaseOrder {
     supplier_id?: string;
     created_at: string;
     created_by: string;
-    status: 'open' | 'closed' | 'partial';
+    status: 'open' | 'closed' | 'partial' | 'edit_requested' | 'edit_approved';
     total_value: number;
     requests: PurchaseRequest[];
     creator_name?: string;
+    supplier_name?: string;
     suppliers?: { name: string }; // Join result
     profiles?: { full_name: string }; // Join result
 }
@@ -129,6 +139,7 @@ export interface POSProduct {
     category: string;
     stock_danilo: number;
     stock_adriel: number;
+    unit?: string;
 }
 
 export interface POSOrderItem {

@@ -24,7 +24,9 @@ interface ManageOrderDialogProps {
     formatStatus: (status: string) => string;
     onEditItem: (item: any) => void;
     currentUserId: string;
+    currentUserRoles: string[];
     onDeleteOrder: (id: string) => void;
+    onOrderUpdated?: () => void;
 }
 
 export function ManageOrderDialog({
@@ -40,10 +42,24 @@ export function ManageOrderDialog({
     formatStatus,
     onEditItem,
     currentUserId,
-    onDeleteOrder
+    currentUserRoles,
+    onDeleteOrder,
+    onOrderUpdated
 }: ManageOrderDialogProps) {
     const { toast } = useToast();
-    const { addRequestToOrder, deleteRequestFromOrder, updateOrderHeader, fetchOrders, approveRequest } = usePurchases();
+    const { addRequestToOrder, deleteRequestFromOrder, updateOrderHeader, fetchOrders, approveRequest, batchApproveRequests, updateOrderStatus } = usePurchases();
+
+    // LOCK LOGIC
+    const hasItems = order?.requests?.length > 0;
+    const allItemsApproved = hasItems && order?.requests?.every((r: any) => r.status === 'approved');
+    const isEditApproved = order?.status === 'edit_approved';
+    const isEditRequested = order?.status === 'edit_requested';
+
+    // Locked se: (Todos Aprovados E não está Edit Approved) OU (Está explicitamente Edit Requested)
+    const isLocked = (allItemsApproved && !isEditApproved) || isEditRequested;
+
+    // Se estiver locked, campos de edição ficam desabilitados
+    const disableEditing = isReadOnly || isLocked;
 
     // Local state for header editing
     const [headerNickname, setHeaderNickname] = useState(order?.nickname || '');
@@ -77,6 +93,7 @@ export function ManageOrderDialog({
         if (success) {
             toast({ title: "Cabeçalho atualizado" });
             fetchOrders();
+            onOrderUpdated?.();
         }
     }
 
@@ -102,6 +119,7 @@ export function ManageOrderDialog({
         if (success) {
             setNewItemDraft({ ingredient_id: undefined, item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo' });
             fetchOrders();
+            onOrderUpdated?.();
         }
     }
 
@@ -113,20 +131,14 @@ export function ManageOrderDialog({
         }
 
         const success = await deleteRequestFromOrder(itemId, status);
-        if (success) fetchOrders();
+        if (success) {
+            fetchOrders();
+            onOrderUpdated?.();
+        }
     }
 
-    // Effect to sync header state when order opens/changes
-    // React.useEffect(() => {
-    //     if (order) {
-    //         setHeaderNickname(order.nickname);
-    //         setHeaderSupplier(order.supplier_id);
-    //     }
-    // }, [order]);
-    // This is tricky if user is typing. Let's do it onOpenChange?
-    // Or just use 'key' on the dialog to reset state?
-    // The parent controls 'order', so if we save and refetch, 'order' changes.
-    // So useEffect is okay if 'order' object reference changes.
+    const canApprove = currentUserRoles?.includes('approver');
+    const isAdmin = currentUserRoles?.includes('admin');
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -144,7 +156,7 @@ export function ManageOrderDialog({
                                     <Select
                                         value={headerSupplier}
                                         onValueChange={setHeaderSupplier}
-                                        disabled={isReadOnly}
+                                        disabled={disableEditing}
                                     >
                                         <SelectTrigger className="flex-1"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                         <SelectContent>
@@ -152,7 +164,7 @@ export function ManageOrderDialog({
                                             {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
-                                    {!isReadOnly && (
+                                    {!disableEditing && (
                                         <Button variant="outline" size="icon" onClick={onNewSupplier} title="Novo Fornecedor">
                                             <Plus className="h-4 w-4" />
                                         </Button>
@@ -165,10 +177,10 @@ export function ManageOrderDialog({
                                     <Input
                                         value={headerNickname}
                                         onChange={e => setHeaderNickname(e.target.value)}
-                                        readOnly={isReadOnly}
-                                        className={isReadOnly ? "bg-zinc-100" : ""}
+                                        readOnly={disableEditing}
+                                        className={disableEditing ? "bg-zinc-100" : ""}
                                     />
-                                    {!isReadOnly && (
+                                    {!disableEditing && (
                                         <Button onClick={handleSaveHeader} disabled={isSavingHeader} size="icon" variant="ghost">
                                             {isSavingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                                         </Button>
@@ -195,9 +207,9 @@ export function ManageOrderDialog({
                                                     : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>
                                                 }
                                             </div>
-                                            {!isReadOnly && (
+                                            {!disableEditing && (
                                                 <div className="flex justify-end gap-2 pt-2 border-t mt-1">
-                                                    {item.status === 'pending' && (
+                                                    {item.status === 'pending' && canApprove && (
                                                         <>
                                                             <Button variant="ghost" size="sm" onClick={() => approveRequest(item, true)} className="h-8 w-8 p-0 text-green-600 bg-green-50">
                                                                 <Check className="h-4 w-4" />
@@ -226,7 +238,7 @@ export function ManageOrderDialog({
                                 {/* Desktop View: Table */}
                                 <div className="hidden md:block">
                                     <Table>
-                                        <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qtd</TableHead><TableHead>Custo</TableHead><TableHead>Status</TableHead>{!isReadOnly && <TableHead className="text-right">Ação</TableHead>}</TableRow></TableHeader>
+                                        <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qtd</TableHead><TableHead>Custo</TableHead><TableHead>Status</TableHead>{!disableEditing && <TableHead className="text-right">Ação</TableHead>}</TableRow></TableHeader>
                                         <TableBody>
                                             {order.requests?.map((item: any) => (
                                                 <TableRow key={item.id}>
@@ -236,9 +248,9 @@ export function ManageOrderDialog({
                                                     <TableCell>
                                                         {item.financial_status === 'paid' ? <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge> : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>}
                                                     </TableCell>
-                                                    {!isReadOnly && (
+                                                    {!disableEditing && (
                                                         <TableCell className="text-right flex justify-end gap-1">
-                                                            {item.status === 'pending' && (
+                                                            {item.status === 'pending' && canApprove && (
                                                                 <>
                                                                     <Button variant="ghost" size="sm" onClick={() => approveRequest(item, true)} className="h-6 w-6 p-0 text-green-600 hover:text-green-700 hover:bg-green-50" title="Aprovar">
                                                                         <Check className="h-4 w-4" />
@@ -270,7 +282,7 @@ export function ManageOrderDialog({
 
 
 
-                        {!isReadOnly && (
+                        {!isReadOnly && !isLocked && (
                             <div className="pt-4 border-t space-y-3">
                                 <h4 className="font-semibold text-sm text-zinc-700">Adicionar Novo Item ao Lote</h4>
                                 <div className="grid grid-cols-2 md:grid-cols-12 gap-2 items-end bg-zinc-50 p-3 rounded border">
@@ -303,7 +315,7 @@ export function ManageOrderDialog({
                                             <SelectContent>
                                                 {(() => {
                                                     const ing = ingredients.find(i => i.id === newItemDraft.ingredient_id);
-                                                    if (!ing) return <SelectItem value="un">un</SelectItem>;
+                                                    if (!ing) return null;
                                                     return (
                                                         <>
                                                             <SelectItem value={ing.unit}>Estoque ({ing.unit})</SelectItem>
@@ -315,7 +327,7 @@ export function ManageOrderDialog({
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                    <div className="col-span-1 md:col-span-2">
+                                    <div className="col-span-1 md:col-span-1">
                                         <Label className="text-[10px]">Destino</Label>
                                         <Select value={newItemDraft.destination} onValueChange={(val: any) => setNewItemDraft({ ...newItemDraft, destination: val })}>
                                             <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
@@ -349,9 +361,83 @@ export function ManageOrderDialog({
                 )}
 
 
-                <DialogFooter className="sm:justify-between">
-                    {order && !isReadOnly && (
-                        <div className="flex gap-2">
+                <DialogFooter className="sm:justify-between gap-2 flex-wrap">
+                    <div className="flex gap-2 order-2 sm:order-1">
+                        {order && order.requests?.some((r: any) => r.status === 'pending') && !isReadOnly && canApprove && (
+                            <>
+                                <Button
+                                    variant="outline"
+                                    onClick={async () => {
+                                        if (confirm("Aprovar TODOS os itens pendentes?")) {
+                                            await batchApproveRequests(order.requests, true);
+                                            onOpenChange(false);
+                                        }
+                                    }}
+                                    className="text-green-600 border-green-200 hover:bg-green-50"
+                                >
+                                    <Check className="mr-2 h-4 w-4" /> Aprovar Todos
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    onClick={async () => {
+                                        if (confirm("Reprovar TODOS os itens pendentes?")) {
+                                            await batchApproveRequests(order.requests, false);
+                                            onOpenChange(false);
+                                        }
+                                    }}
+                                    className="text-red-600 border-red-200 hover:bg-red-50"
+                                >
+                                    <Ban className="mr-2 h-4 w-4" /> Reprovar Todos
+                                </Button>
+                            </>
+                        )}
+
+                        {/* Approver Actions for Edit Request */}
+                        {isEditRequested && canApprove && (
+                            <>
+                                <Button
+                                    variant="outline"
+                                    onClick={async () => {
+                                        await updateOrderStatus(order.id, 'edit_approved');
+                                        onOrderUpdated?.();
+                                    }}
+                                    className="text-white bg-indigo-600 hover:bg-indigo-700"
+                                >
+                                    <Check className="mr-2 h-4 w-4" /> Permitir Edição
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    onClick={async () => {
+                                        await updateOrderStatus(order.id, 'approved'); // Revert to approved (locked)
+                                        onOrderUpdated?.();
+                                    }}
+                                    className="text-red-600 border-red-200 hover:bg-red-50"
+                                >
+                                    <Ban className="mr-2 h-4 w-4" /> Negar
+                                </Button>
+                            </>
+                        )}
+
+                        {/* Edit Request Flow for Creator or Admin */}
+                        {isLocked && !isEditRequested && (order.created_by === currentUserId || isAdmin) && (
+                            <Button
+                                variant="outline"
+                                className="border-indigo-200 text-indigo-700 bg-indigo-50"
+                                onClick={async () => {
+                                    if (confirm("Solicitar edição deste pedido? Ele voltará para análise.")) {
+                                        await updateOrderStatus(order.id, 'edit_requested');
+                                        onOrderUpdated?.();
+                                    }
+                                }}
+                            >
+                                <Pencil className="mr-2 h-4 w-4" /> Solicitar Edição
+                            </Button>
+                        )}
+
+                    </div>
+
+                    <div className="flex gap-2 order-1 sm:order-2">
+                        {order && !isReadOnly && !isLocked && (
                             <Button
                                 variant="destructive"
                                 onClick={() => {
@@ -367,9 +453,9 @@ export function ManageOrderDialog({
                             >
                                 <Trash2 className="mr-2 h-4 w-4" /> Excluir Lote
                             </Button>
-                        </div>
-                    )}
-                    <Button variant="outline" onClick={() => onOpenChange(false)}>Fechar</Button>
+                        )}
+                        <Button variant="outline" onClick={() => onOpenChange(false)}>Fechar</Button>
+                    </div>
                 </DialogFooter>
             </DialogContent >
         </Dialog >

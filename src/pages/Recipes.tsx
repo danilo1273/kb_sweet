@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -615,53 +616,99 @@ export default function Recipes() {
                                             ) : bomItems.length === 0 ? (
                                                 <div className="text-center p-4 text-sm text-muted-foreground">Nenhum item na ficha técnica.</div>
                                             ) : (
-                                                <Table>
-                                                    <TableHeader>
-                                                        <TableRow>
-                                                            <TableHead>Tipo</TableHead>
-                                                            <TableHead>Item</TableHead>
-                                                            <TableHead>Qtd</TableHead>
-                                                            <TableHead>Custo Aprox</TableHead>
-                                                            <TableHead className="w-[50px]"></TableHead>
-                                                        </TableRow>
-                                                    </TableHeader>
-                                                    <TableBody>
+                                                <>
+                                                    {/* Desktop Table */}
+                                                    <div className="hidden md:block">
+                                                        <Table>
+                                                            <TableHeader>
+                                                                <TableRow>
+                                                                    <TableHead>Tipo</TableHead>
+                                                                    <TableHead>Item</TableHead>
+                                                                    <TableHead>Qtd</TableHead>
+                                                                    <TableHead>Custo Aprox</TableHead>
+                                                                    <TableHead className="w-[50px]"></TableHead>
+                                                                </TableRow>
+                                                            </TableHeader>
+                                                            <TableBody>
+                                                                {bomItems.map(item => {
+                                                                    let name = "Desconhecido";
+                                                                    let typeLabel = <span className="text-zinc-400 text-xs">?</span>;
+                                                                    let cost = 0;
+
+                                                                    if (item.ingredients) {
+                                                                        name = item.ingredients.name;
+                                                                        typeLabel = <Box className="h-3 w-3 text-blue-500" />;
+                                                                        if (item.ingredients.unit_weight && item.ingredients.cost) {
+                                                                            // Simple Calc
+                                                                            let qty = item.quantity;
+                                                                            if (['kg', 'l'].includes(item.unit)) qty *= 1000;
+                                                                            cost = (item.ingredients.cost / item.ingredients.unit_weight) * qty;
+                                                                        }
+                                                                    } else if (item.child_product) {
+                                                                        name = item.child_product.name;
+                                                                        typeLabel = <Layers className="h-3 w-3 text-amber-500" />;
+                                                                        cost = (item.child_product.cost || 0) * item.quantity;
+                                                                    }
+
+                                                                    return (
+                                                                        <TableRow key={item.id}>
+                                                                            <TableCell>{typeLabel}</TableCell>
+                                                                            <TableCell className="font-medium">{name}</TableCell>
+                                                                            <TableCell>{item.quantity} {item.unit}</TableCell>
+                                                                            <TableCell>R$ {cost.toFixed(2)}</TableCell>
+                                                                            <TableCell>
+                                                                                <Button variant="ghost" size="icon" onClick={() => handleDeleteBomItem(item.id)}>
+                                                                                    <X className="h-4 w-4 text-red-500" />
+                                                                                </Button>
+                                                                            </TableCell>
+                                                                        </TableRow>
+                                                                    );
+                                                                })}
+                                                            </TableBody>
+                                                        </Table>
+                                                    </div>
+
+                                                    {/* Mobile Cards */}
+                                                    <div className="md:hidden space-y-2 p-2 bg-zinc-50">
                                                         {bomItems.map(item => {
                                                             let name = "Desconhecido";
-                                                            let typeLabel = <span className="text-zinc-400 text-xs">?</span>;
+                                                            let Icon = Box;
+                                                            let iconColor = "text-blue-500";
                                                             let cost = 0;
 
                                                             if (item.ingredients) {
                                                                 name = item.ingredients.name;
-                                                                typeLabel = <Box className="h-3 w-3 text-blue-500" />;
+                                                                Icon = Box;
+                                                                iconColor = "text-blue-500";
                                                                 if (item.ingredients.unit_weight && item.ingredients.cost) {
-                                                                    // Simple Calc
                                                                     let qty = item.quantity;
                                                                     if (['kg', 'l'].includes(item.unit)) qty *= 1000;
                                                                     cost = (item.ingredients.cost / item.ingredients.unit_weight) * qty;
                                                                 }
                                                             } else if (item.child_product) {
                                                                 name = item.child_product.name;
-                                                                typeLabel = <Layers className="h-3 w-3 text-amber-500" />;
+                                                                Icon = Layers;
+                                                                iconColor = "text-amber-500";
                                                                 cost = (item.child_product.cost || 0) * item.quantity;
                                                             }
 
                                                             return (
-                                                                <TableRow key={item.id}>
-                                                                    <TableCell>{typeLabel}</TableCell>
-                                                                    <TableCell className="font-medium">{name}</TableCell>
-                                                                    <TableCell>{item.quantity} {item.unit}</TableCell>
-                                                                    <TableCell>R$ {cost.toFixed(2)}</TableCell>
-                                                                    <TableCell>
-                                                                        <Button variant="ghost" size="icon" onClick={() => handleDeleteBomItem(item.id)}>
-                                                                            <X className="h-4 w-4 text-red-500" />
-                                                                        </Button>
-                                                                    </TableCell>
-                                                                </TableRow>
+                                                                <div key={item.id} className="bg-white p-3 rounded border flex justify-between items-center shadow-sm">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <Icon className={cn("h-4 w-4", iconColor)} />
+                                                                        <div>
+                                                                            <div className="font-medium text-sm text-zinc-900">{name}</div>
+                                                                            <div className="text-xs text-zinc-500">{item.quantity} {item.unit} • R$ {cost.toFixed(2)}</div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <Button variant="ghost" size="sm" onClick={() => handleDeleteBomItem(item.id)} className="h-8 w-8 p-0">
+                                                                        <X className="h-4 w-4 text-red-500" />
+                                                                    </Button>
+                                                                </div>
                                                             );
                                                         })}
-                                                    </TableBody>
-                                                </Table>
+                                                    </div>
+                                                </>
                                             )}
                                         </div>
 

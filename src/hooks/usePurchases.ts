@@ -110,8 +110,34 @@ export function usePurchases() {
 
     const deleteOrder = async (orderId: string) => {
         try {
-            // Cascading delete is handled by DB usually, but let's be safe if UI needs explicit steps
-            // Assuming DB has ON DELETE CASCADE for foreign keys on requests
+            // 1. Fetch all requests to check for necessary cleanup (Stock/Financial)
+            const { data: requests, error: fetchErr } = await supabase
+                .from('purchase_requests')
+                .select('*')
+                .eq('order_id', orderId);
+
+            if (fetchErr) throw fetchErr;
+
+            if (requests && requests.length > 0) {
+                // 2. Revert Stock/Financials for Approved items before deletion
+                for (const req of requests) {
+                    if (req.status === 'approved' || req.status === 'edit_approved') {
+                        await reverseStockAndFinancial(req);
+                        // Also clear any financial movements linked to this specific item
+                        await supabase.from('financial_movements').delete().eq('related_purchase_id', req.id);
+                    }
+                }
+
+                // 3. Delete all requests (Manual Cascade)
+                const { error: delReqErr } = await supabase
+                    .from('purchase_requests')
+                    .delete()
+                    .eq('order_id', orderId);
+
+                if (delReqErr) throw delReqErr;
+            }
+
+            // 4. Finally Delete the Order
             const { error } = await supabase.from('purchase_orders').delete().eq('id', orderId);
             if (error) throw error;
 
@@ -219,7 +245,7 @@ export function usePurchases() {
     };
 
 
-    const approveRequest = async (item: any, approved: boolean) => {
+    const approveRequest = async (item: any, approved: boolean, skipFetch = false) => {
         try {
             const newStatus = approved ? 'approved' : 'rejected';
 
@@ -295,12 +321,49 @@ export function usePurchases() {
             const { error: statusErr } = await supabase.from('purchase_requests').update({ status: newStatus }).eq('id', item.id);
             if (statusErr) throw new Error("Falha ao atualizar status");
 
-            toast({ title: `Item ${approved ? 'Aprovado' : 'Rejeitado'}` });
-            await fetchOrders();
+            if (!skipFetch) {
+                toast({ title: `Item ${approved ? 'Aprovado' : 'Rejeitado'}` });
+                await fetchOrders();
+            }
             return true;
 
         } catch (e: any) {
             toast({ variant: 'destructive', title: "Erro", description: e.message });
+            return false;
+        }
+    };
+
+    const batchApproveRequests = async (items: any[], approve: boolean) => {
+        try {
+            let processed = 0;
+            // First run all updates in parallel or sequence BUT without fetching
+            const promises = items
+                .filter(item => item.status === 'pending')
+                .map(item => approveRequest(item, approve, true)); // true = skipFetch inside loop
+
+            await Promise.all(promises);
+            processed = promises.length;
+
+            toast({ title: `${processed} itens ${approve ? 'aprovados' : 'rejeitados'}` });
+
+            // ONE fetch at the end to update UI
+            await fetchOrders();
+            return true;
+        } catch (e: any) {
+            toast({ variant: 'destructive', title: "Erro em lote", description: e.message });
+            return false;
+        }
+    };
+
+    const updateOrderStatus = async (orderId: string, status: string) => {
+        try {
+            const { error } = await supabase.from('purchase_orders').update({ status }).eq('id', orderId);
+            if (error) throw error;
+            toast({ title: `Status do pedido atualizado: ${status}` });
+            await fetchOrders();
+            return true;
+        } catch (error: any) {
+            toast({ variant: 'destructive', title: "Erro ao atualizar status", description: error.message });
             return false;
         }
     };
@@ -314,8 +377,10 @@ export function usePurchases() {
         addRequestToOrder,
         deleteRequestFromOrder,
         updateOrderHeader,
+        updateOrderStatus,
         profilesCache,
         reverseStockAndFinancial,
-        approveRequest
+        approveRequest,
+        batchApproveRequests
     };
 }

@@ -215,8 +215,9 @@ export default function Inventory() {
         const matchesSearch = ing.name.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesCategory = categoryFilter === 'all' || (ing.category && ing.category === categoryFilter);
         const matchesStock = stockFilter === 'all' ||
-            (stockFilter === 'low' && (ing.stock_danilo <= ing.min_stock || ing.stock_adriel <= ing.min_stock)) ||
-            (stockFilter === 'available' && (ing.stock_danilo > 0 || ing.stock_adriel > 0));
+            (stockFilter === 'low' && ((ing.stock_danilo || 0) <= (ing.min_stock || 0) || (ing.stock_adriel || 0) <= (ing.min_stock || 0))) ||
+            (stockFilter === 'with_balance' && ((ing.stock_danilo || 0) > 0 || (ing.stock_adriel || 0) > 0)) ||
+            (stockFilter === 'no_balance' && ((ing.stock_danilo || 0) <= 0 && (ing.stock_adriel || 0) <= 0));
 
         let matchesType = true;
         if (typeFilter === 'product') matchesType = ing.type === 'product'; // Acabado

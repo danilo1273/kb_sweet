@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus, Pencil, Trash2, Search, Database, RefreshCw, Calculator, AlertTriangle, ArrowRight } from 'lucide-react';
-import { Ingredient, Category, Supplier } from "@/types";
+import { Category } from "@/types";
 
 export default function AdminRegisters() {
     const { toast } = useToast();
@@ -331,58 +331,102 @@ export default function AdminRegisters() {
                         <Loader2 className="animate-spin h-8 w-8 text-primary" />
                     </div>
                 ) : (
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>ID</TableHead>
-                                <TableHead>Nome</TableHead>
-                                {activeTab === 'categories' && <TableHead>Tipo</TableHead>}
-                                {activeTab === 'products' && <TableHead>Categoria</TableHead>}
-                                <TableHead className="text-right">Ações</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
+                    <>
+                        <div className="hidden md:block">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>ID</TableHead>
+                                        <TableHead>Nome</TableHead>
+                                        {activeTab === 'categories' && <TableHead>Tipo</TableHead>}
+                                        {activeTab === 'products' && <TableHead>Categoria</TableHead>}
+                                        <TableHead className="text-right">Ações</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {filteredData.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={activeTab === 'categories' ? 4 : 4} className="text-center py-8 text-zinc-500">
+                                                Nenhum registro encontrado.
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        filteredData.map((item) => (
+                                            <TableRow key={item.id}>
+                                                <TableCell className="w-[80px] text-zinc-500">#{item.id}</TableCell>
+                                                <TableCell className="font-medium">{item.name}</TableCell>
+
+                                                {activeTab === 'categories' && (
+                                                    <TableCell>
+                                                        <span className={`px-2 py-1 rounded text-xs font-medium ${item.type === 'expense' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                            {item.type === 'expense' ? 'Despesa' : 'Estoque'}
+                                                        </span>
+                                                    </TableCell>
+                                                )}
+
+                                                {activeTab === 'products' && (
+                                                    <TableCell>
+                                                        <span className="text-sm text-zinc-600">{item.category || '-'}</span>
+                                                    </TableCell>
+                                                )}
+
+                                                <TableCell className="text-right">
+                                                    <div className="flex justify-end gap-2">
+                                                        <Button variant="ghost" size="icon" onClick={() => openMockDialog(item)}>
+                                                            <Pencil className="h-4 w-4 text-zinc-500" />
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon" onClick={() => handleDelete(item)}>
+                                                            <Trash2 className="h-4 w-4 text-red-400" />
+                                                        </Button>
+                                                    </div>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+
+                        {/* Mobile Cards */}
+                        <div className="md:hidden space-y-2 p-2 bg-zinc-50">
                             {filteredData.length === 0 ? (
-                                <TableRow>
-                                    <TableCell colSpan={activeTab === 'categories' ? 4 : 4} className="text-center py-8 text-zinc-500">
-                                        Nenhum registro encontrado.
-                                    </TableCell>
-                                </TableRow>
+                                <div className="text-center py-8 text-zinc-500">Nenhum registro encontrado.</div>
                             ) : (
-                                filteredData.map((item) => (
-                                    <TableRow key={item.id}>
-                                        <TableCell className="w-[80px] text-zinc-500">#{item.id}</TableCell>
-                                        <TableCell className="font-medium">{item.name}</TableCell>
-
-                                        {activeTab === 'categories' && (
-                                            <TableCell>
-                                                <span className={`px-2 py-1 rounded text-xs font-medium ${item.type === 'expense' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                                                    {item.type === 'expense' ? 'Despesa' : 'Estoque'}
-                                                </span>
-                                            </TableCell>
-                                        )}
-
-                                        {activeTab === 'products' && (
-                                            <TableCell>
-                                                <span className="text-sm text-zinc-600">{item.category || '-'}</span>
-                                            </TableCell>
-                                        )}
-
-                                        <TableCell className="text-right">
-                                            <div className="flex justify-end gap-2">
-                                                <Button variant="ghost" size="icon" onClick={() => openMockDialog(item)}>
+                                filteredData.map(item => (
+                                    <div key={item.id} className="bg-white p-3 rounded border shadow-sm flex flex-col gap-2">
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <div className="font-medium text-zinc-900">{item.name}</div>
+                                                <div className="text-xs text-zinc-500">#{item.id}</div>
+                                            </div>
+                                            <div className="flex gap-1">
+                                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openMockDialog(item)}>
                                                     <Pencil className="h-4 w-4 text-zinc-500" />
                                                 </Button>
-                                                <Button variant="ghost" size="icon" onClick={() => handleDelete(item)}>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(item)}>
                                                     <Trash2 className="h-4 w-4 text-red-400" />
                                                 </Button>
                                             </div>
-                                        </TableCell>
-                                    </TableRow>
+                                        </div>
+                                        {/* Specific fields based on tab */}
+                                        {activeTab === 'categories' && (
+                                            <div>
+                                                <span className={`px-2 py-1 rounded text-xs font-medium ${item.type === 'expense' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                    {item.type === 'expense' ? 'Despesa' : 'Estoque'}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {activeTab === 'products' && (
+                                            <div className="text-sm text-zinc-600">
+                                                <span className="font-semibold text-xs text-zinc-400 uppercase mr-1">Categoria:</span>
+                                                {item.category || '-'}
+                                            </div>
+                                        )}
+                                    </div>
                                 ))
                             )}
-                        </TableBody>
-                    </Table>
+                        </div>
+                    </>
                 )}
             </div>
 

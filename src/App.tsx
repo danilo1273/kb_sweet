@@ -21,6 +21,7 @@ const AdminRegisters = lazy(() => import('@/pages/AdminRegisters'));
 const Clients = lazy(() => import('@/pages/Clients'));
 const Sales = lazy(() => import('@/pages/Sales'));
 const POS = lazy(() => import('@/pages/POS'));
+const Banking = lazy(() => import('@/pages/Banking'));
 
 function App() {
     const [session, setSession] = useState<Session | null>(null);
@@ -61,6 +62,8 @@ function App() {
                     <Route path="/recipes" element={<Recipes />} />
                     <Route path="/financial" element={<Financial />} />
                     <Route path="/financial" element={<Financial />} />
+                    <Route path="/financial" element={<Financial />} />
+                    <Route path="/banking" element={<Banking />} />
                     <Route path="/purchases" element={<Purchases />} />
                     <Route path="/production" element={<Production />} />
                     <Route path="/admin" element={

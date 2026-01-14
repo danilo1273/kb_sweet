@@ -15,14 +15,8 @@ import { QuickProductDialog } from "@/components/purchases/QuickProductDialog";
 import { CreateSupplierDialog } from "@/components/purchases/CreateSupplierDialog";
 import { ManageCategoriesDialog } from "@/components/purchases/ManageCategoriesDialog";
 import { ManageUnitsDialog } from "@/components/purchases/ManageUnitsDialog";
-import { useNavigate } from "react-router-dom"; // Adding missing nav if needed or just hook
 import { usePurchases } from "@/hooks/usePurchases";
 import { PurchaseOrder, PurchaseRequest, Ingredient, Supplier, ItemDraft, Category } from "@/types";
-
-
-
-
-
 import { motion, AnimatePresence } from "framer-motion";
 
 const Purchases = () => {
@@ -33,13 +27,11 @@ const Purchases = () => {
     const [ingredients, setIngredients] = useState<Ingredient[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
-
-
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const [currentUserRoles, setCurrentUserRoles] = useState<string[]>([]);
 
     // New Order State
     const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
-
 
     // MANAGE ORDER Dialog (New V3.7)
     const [isManageOrderOpen, setIsManageOrderOpen] = useState(false);
@@ -105,7 +97,10 @@ const Purchases = () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
             setCurrentUserId(user.id);
-            // Removed local profile fetching as we rely on cache/hook where possible or just currentUserId
+            const { data: profile } = await supabase.from('profiles').select('roles').eq('id', user.id).single();
+            if (profile && profile.roles) {
+                setCurrentUserRoles(profile.roles);
+            }
         }
     }
 
@@ -157,32 +152,13 @@ const Purchases = () => {
         }
     }
 
-
-
-    // fetchData removed
-
-
-
     // --- MANAGE ORDER LOGIC ---
     function openManageOrder(order: PurchaseOrder, readOnly: boolean = false) {
-        if (!readOnly) {
-            const hasPaidItem = order.requests.some(r => r.financial_status === 'paid');
-            if (hasPaidItem) {
-                return toast({
-                    title: "Lote Bloqueado",
-                    description: "Este lote contém itens já pagos. Para editar, o Financeiro precisa estornar a baixa primeiro.",
-                    variant: "destructive"
-                });
-            }
-        }
         setSelectedOrderId(order.id);
         setIsManageOrderReadOnly(readOnly);
         setIsManageOrderOpen(true);
     }
 
-
-
-    // --- Order Logic ---
     // --- Order Logic ---
     async function handleCreateOrder(nickname: string, supplierId: string, items: any[]) {
         const success = await createOrder(nickname, supplierId, items, currentUserId || '');
@@ -191,21 +167,6 @@ const Purchases = () => {
             fetchOrders();
         }
     }
-
-
-
-
-    // Reverting: I will NOT replace handleDeleteOrder blindly. I'll just fix fetchData call inside it.
-    // So I am removing this chunk from the request and will do a global replace for fetchData -> fetchOrders.
-
-
-
-
-
-
-
-
-
 
     function openEditItem(item: PurchaseRequest) {
         setEditingItem(item);
@@ -379,6 +340,10 @@ const Purchases = () => {
     };
 
     const getOrderStatus = (order: PurchaseOrder) => {
+        // 1. Check Order-Level Status First (New Workflow)
+        if (order.status === 'edit_requested') return { label: 'Edição Solicitada', color: 'bg-amber-100 text-amber-800 border-amber-500 border', value: 'editing' };
+        if (order.status === 'edit_approved') return { label: 'Edição Liberada', color: 'bg-blue-100 text-blue-800 border-blue-500 border', value: 'editing' };
+
         const reqs = order.requests || [];
         if (reqs.length === 0) return { label: 'Vazio', color: 'bg-zinc-100 text-zinc-800 hover:bg-zinc-200', value: 'empty' };
 
@@ -389,7 +354,7 @@ const Purchases = () => {
         const allRejected = reqs.every(r => r.status === 'rejected');
         const allPending = reqs.every(r => r.status === 'pending');
 
-        if (hasEditing) return { label: 'Em Edição', color: 'bg-indigo-100 text-indigo-800 border border-indigo-200', value: 'editing' };
+        if (hasEditing) return { label: 'Item em Edição', color: 'bg-indigo-100 text-indigo-800 border border-indigo-200', value: 'editing' };
         if (allApproved) return { label: 'Aprovado', color: 'bg-green-100 text-green-800 border border-green-200', value: 'approved' };
         if (allRejected) return { label: 'Rejeitado', color: 'bg-red-100 text-red-800 border border-red-200', value: 'rejected' };
         if (allPending) return { label: 'Pendente', color: 'bg-yellow-100 text-yellow-800 border border-yellow-200', value: 'pending' };
@@ -427,7 +392,7 @@ const Purchases = () => {
                                 onClick={() => setFilterStatus(st)}
                                 className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${filterStatus === st ? 'bg-white shadow text-black' : 'text-zinc-500 hover:text-zinc-700'}`}
                             >
-                                {st === 'all' ? 'Todos' : st === 'pending' ? 'Pendentes' : st === 'editing' ? 'Em Edição' : st === 'approved' ? 'Aprovados' : st === 'partial' ? 'Parciais' : 'Rejeitados'}
+                                {st === 'all' ? 'Todos' : st === 'pending' ? 'Pendentes' : st === 'editing' ? 'Solic. Edição' : st === 'approved' ? 'Aprovados' : st === 'partial' ? 'Parciais' : 'Rejeitados'}
                             </button>
                         ))}
                     </div>
@@ -492,17 +457,10 @@ const Purchases = () => {
                                             </div>
                                             <div className="text-right">
                                                 <p className="text-xs text-zinc-400">{order.requests?.length || 0} itens</p>
-                                                <div className="flex -space-x-2 mt-1 justify-end">
-                                                    {order.requests?.slice(0, 3).map((r, i) => (
-                                                        <div key={i} className="h-6 w-6 rounded-full bg-zinc-100 border-2 border-white flex items-center justify-center text-[10px] text-zinc-500" title={r.item_name || 'Item sem nome'}>
-                                                            {(r.item_name || '?').charAt(0).toUpperCase()}
-                                                        </div>
-                                                    ))}
-                                                    {(order.requests?.length || 0) > 3 && (
-                                                        <div className="h-6 w-6 rounded-full bg-zinc-100 border-2 border-white flex items-center justify-center text-[8px] text-zinc-500">
-                                                            +{(order.requests?.length || 0) - 3}
-                                                        </div>
-                                                    )}
+                                                <div className="mt-1 flex justify-end">
+                                                    <span className="text-xs font-medium text-zinc-600 bg-zinc-50 border border-zinc-200 px-2 py-1 rounded-md truncate max-w-[120px]" title={order.supplier_name}>
+                                                        {order.supplier_name || 'Fornecedor n/d'}
+                                                    </span>
                                                 </div>
                                             </div>
                                         </div>
@@ -537,15 +495,14 @@ const Purchases = () => {
                 formatCurrency={formatCurrency}
                 formatStatus={formatStatus}
                 onEditItem={openEditItem}
-
+                currentUserRoles={currentUserRoles}
                 currentUserId={currentUserId || ''}
                 onDeleteOrder={async (id) => {
                     const success = await deleteOrder(id);
                     if (success) setIsManageOrderOpen(false);
                 }}
+                onOrderUpdated={fetchOrders}
             />
-
-
 
             <EditItemDialog
                 isOpen={isEditItemOpen}
@@ -557,8 +514,6 @@ const Purchases = () => {
                 availableUnits={availableUnits}
                 onSave={saveEditItem}
             />
-
-
 
             <QuickProductDialog
                 isOpen={isProductDialogOpen}
@@ -601,7 +556,7 @@ const Purchases = () => {
                 availableUnits={availableUnits}
                 onDeleteUnit={handleDeleteUnit}
             />
-        </div >
+        </div>
     );
 }
 

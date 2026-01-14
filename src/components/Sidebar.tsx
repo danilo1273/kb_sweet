@@ -10,7 +10,8 @@ import {
     LogOut,
     X,
     Factory,
-    Database
+    Database,
+    Building2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/supabaseClient";
@@ -58,6 +59,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         { name: "Vendas", href: "/sales", icon: ShoppingCart, roles: ['admin', 'seller'] },
         { name: "Clientes", href: "/clients", icon: User, roles: ['admin', 'seller'] },
         { name: "Financeiro", href: "/financial", icon: DollarSign, roles: ['admin', 'financial'] },
+        { name: "Bancos", href: "/banking", icon: Building2, roles: ['admin', 'financial'] },
         { name: "Cadastros", href: "/admin/registers", icon: Database, roles: ['admin'] },
         { name: "Usuários", href: "/admin", icon: User, roles: ['admin'] },
         { name: "Perfis", href: "/profile", icon: User, roles: [] }, // Todos

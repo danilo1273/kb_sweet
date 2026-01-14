@@ -3,7 +3,7 @@ import { supabase } from "@/supabaseClient";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, CheckCircle, ArrowDownCircle, RotateCcw, Trash2, Filter, ChevronDown, ChevronUp, Layers, Calculator, TrendingUp, TrendingDown } from "lucide-react";
+import { Loader2, CheckCircle, ArrowDownCircle, RotateCcw, Trash2, Filter, ChevronDown, ChevronUp, Layers, Calculator, TrendingUp, TrendingDown, Building2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { FinancialMovement, BatchGroup } from "@/types";
 import { calculateTotalPending, calculateTotalPaid } from "@/lib/financialUtils";
+import { PaymentConfirmationDialog } from "@/components/financial/PaymentConfirmationDialog";
 
 export default function Financial() {
     const [movements, setMovements] = useState<FinancialMovement[]>([]);
@@ -36,6 +37,16 @@ export default function Financial() {
     // Expansion & Selection
     const [expandedBatches, setExpandedBatches] = useState<Record<string, boolean>>({});
     const [selectedBatches, setSelectedBatches] = useState<Record<string, boolean>>({});
+
+    // Payment Dialog State
+    const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
+    const [paymentDialogData, setPaymentDialogData] = useState<{
+        mode: 'single' | 'batch',
+        id?: string, // for single
+        amount?: number,
+        type: 'income' | 'expense',
+        count?: number
+    }>({ mode: 'single', type: 'expense' });
 
     const { toast } = useToast();
 
@@ -65,6 +76,14 @@ export default function Financial() {
             toast({ variant: 'destructive', title: 'Erro ao carregar', description: error.message });
             setLoading(false);
             return;
+        }
+
+        // Fetch Bank Accounts for display
+        const bankAccountIds = movs?.map(m => m.bank_account_id).filter(Boolean) || [];
+        let banksMap: Record<string, string> = {};
+        if (bankAccountIds.length > 0) {
+            const { data: banks } = await supabase.from('bank_accounts').select('id, name').in('id', bankAccountIds);
+            banks?.forEach(b => banksMap[b.id] = b.name);
         }
 
         let enrichedMovements: FinancialMovement[] = movs || [];
@@ -118,7 +137,14 @@ export default function Financial() {
                         }
                     }
                 }
-                return { ...m, detail_buyer: buyerName, detail_supplier: supplierName, detail_order_nickname: orderNickname, detail_order_id: orderId };
+                return {
+                    ...m,
+                    detail_buyer: buyerName,
+                    detail_supplier: supplierName,
+                    detail_order_nickname: orderNickname,
+                    detail_order_id: orderId,
+                    detail_bank_name: m.bank_account_id ? banksMap[m.bank_account_id] : undefined
+                };
             });
 
             // Fetch Sales Details for Income items that are likely Sales
@@ -144,7 +170,9 @@ export default function Financial() {
                                     ...m,
                                     description: `Venda - ${clientName} - ${m.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
                                     detail_buyer: clientName === 'Consumidor Final' ? 'Balcão' : clientName,
-                                    detail_supplier: 'Loja' // Income source
+
+                                    detail_supplier: 'Loja', // Income source
+                                    detail_bank_name: m.bank_account_id ? banksMap[m.bank_account_id] : undefined
                                 };
                             }
                         }
@@ -239,11 +267,72 @@ export default function Financial() {
         setLoading(false);
     }
 
-    async function markAsPaid(id: string) {
-        if (!confirm("Confirmar pagamento/recebimento?")) return;
-        const { error } = await supabase.from('financial_movements').update({ status: 'paid', payment_date: new Date().toISOString() }).eq('id', id);
-        if (error) toast({ variant: 'destructive', title: 'Erro', description: error.message });
-        else { toast({ title: "Registro atualizado!" }); fetchMovements(); }
+    function openPaymentDialog(movement: FinancialMovement) {
+        setPaymentDialogData({
+            mode: 'single',
+            id: movement.id,
+            amount: movement.amount,
+            type: movement.type as any,
+            count: 1
+        });
+        setIsPaymentDialogOpen(true);
+    }
+
+    async function handlePaymentConfirm(bankAccountId: string, date: string) {
+        setLoading(true);
+        try {
+            if (paymentDialogData.mode === 'single' && paymentDialogData.id) {
+                const { error } = await supabase
+                    .from('financial_movements')
+                    .update({
+                        status: 'paid',
+                        payment_date: date,
+                        bank_account_id: bankAccountId
+                    })
+                    .eq('id', paymentDialogData.id);
+
+                if (error) throw error;
+                toast({ title: "Pagamento registrado!" });
+            } else if (paymentDialogData.mode === 'batch') {
+                const selectedIds = Object.keys(selectedBatches).filter(id => selectedBatches[id]);
+                const idsToUpdate: string[] = [];
+
+                selectedIds.forEach(batchId => {
+                    const batch = batches.find(b => b.order_id === batchId);
+                    if (batch) {
+                        batch.movements.forEach(m => {
+                            const isExpense = m.type === 'expense';
+                            const isIncome = m.type === 'income';
+                            const matchesTab = activeTab === 'payable' ? isExpense : isIncome;
+
+                            if (m.status === 'pending' && matchesTab) {
+                                idsToUpdate.push(m.id);
+                            }
+                        });
+                    }
+                });
+
+                if (idsToUpdate.length > 0) {
+                    const { error } = await supabase
+                        .from('financial_movements')
+                        .update({
+                            status: 'paid',
+                            payment_date: date,
+                            bank_account_id: bankAccountId
+                        })
+                        .in('id', idsToUpdate);
+                    if (error) throw error;
+                    toast({ title: "Pagamento em lote realizado!" });
+                    setSelectedBatches({});
+                }
+            }
+            fetchMovements();
+        } catch (e: any) {
+            toast({ variant: 'destructive', title: 'Erro', description: e.message });
+        } finally {
+            setLoading(false);
+            setIsPaymentDialogOpen(false);
+        }
     }
 
     async function deleteMovement(id: string) {
@@ -269,6 +358,38 @@ export default function Financial() {
         const confirmMsg = isPay
             ? `Confirma a BAIXA de todos os itens PENDENTES nos ${selectedIds.length} lotes?`
             : `Confirma o ESTORNO de todos os itens BAIXADOS nos ${selectedIds.length} lotes?`;
+
+        if (isPay) {
+            // Calculate total count and amount just for display
+            let count = 0;
+            let total = 0;
+            selectedIds.forEach(batchId => {
+                const batch = batches.find(b => b.order_id === batchId);
+                if (batch) {
+                    batch.movements.forEach(m => {
+                        const matchesTab = activeTab === 'payable' ? m.type === 'expense' : m.type === 'income';
+                        if (m.status === 'pending' && matchesTab) {
+                            count++;
+                            total += m.amount;
+                        }
+                    });
+                }
+            });
+
+            if (count === 0) {
+                toast({ title: "Nenhum item pendente nos lotes selecionados." });
+                return;
+            }
+
+            setPaymentDialogData({
+                mode: 'batch',
+                type: activeTab === 'payable' ? 'expense' : 'income',
+                count: count,
+                amount: total
+            });
+            setIsPaymentDialogOpen(true);
+            return;
+        }
 
         if (!confirm(confirmMsg)) return;
 
@@ -348,9 +469,9 @@ export default function Financial() {
             });
 
             // Re-calculate totals for this filtered batch view
-            // This ensures the card shows only the totals for the relevant items (e.g. only expenses)
-            const pending = filteredMovements.filter(m => m.status === 'pending').reduce((a, b) => a + b.amount, 0);
-            const paid = filteredMovements.filter(m => m.status === 'paid').reduce((a, b) => a + b.amount, 0);
+            // Expenses might be stored as negative numbers. We want visual totals to be positive sum of magnitude.
+            const pending = filteredMovements.filter(m => m.status === 'pending').reduce((a, b) => a + Math.abs(b.amount), 0);
+            const paid = filteredMovements.filter(m => m.status === 'paid').reduce((a, b) => a + Math.abs(b.amount), 0);
 
             return {
                 ...batch,
@@ -370,7 +491,8 @@ export default function Financial() {
 
     // Selection Totals
     const selectedBatchesList = filteredBatches.filter(b => selectedBatches[b.order_id]);
-    const selectionTotal = selectedBatchesList.reduce((acc, b) => acc + b.visual_total_pending, 0);
+    const selectionTotalPending = selectedBatchesList.reduce((acc, b) => acc + b.visual_total_pending, 0);
+    const selectionTotalPaid = selectedBatchesList.reduce((acc, b) => acc + b.visual_total_paid, 0);
 
     const toggleBatchSelection = (id: string, checked: boolean) => {
         setSelectedBatches(prev => ({ ...prev, [id]: checked }));
@@ -436,14 +558,23 @@ export default function Financial() {
                     </div>
 
                     {/* Quick Stats for Selection */}
-                    {selectionTotal > 0 && (
+                    {selectedBatchesList.length > 0 && (
                         <div className="ml-auto flex items-center gap-4 animate-in fade-in slide-in-from-right-5">
                             <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded text-sm font-medium border border-blue-100">
-                                Seleção: R$ {selectionTotal.toFixed(2)}
+                                Seleção: {selectionTotalPending > 0.01 ? `Pendente R$ ${selectionTotalPending.toFixed(2)}` : `Pago R$ ${selectionTotalPaid.toFixed(2)}`}
                             </div>
-                            <Button size="sm" onClick={() => processBatchAction('pay')} className={activeTab === 'payable' ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"}>
-                                <CheckCircle className="mr-2 h-3 w-3" /> {activeTab === 'payable' ? 'Baixar' : 'Receber'}
-                            </Button>
+
+                            {selectionTotalPending > 0.01 && (
+                                <Button size="sm" onClick={() => processBatchAction('pay')} className={activeTab === 'payable' ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"}>
+                                    <CheckCircle className="mr-2 h-3 w-3" /> {activeTab === 'payable' ? 'Baixar Seleção' : 'Receber Seleção'}
+                                </Button>
+                            )}
+
+                            {selectionTotalPending <= 0.01 && selectionTotalPaid > 0 && (
+                                <Button size="sm" variant="outline" onClick={() => processBatchAction('reverse')} className="text-orange-600 border-orange-200 hover:bg-orange-50">
+                                    <RotateCcw className="mr-2 h-3 w-3" /> Estornar Seleção
+                                </Button>
+                            )}
                         </div>
                     )}
                 </div>
@@ -490,7 +621,9 @@ export default function Financial() {
                                                 <Layers className="h-4 w-4 text-zinc-400" />
                                                 <div className="flex flex-col">
                                                     <h3 className="font-semibold text-zinc-800">{batch.order_nickname}</h3>
-                                                    <span className="text-xs text-zinc-500">ID: {batch.order_id.slice(0, 8)}...</span>
+                                                    <span className="text-xs text-zinc-500">
+                                                        {batch.movements.length} item(s) • {batch.movements[0]?.due_date ? new Date(batch.movements[0].due_date).toLocaleDateString() : '-'}
+                                                    </span>
                                                 </div>
                                                 {batch.supplier_name !== '-' && <Badge variant="outline">{batch.supplier_name}</Badge>}
                                                 {batch.buyer_name !== '-' && <Badge variant="secondary">{batch.buyer_name}</Badge>}
@@ -528,17 +661,22 @@ export default function Financial() {
                                                             <div className="font-medium text-sm text-zinc-900">{mov.description}</div>
                                                             <div className="text-xs text-zinc-500">{mov.due_date ? new Date(mov.due_date).toLocaleDateString() : '-'} • {mov.detail_buyer}</div>
                                                         </div>
-                                                        <div className="font-bold text-zinc-900">R$ {mov.amount.toFixed(2)}</div>
+                                                        <div className="font-bold text-zinc-900">R$ {Math.abs(mov.amount).toFixed(2)}</div>
                                                     </div>
 
                                                     <div className="flex justify-between items-center border-t pt-2 mt-1">
                                                         <Badge variant={mov.status === 'paid' ? 'default' : 'outline'} className={mov.status === 'paid' ? 'bg-green-100 text-green-700 hover:bg-green-100' : 'text-yellow-700 bg-yellow-50 mobile-badge'}>
                                                             {mov.status === 'paid' ? 'Pago' : 'Pendente'}
                                                         </Badge>
+                                                        {mov.detail_bank_name && (
+                                                            <div className="flex items-center gap-1 text-xs text-zinc-500 bg-zinc-100 px-2 py-1 rounded">
+                                                                <Building2 className="h-3 w-3" /> {mov.detail_bank_name}
+                                                            </div>
+                                                        )}
 
                                                         <div className="flex gap-2">
                                                             {mov.status === 'pending' && (
-                                                                <Button size="sm" variant="ghost" className="h-8 w-8 text-green-600 bg-green-50" onClick={() => markAsPaid(mov.id)}>
+                                                                <Button size="sm" variant="ghost" className="h-8 w-8 text-green-600 bg-green-50" onClick={() => openPaymentDialog(mov)}>
                                                                     <CheckCircle className="h-4 w-4" />
                                                                 </Button>
                                                             )}
@@ -580,17 +718,22 @@ export default function Financial() {
                                                             <TableCell className="text-sm font-medium text-zinc-700">{mov.description}</TableCell>
                                                             <TableCell className="text-xs text-zinc-500">{mov.detail_buyer}</TableCell>
                                                             <TableCell className="text-right font-bold text-sm">
-                                                                R$ {mov.amount.toFixed(2)}
+                                                                R$ {Math.abs(mov.amount).toFixed(2)}
                                                             </TableCell>
                                                             <TableCell className="text-center">
                                                                 <Badge variant={mov.status === 'paid' ? 'default' : 'outline'} className={mov.status === 'paid' ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-100' : 'text-yellow-600 border-yellow-200 bg-yellow-50 hover:bg-yellow-50'}>
                                                                     {mov.status === 'paid' ? 'Pago' : 'Pendente'}
                                                                 </Badge>
+                                                                {mov.detail_bank_name && (
+                                                                    <div className="flex items-center gap-1 text-[10px] text-zinc-500 mt-1">
+                                                                        <Building2 className="h-3 w-3" /> {mov.detail_bank_name}
+                                                                    </div>
+                                                                )}
                                                             </TableCell>
                                                             <TableCell className="text-right">
                                                                 <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                                                     {mov.status === 'pending' && (
-                                                                        <Button size="icon" variant="ghost" className="h-6 w-6 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => markAsPaid(mov.id)} title="Baixar">
+                                                                        <Button size="icon" variant="ghost" className="h-6 w-6 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => openPaymentDialog(mov)} title="Baixar">
                                                                             <CheckCircle className="h-4 w-4" />
                                                                         </Button>
                                                                     )}
@@ -618,6 +761,16 @@ export default function Financial() {
                     </TabsContent>
                 )}
             </Tabs>
+
+
+            <PaymentConfirmationDialog
+                isOpen={isPaymentDialogOpen}
+                onClose={() => setIsPaymentDialogOpen(false)}
+                onConfirm={handlePaymentConfirm}
+                amount={Math.abs(paymentDialogData.amount || 0)}
+                type={paymentDialogData.mode === 'batch' ? (activeTab === 'payable' ? 'expense' : 'income') : (paymentDialogData.type as any)}
+                count={paymentDialogData.count}
+            />
         </div>
     );
 }

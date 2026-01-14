@@ -557,127 +557,219 @@ export default function Production() {
                     </DialogHeader>
 
                     <div className="py-4 space-y-6">
-
+                        {/* Wrapper para Tabela (Desktop) e Cards (Mobile) */}
                         <div className="max-h-[400px] overflow-auto border rounded-md">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Item</TableHead>
-                                        <TableHead className="w-24">Unid.</TableHead>
-                                        <TableHead className="w-24 text-zinc-600">Estoque</TableHead>
-                                        <TableHead className="w-32">Planejado</TableHead>
-                                        <TableHead className="w-32">Qtd. Real</TableHead>
-                                        <TableHead className="w-32 text-amber-600">Desperdício</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {orderItems.map(item => {
-                                        const stockInfo = item.type === 'ingredient'
-                                            ? ingredients.find(i => i.id === item.item_id)
-                                            : products.find(p => p.id === item.item_id);
+                            {/* Desktop View: Table */}
+                            <div className="hidden md:block">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Item</TableHead>
+                                            <TableHead className="w-24">Unid.</TableHead>
+                                            <TableHead className="w-24 text-zinc-600">Estoque</TableHead>
+                                            <TableHead className="w-32">Planejado</TableHead>
+                                            <TableHead className="w-32">Qtd. Real</TableHead>
+                                            <TableHead className="w-32 text-amber-600">Desperdício</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {orderItems.map(item => {
+                                            const stockInfo = item.type === 'ingredient'
+                                                ? ingredients.find(i => i.id === item.item_id)
+                                                : products.find(p => p.id === item.item_id);
 
-                                        let currentStock = 0;
-                                        let stockUnit = '-';
-                                        let unitWeight = 1;
-                                        let unitType = '';
+                                            let currentStock = 0;
+                                            let stockUnit = '-';
+                                            let unitWeight = 1;
+                                            let unitType = '';
 
-                                        if (stockInfo) {
-                                            if ('stock_danilo' in stockInfo) {
-                                                currentStock = stockInfo.stock_danilo;
-                                                stockUnit = stockInfo.unit;
-                                                unitWeight = stockInfo.unit_weight || 1;
-                                                unitType = stockInfo.unit_type || '';
-                                            } else {
-                                                currentStock = stockInfo.stock_quantity;
-                                                stockUnit = stockInfo.unit || 'un';
+                                            if (stockInfo) {
+                                                if ('stock_danilo' in stockInfo) {
+                                                    currentStock = stockInfo.stock_danilo;
+                                                    stockUnit = stockInfo.unit;
+                                                    unitWeight = stockInfo.unit_weight || 1;
+                                                    unitType = stockInfo.unit_type || '';
+                                                } else {
+                                                    currentStock = stockInfo.stock_quantity;
+                                                    stockUnit = stockInfo.unit || 'un';
+                                                }
                                             }
-                                        }
 
-                                        // Robust Conversion & Unit Determination
-                                        const stockUnitLower = stockUnit?.toLowerCase();
+                                            // Robust Conversion & Unit Determination
+                                            const stockUnitLower = stockUnit?.toLowerCase();
 
-                                        // Priority: 1. Ingredient's Secondary Unit (unit_type) 2. Recipe's Unit 3. Default 'un'
-                                        let consumptionUnit = (unitType || item.unit || 'un').toLowerCase();
+                                            // Priority: 1. Ingredient's Secondary Unit (unit_type) 2. Recipe's Unit 3. Default 'un'
+                                            let consumptionUnit = (unitType || item.unit || 'un').toLowerCase();
 
-                                        // Specialized override: if stock is 'un' but we have a weight factor and a target type like 'g'
-                                        if (stockUnitLower === 'un' && unitWeight > 1 && unitType && item.unit?.toLowerCase() === 'un') {
-                                            consumptionUnit = unitType.toLowerCase();
-                                        }
+                                            // Specialized override: if stock is 'un' but we have a weight factor and a target type like 'g'
+                                            if (stockUnitLower === 'un' && unitWeight > 1 && unitType && item.unit?.toLowerCase() === 'un') {
+                                                consumptionUnit = unitType.toLowerCase();
+                                            }
 
-                                        let displayStock = currentStock;
+                                            let displayStock = currentStock;
 
-                                        // Apply Conversion Factor
-                                        if ((stockUnitLower === 'un' || stockUnitLower === 'saco') && (consumptionUnit === 'g' || consumptionUnit === 'ml')) {
-                                            displayStock = currentStock * unitWeight;
-                                        } else if (stockUnitLower === 'kg' && consumptionUnit === 'g') displayStock = currentStock * 1000;
-                                        else if (stockUnitLower === 'g' && consumptionUnit === 'kg') displayStock = currentStock / 1000;
-                                        else if (stockUnitLower === 'l' && consumptionUnit === 'ml') displayStock = currentStock * 1000;
-                                        else if (stockUnitLower === 'ml' && consumptionUnit === 'l') displayStock = currentStock / 1000;
+                                            // Apply Conversion Factor
+                                            if ((stockUnitLower === 'un' || stockUnitLower === 'saco') && (consumptionUnit === 'g' || consumptionUnit === 'ml')) {
+                                                displayStock = currentStock * unitWeight;
+                                            } else if (stockUnitLower === 'kg' && consumptionUnit === 'g') displayStock = currentStock * 1000;
+                                            else if (stockUnitLower === 'g' && consumptionUnit === 'kg') displayStock = currentStock / 1000;
+                                            else if (stockUnitLower === 'l' && consumptionUnit === 'ml') displayStock = currentStock * 1000;
+                                            else if (stockUnitLower === 'ml' && consumptionUnit === 'l') displayStock = currentStock / 1000;
 
-                                        const realQty = item.quantity_used ?? item.quantity_planned;
-                                        const totalNeeded = realQty + (item.waste_quantity || 0);
-                                        const isInsufficient = totalNeeded > (displayStock + 0.001);
+                                            const realQty = item.quantity_used ?? item.quantity_planned;
+                                            const totalNeeded = realQty + (item.waste_quantity || 0);
+                                            const isInsufficient = totalNeeded > (displayStock + 0.001);
 
-                                        return (
-                                            <TableRow key={item.id} className={isInsufficient ? "bg-red-50/50" : ""}>
-                                                <TableCell className="font-medium">
-                                                    <div className="flex flex-col">
-                                                        <div className="flex items-center gap-1.5">
-                                                            {item.type === 'product' ? <Layers className="h-3.5 w-3.5 text-amber-600" /> : <Box className="h-3.5 w-3.5 text-blue-600" />}
-                                                            <span className="text-zinc-900">{item.name}</span>
-                                                        </div>
-                                                        {isInsufficient && (
-                                                            <span className="text-[10px] text-red-600 font-bold mt-0.5">
-                                                                Saldo Insuficiente! (Faltam {(totalNeeded - displayStock).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}{consumptionUnit})
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell className="text-xs text-zinc-500 font-medium uppercase text-center">{consumptionUnit}</TableCell>
-                                                <TableCell className="text-xs font-mono">
-                                                    <div className="flex flex-col">
-                                                        <span className={cn("font-bold", isInsufficient ? "text-red-600" : "text-zinc-700")}>
-                                                            {displayStock.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} {consumptionUnit}
-                                                        </span>
-                                                        <span className="text-[10px] text-zinc-400">
-                                                            Estoque: {currentStock} {stockUnit}
-                                                        </span>
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell className="text-sm font-medium text-zinc-700">
-                                                    {Number(item.quantity_planned).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-zinc-400 text-[10px] uppercase">{consumptionUnit}</span>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <div className="flex items-center gap-1.5">
-                                                        <Input
-                                                            type="number"
-                                                            className={cn(
-                                                                "h-9 w-24 text-center font-medium",
-                                                                isInsufficient ? "border-red-300 bg-red-50 focus-visible:ring-red-500" : "bg-white"
+                                            return (
+                                                <TableRow key={item.id} className={isInsufficient ? "bg-red-50/50" : ""}>
+                                                    <TableCell className="font-medium">
+                                                        <div className="flex flex-col">
+                                                            <div className="flex items-center gap-1.5">
+                                                                {item.type === 'product' ? <Layers className="h-3.5 w-3.5 text-amber-600" /> : <Box className="h-3.5 w-3.5 text-blue-600" />}
+                                                                <span className="text-zinc-900">{item.name}</span>
+                                                            </div>
+                                                            {isInsufficient && (
+                                                                <span className="text-[10px] text-red-600 font-bold mt-0.5">
+                                                                    Saldo Insuficiente! (Faltam {(totalNeeded - displayStock).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}{consumptionUnit})
+                                                                </span>
                                                             )}
-                                                            value={item.quantity_used ?? item.quantity_planned}
-                                                            onChange={e => updateItemUsage(item.id, 'quantity_used', Number(e.target.value))}
-                                                        />
-                                                        <span className="text-[10px] text-zinc-400 font-bold uppercase">{consumptionUnit}</span>
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <div className="flex items-center gap-1.5">
-                                                        <Input
-                                                            type="number"
-                                                            className="h-9 w-24 border-amber-200 focus:ring-amber-500 text-center font-medium bg-amber-50/10 placeholder:text-amber-300"
-                                                            value={item.waste_quantity || ''}
-                                                            onChange={e => updateItemUsage(item.id, 'waste_quantity', Number(e.target.value))}
-                                                            placeholder="0"
-                                                        />
-                                                        <span className="text-[10px] text-zinc-400 font-bold uppercase">{consumptionUnit}</span>
-                                                    </div>
-                                                </TableCell>
-                                            </TableRow>
-                                        );
-                                    })}
-                                </TableBody>
-                            </Table>
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell className="text-xs text-zinc-500 font-medium uppercase text-center">{consumptionUnit}</TableCell>
+                                                    <TableCell className="text-xs font-mono">
+                                                        <div className="flex flex-col">
+                                                            <span className={cn("font-bold", isInsufficient ? "text-red-600" : "text-zinc-700")}>
+                                                                {displayStock.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} {consumptionUnit}
+                                                            </span>
+                                                            <span className="text-[10px] text-zinc-400">
+                                                                Estoque: {currentStock} {stockUnit}
+                                                            </span>
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell className="text-sm font-medium text-zinc-700">
+                                                        {Number(item.quantity_planned).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-zinc-400 text-[10px] uppercase">{consumptionUnit}</span>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <div className="flex items-center gap-1.5">
+                                                            <Input
+                                                                type="number"
+                                                                className={cn(
+                                                                    "h-9 w-24 text-center font-medium",
+                                                                    isInsufficient ? "border-red-300 bg-red-50 focus-visible:ring-red-500" : "bg-white"
+                                                                )}
+                                                                value={item.quantity_used ?? item.quantity_planned}
+                                                                onChange={e => updateItemUsage(item.id, 'quantity_used', Number(e.target.value))}
+                                                            />
+                                                            <span className="text-[10px] text-zinc-400 font-bold uppercase">{consumptionUnit}</span>
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <div className="flex items-center gap-1.5">
+                                                            <Input
+                                                                type="number"
+                                                                className="h-9 w-24 border-amber-200 focus:ring-amber-500 text-center font-medium bg-amber-50/10 placeholder:text-amber-300"
+                                                                value={item.waste_quantity || ''}
+                                                                onChange={e => updateItemUsage(item.id, 'waste_quantity', Number(e.target.value))}
+                                                                placeholder="0"
+                                                            />
+                                                            <span className="text-[10px] text-zinc-400 font-bold uppercase">{consumptionUnit}</span>
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+                                    </TableBody>
+                                </Table>
+                            </div>
+
+                            {/* Mobile View: Cards */}
+                            <div className="md:hidden space-y-4 p-2 bg-zinc-50/50">
+                                {orderItems.map(item => {
+                                    const stockInfo = item.type === 'ingredient'
+                                        ? ingredients.find(i => i.id === item.item_id)
+                                        : products.find(p => p.id === item.item_id);
+
+                                    let currentStock = 0;
+                                    let stockUnit = '-';
+                                    let unitWeight = 1;
+                                    let unitType = '';
+
+                                    if (stockInfo) {
+                                        if ('stock_danilo' in stockInfo) {
+                                            currentStock = stockInfo.stock_danilo;
+                                            stockUnit = stockInfo.unit;
+                                            unitWeight = stockInfo.unit_weight || 1;
+                                            unitType = stockInfo.unit_type || '';
+                                        } else {
+                                            currentStock = stockInfo.stock_quantity;
+                                            stockUnit = stockInfo.unit || 'un';
+                                        }
+                                    }
+
+                                    // Robust Conversion & Unit Determination
+                                    const stockUnitLower = stockUnit?.toLowerCase();
+                                    let consumptionUnit = (unitType || item.unit || 'un').toLowerCase();
+
+                                    if (stockUnitLower === 'un' && unitWeight > 1 && unitType && item.unit?.toLowerCase() === 'un') {
+                                        consumptionUnit = unitType.toLowerCase();
+                                    }
+
+                                    let displayStock = currentStock;
+
+                                    if ((stockUnitLower === 'un' || stockUnitLower === 'saco') && (consumptionUnit === 'g' || consumptionUnit === 'ml')) {
+                                        displayStock = currentStock * unitWeight;
+                                    } else if (stockUnitLower === 'kg' && consumptionUnit === 'g') displayStock = currentStock * 1000;
+                                    else if (stockUnitLower === 'g' && consumptionUnit === 'kg') displayStock = currentStock / 1000;
+                                    else if (stockUnitLower === 'l' && consumptionUnit === 'ml') displayStock = currentStock * 1000;
+                                    else if (stockUnitLower === 'ml' && consumptionUnit === 'l') displayStock = currentStock / 1000;
+
+                                    const realQty = item.quantity_used ?? item.quantity_planned;
+                                    const totalNeeded = realQty + (item.waste_quantity || 0);
+                                    const isInsufficient = totalNeeded > (displayStock + 0.001);
+
+                                    return (
+                                        <div key={item.id} className={cn("bg-white p-3 rounded-lg border shadow-sm space-y-3", isInsufficient ? "border-red-300 bg-red-50/30" : "")}>
+                                            <div className="flex justify-between items-start">
+                                                <div className="flex items-center gap-2">
+                                                    {item.type === 'product' ? <Layers className="h-4 w-4 text-amber-600" /> : <Box className="h-4 w-4 text-blue-600" />}
+                                                    <span className="font-semibold text-sm">{item.name}</span>
+                                                </div>
+                                                <Badge variant="outline" className="text-xs bg-zinc-50">
+                                                    Est: {displayStock.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}{consumptionUnit}
+                                                </Badge>
+                                            </div>
+
+                                            {isInsufficient && (
+                                                <div className="text-[10px] text-red-600 font-bold bg-red-100 px-2 py-1 rounded">
+                                                    Saldo Insuficiente! Faltam {(totalNeeded - displayStock).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}{consumptionUnit}
+                                                </div>
+                                            )}
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-1">
+                                                    <Label className="text-xs text-zinc-500">Qtd Real ({consumptionUnit})</Label>
+                                                    <Input
+                                                        type="number"
+                                                        className={cn("h-9", isInsufficient ? "border-red-300 focus-visible:ring-red-500" : "")}
+                                                        value={item.quantity_used ?? item.quantity_planned}
+                                                        onChange={e => updateItemUsage(item.id, 'quantity_used', Number(e.target.value))}
+                                                    />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <Label className="text-xs text-amber-600">Desperdício ({consumptionUnit})</Label>
+                                                    <Input
+                                                        type="number"
+                                                        className="h-9 border-amber-200 focus:ring-amber-500 bg-amber-50/10"
+                                                        value={item.waste_quantity || ''}
+                                                        onChange={e => updateItemUsage(item.id, 'waste_quantity', Number(e.target.value))}
+                                                        placeholder="0"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
 

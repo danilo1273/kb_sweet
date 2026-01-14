@@ -32,15 +32,16 @@ export default function Dashboard() {
 
                 // Fetch Metrics
                 const [ingredientsRes, financialRes, ordersRes] = await Promise.all([
-                    supabase.from('ingredients').select('stock_danilo, stock_adriel, cost, unit_weight'),
+                    supabase.from('ingredients').select('stock_danilo, stock_adriel, cost_danilo, cost_adriel'),
                     supabase.from('financial_movements').select('amount, status, type'),
                     supabase.from('production_orders').select('id', { count: 'exact' }).eq('status', 'open')
                 ]);
 
                 // Calculate Stock Value
                 const totalStockValue = ingredientsRes.data?.reduce((acc, ing) => {
-                    const totalQty = (Number(ing.stock_danilo) || 0) + (Number(ing.stock_adriel) || 0);
-                    return acc + (totalQty * (Number(ing.cost) || 0) / (Number(ing.unit_weight) || 1));
+                    const valDanilo = (Number(ing.stock_danilo) || 0) * (Number(ing.cost_danilo) || 0);
+                    const valAdriel = (Number(ing.stock_adriel) || 0) * (Number(ing.cost_adriel) || 0);
+                    return acc + valDanilo + valAdriel;
                 }, 0) || 0;
 
                 // Calculate Pending Payments (Expenses ONLY)
