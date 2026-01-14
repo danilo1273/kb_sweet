@@ -315,107 +315,183 @@ export default function Production() {
 
                 <TabsContent value="open">
                     {activeTab === 'open' && (
-                        <div className="bg-white rounded-lg border shadow-sm">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Data Criação</TableHead>
-                                        <TableHead>Produto</TableHead>
-                                        <TableHead>Criado Por</TableHead>
-                                        <TableHead>Qtd Planejada</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead className="text-right">Ações</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {orders.length === 0 ? (
-                                        <TableRow><TableCell colSpan={6} className="text-center py-8 text-zinc-500">Nenhuma produção em andamento.</TableCell></TableRow>
-                                    ) : (
-                                        orders.map(order => (
-                                            <TableRow key={order.id}>
-                                                <TableCell>{new Date(order.created_at).toLocaleString()}</TableCell>
-                                                <TableCell className="font-medium text-lg">{order.products?.name}</TableCell>
-                                                <TableCell className="text-zinc-500">
-                                                    {order.profiles?.full_name?.split(' ')[0] || order.profiles?.email?.split('@')[0] || '-'}
-                                                </TableCell>
-                                                <TableCell><Badge variant="outline" className="text-base">{order.quantity}</Badge></TableCell>
-                                                <TableCell><Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200">Em Aberto</Badge></TableCell>
-                                                <TableCell className="text-right space-x-2">
-                                                    {(order.user_id === currentUserId || isAdmin) && (
-                                                        <>
-                                                            <Button size="sm" onClick={() => openExecution(order)} className="bg-blue-600 hover:bg-blue-700">
-                                                                <PlayCircle className="mr-2 h-4 w-4" /> Executar
-                                                            </Button>
-                                                            <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-9 w-9 p-0" title="Cancelar Ordem">
-                                                                <Trash2 className="h-4 w-4" />
-                                                            </Button>
-                                                        </>
-                                                    )}
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
+                        <>
+                            <div className="md:hidden space-y-3 p-1">
+                                {orders.length === 0 ? (
+                                    <div className="text-center py-8 text-zinc-500">Nenhuma produção em andamento.</div>
+                                ) : (
+                                    orders.map(order => (
+                                        <div key={order.id} className="bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <div className="font-bold text-lg text-zinc-900">{order.products?.name}</div>
+                                                    <div className="text-xs text-zinc-500">{new Date(order.created_at).toLocaleString()}</div>
+                                                </div>
+                                                <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200">Em Aberto</Badge>
+                                            </div>
+                                            <div className="flex justify-between items-center text-sm">
+                                                <span className="text-zinc-600">Qtd: <strong>{order.quantity}</strong></span>
+                                                <span className="text-zinc-500 text-xs">Por: {order.profiles?.full_name?.split(' ')[0] || '-'}</span>
+                                            </div>
+                                            {(order.user_id === currentUserId || isAdmin) && (
+                                                <div className="flex justify-end gap-2 pt-2 border-t mt-1">
+                                                    <Button size="sm" onClick={() => openExecution(order)} className="bg-blue-600 hover:bg-blue-700 h-8 text-xs">
+                                                        <PlayCircle className="mr-2 h-3 w-3" /> Executar
+                                                    </Button>
+                                                    <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+
+                            <div className="hidden md:block bg-white rounded-lg border shadow-sm">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Data Criação</TableHead>
+                                            <TableHead>Produto</TableHead>
+                                            <TableHead>Criado Por</TableHead>
+                                            <TableHead>Qtd Planejada</TableHead>
+                                            <TableHead>Status</TableHead>
+                                            <TableHead className="text-right">Ações</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {orders.length === 0 ? (
+                                            <TableRow><TableCell colSpan={6} className="text-center py-8 text-zinc-500">Nenhuma produção em andamento.</TableCell></TableRow>
+                                        ) : (
+                                            orders.map(order => (
+                                                <TableRow key={order.id}>
+                                                    <TableCell>{new Date(order.created_at).toLocaleString()}</TableCell>
+                                                    <TableCell className="font-medium text-lg">{order.products?.name}</TableCell>
+                                                    <TableCell className="text-zinc-500">
+                                                        {order.profiles?.full_name?.split(' ')[0] || order.profiles?.email?.split('@')[0] || '-'}
+                                                    </TableCell>
+                                                    <TableCell><Badge variant="outline" className="text-base">{order.quantity}</Badge></TableCell>
+                                                    <TableCell><Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200">Em Aberto</Badge></TableCell>
+                                                    <TableCell className="text-right space-x-2">
+                                                        {(order.user_id === currentUserId || isAdmin) && (
+                                                            <>
+                                                                <Button size="sm" onClick={() => openExecution(order)} className="bg-blue-600 hover:bg-blue-700">
+                                                                    <PlayCircle className="mr-2 h-4 w-4" /> Executar
+                                                                </Button>
+                                                                <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-9 w-9 p-0" title="Cancelar Ordem">
+                                                                    <Trash2 className="h-4 w-4" />
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        </>
                     )}
                 </TabsContent>
 
                 <TabsContent value="history">
                     {activeTab === 'history' && (
-                        <div className="bg-white rounded-lg border shadow-sm">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Data Fechamento</TableHead>
-                                        <TableHead>Produto</TableHead>
-                                        <TableHead>Criado Por</TableHead>
-                                        <TableHead>Qtd Produzida</TableHead>
-                                        <TableHead>Custo Total</TableHead>
-                                        <TableHead>Custo Unitário</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead className="text-right">Ações</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {orders.length === 0 ? (
-                                        <TableRow><TableCell colSpan={8} className="text-center py-8 text-zinc-500">Histórico vazio.</TableCell></TableRow>
-                                    ) : (
-                                        orders.map(order => (
-                                            <TableRow key={order.id}>
-                                                <TableCell>{order.closed_at ? new Date(order.closed_at).toLocaleString() : '-'}</TableCell>
-                                                <TableCell className="font-medium">{order.products?.name}</TableCell>
-                                                <TableCell className="text-zinc-500">
-                                                    {order.profiles?.full_name?.split(' ')[0] || order.profiles?.email?.split('@')[0] || '-'}
-                                                </TableCell>
-                                                <TableCell>{order.quantity}</TableCell>
-                                                <TableCell>R$ {order.cost_at_production?.toFixed(2)}</TableCell>
-                                                <TableCell className="text-zinc-500 font-mono">
-                                                    R$ {order.quantity > 0 && order.cost_at_production ? (order.cost_at_production / order.quantity).toFixed(2) : '-'}
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Badge variant={order.status === 'closed' ? 'default' : 'secondary'} className={order.status === 'closed' ? 'bg-green-600 hover:bg-green-700' : 'bg-zinc-500'}>
-                                                        {order.status === 'closed' ? 'Concluído' : order.status === 'canceled' ? 'Cancelado' : order.status === 'open' ? 'Em Aberto' : order.status}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                    {isAdmin && (
-                                                        <div className="flex justify-end gap-1">
-                                                            <Button variant="outline" size="sm" onClick={() => handleAdminAction('reopen', order.id)} title="Corrigir / Reabrir">
-                                                                <Edit className="h-3 w-3 mr-1" /> Corrigir
-                                                            </Button>
-                                                            <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0" title="Excluir (Reverter Estoque)">
-                                                                <Trash2 className="h-4 w-4" />
-                                                            </Button>
-                                                        </div>
-                                                    )}
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
+                        <>
+                            <div className="md:hidden space-y-3 p-1">
+                                {orders.length === 0 ? (
+                                    <div className="text-center py-8 text-zinc-500">Histórico vazio.</div>
+                                ) : (
+                                    orders.map(order => (
+                                        <div key={order.id} className="bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <div className="font-bold text-lg text-zinc-900">{order.products?.name}</div>
+                                                    <div className="text-xs text-zinc-500">Fechado em: {order.closed_at ? new Date(order.closed_at).toLocaleDateString() : '-'}</div>
+                                                </div>
+                                                <Badge variant={order.status === 'closed' ? 'default' : 'secondary'} className={order.status === 'closed' ? 'bg-green-600' : ''}>
+                                                    {order.status === 'closed' ? 'Concluído' : order.status}
+                                                </Badge>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2 text-sm bg-zinc-50 p-2 rounded">
+                                                <div>
+                                                    <span className="text-xs text-zinc-500">Qtd Produzida</span>
+                                                    <div className="font-medium">{order.quantity}</div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="text-xs text-zinc-500">Custo Total</span>
+                                                    <div className="font-bold text-green-700">R$ {order.cost_at_production?.toFixed(2)}</div>
+                                                </div>
+                                            </div>
+                                            {isAdmin && (
+                                                <div className="flex justify-end gap-2 pt-2 border-t mt-1">
+                                                    <Button variant="outline" size="sm" onClick={() => handleAdminAction('reopen', order.id)} className="h-8 text-xs">
+                                                        <Edit className="h-3 w-3 mr-1" /> Corrigir
+                                                    </Button>
+                                                    <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+
+                            <div className="hidden md:block bg-white rounded-lg border shadow-sm">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Data Fechamento</TableHead>
+                                            <TableHead>Produto</TableHead>
+                                            <TableHead>Criado Por</TableHead>
+                                            <TableHead>Qtd Produzida</TableHead>
+                                            <TableHead>Custo Total</TableHead>
+                                            <TableHead>Custo Unitário</TableHead>
+                                            <TableHead>Status</TableHead>
+                                            <TableHead className="text-right">Ações</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {orders.length === 0 ? (
+                                            <TableRow><TableCell colSpan={8} className="text-center py-8 text-zinc-500">Histórico vazio.</TableCell></TableRow>
+                                        ) : (
+                                            orders.map(order => (
+                                                <TableRow key={order.id}>
+                                                    <TableCell>{order.closed_at ? new Date(order.closed_at).toLocaleString() : '-'}</TableCell>
+                                                    <TableCell className="font-medium">{order.products?.name}</TableCell>
+                                                    <TableCell className="text-zinc-500">
+                                                        {order.profiles?.full_name?.split(' ')[0] || order.profiles?.email?.split('@')[0] || '-'}
+                                                    </TableCell>
+                                                    <TableCell>{order.quantity}</TableCell>
+                                                    <TableCell>R$ {order.cost_at_production?.toFixed(2)}</TableCell>
+                                                    <TableCell className="text-zinc-500 font-mono">
+                                                        R$ {order.quantity > 0 && order.cost_at_production ? (order.cost_at_production / order.quantity).toFixed(2) : '-'}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Badge variant={order.status === 'closed' ? 'default' : 'secondary'} className={order.status === 'closed' ? 'bg-green-600 hover:bg-green-700' : 'bg-zinc-500'}>
+                                                            {order.status === 'closed' ? 'Concluído' : order.status === 'canceled' ? 'Cancelado' : order.status === 'open' ? 'Em Aberto' : order.status}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell className="text-right">
+                                                        {isAdmin && (
+                                                            <div className="flex justify-end gap-1">
+                                                                <Button variant="outline" size="sm" onClick={() => handleAdminAction('reopen', order.id)} title="Corrigir / Reabrir">
+                                                                    <Edit className="h-3 w-3 mr-1" /> Corrigir
+                                                                </Button>
+                                                                <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0" title="Excluir (Reverter Estoque)">
+                                                                    <Trash2 className="h-4 w-4" />
+                                                                </Button>
+                                                            </div>
+                                                        )}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        </>
                     )}
                 </TabsContent>
             </Tabs>

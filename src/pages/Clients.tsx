@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { Plus, Search, Loader2, Edit, Trash2, User } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 interface Client {
     id: string;
@@ -106,7 +107,63 @@ export default function Clients() {
                 />
             </div>
 
-            <div className="bg-white rounded-lg border shadow-sm">
+            {/* Mobile View: Cards */}
+            <div className="md:hidden space-y-3 mb-4">
+                {loading ? (
+                    <div className="text-center py-8"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>
+                ) : filteredClients.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">Nenhum cliente encontrado.</div>
+                ) : (
+                    filteredClients.map(client => {
+                        const movements = (client as any).financial_movements || [];
+                        const totalBought = movements
+                            .filter((m: any) => m.type === 'income')
+                            .reduce((acc: number, curr: any) => acc + (Number(curr.amount) || 0), 0);
+
+                        const totalPending = movements
+                            .filter((m: any) => m.type === 'income' && m.status === 'pending')
+                            .reduce((acc: number, curr: any) => acc + (Number(curr.amount) || 0), 0);
+
+                        return (
+                            <div key={client.id} className="bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3">
+                                <div className="flex justify-between items-start">
+                                    <div className="flex items-center gap-2">
+                                        <div className="h-8 w-8 rounded-full bg-zinc-100 flex items-center justify-center">
+                                            <User className="h-4 w-4 text-zinc-500" />
+                                        </div>
+                                        <div>
+                                            <div className="font-bold text-zinc-900">{client.name}</div>
+                                            <div className="text-xs text-zinc-500">{client.phone || '-'}</div>
+                                        </div>
+                                    </div>
+                                    {totalPending > 0 ? (
+                                        <div className="text-right">
+                                            <span className="text-[10px] text-red-600 block">Pendente</span>
+                                            <Badge variant="destructive" className="bg-red-50 text-red-700 hover:bg-red-100 border-red-200">R$ {totalPending.toFixed(2)}</Badge>
+                                        </div>
+                                    ) : (
+                                        <Badge variant="secondary" className="bg-green-50 text-green-700">Em dia</Badge>
+                                    )}
+                                </div>
+                                <div className="flex justify-between items-center bg-zinc-50 p-2 rounded text-sm">
+                                    <span className="text-zinc-500">Total Comprado</span>
+                                    <span className="font-bold">R$ {totalBought.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-end gap-2 pt-2 border-t">
+                                    <Button variant="outline" size="sm" onClick={() => { setCurrentClient(client); setIsDialogOpen(true); }} className="h-8 text-xs">
+                                        <Edit className="h-3 w-3 mr-1" /> Editar
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={() => handleDelete(client.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            </div>
+                        );
+                    })
+                )}
+            </div>
+
+            <div className="hidden md:block bg-white rounded-lg border shadow-sm">
                 <Table>
                     <TableHeader>
                         <TableRow>

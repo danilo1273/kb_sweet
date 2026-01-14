@@ -12,7 +12,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Search, Loader2, Edit, Trash2, History, Settings, Plus, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
-import { useIngredients } from "@/hooks/useIngredients";
+// import { useIngredients } from "@/hooks/useIngredients";
 import { Ingredient, Category } from "@/types";
 
 interface PurchaseHistory {
@@ -60,7 +60,7 @@ export default function Inventory() {
     const [newUnitName, setNewUnitName] = useState("");
     const [categoryFilter, setCategoryFilter] = useState("all");
     const [stockFilter, setStockFilter] = useState("all");
-    const [typeFilter, setTypeFilter] = useState("all"); // 'all', 'stock' (insumo), 'product' (acabado)
+    const [typeFilter] = useState("all"); // 'all', 'stock' (insumo), 'product' (acabado)
 
     // Category State
     const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
@@ -277,6 +277,25 @@ export default function Inventory() {
         }
     }
 
+    async function deleteIngredient(id: string, mode: 'deactivate' | 'delete') {
+        try {
+            if (mode === 'deactivate') {
+                const { error } = await supabase.from('ingredients').update({ is_active: false }).eq('id', id);
+                if (error) throw error;
+                toast({ title: "Ingrediente desativado" });
+            } else {
+                const { error } = await supabase.from('ingredients').delete().eq('id', id);
+                if (error) {
+                    throw new Error("Não é possível excluir itens que possuem histórico. Tente desativar.");
+                }
+                toast({ title: "Ingrediente EXCLUÍDO definitivamente" });
+            }
+            await fetchIngredients();
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Erro ao excluir", description: error.message });
+        }
+    }
+
     const openEdit = (ingredient: Ingredient) => {
         setCurrentIngredient(ingredient);
         setIsDialogOpen(true);
@@ -363,7 +382,7 @@ export default function Inventory() {
                     <SelectContent>
                         <SelectItem value="all">Todas as Categorias</SelectItem>
                         {uniqueCategories.map(cat => (
-                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                            <SelectItem key={cat || 'unknown'} value={cat || 'unknown'}>{cat}</SelectItem>
                         ))}
                     </SelectContent>
                 </Select>
@@ -379,7 +398,65 @@ export default function Inventory() {
                 </Select>
             </div >
 
-            <div className="rounded-md border bg-white shadow-sm overflow-hidden">
+            {/* Mobile View: Cards */}
+            <div className="md:hidden space-y-3 mb-4">
+                {loading ? (
+                    <div className="text-center py-8"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>
+                ) : filteredIngredients.length === 0 ? (
+                    <EmptyState
+                        icon={Package}
+                        title="Nenhum ingrediente"
+                        description="Tente ajustar sua busca."
+                        className="py-8"
+                    />
+                ) : (
+                    filteredIngredients.map((item) => {
+                        const totalQtd = (item.stock_danilo || 0) + (item.stock_adriel || 0);
+                        return (
+                            <div key={item.id} className={cn("bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3", item.type === 'expense' ? 'bg-purple-50/30' : '')}>
+                                <div className="flex justify-between items-start">
+                                    <div className="w-[70%]">
+                                        <div className="font-bold text-zinc-900 truncate" title={item.name}>{item.name}</div>
+                                        <div className="text-xs text-zinc-500 flex items-center gap-2">
+                                            {item.category}
+                                            {item.type === 'expense' && <span className="text-[9px] bg-purple-100 text-purple-700 px-1 rounded">Despesa</span>}
+                                        </div>
+                                    </div>
+                                    <div className="w-[30%] flex justify-end gap-1">
+                                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(item)}>
+                                            <Edit className="h-4 w-4 text-zinc-400" />
+                                        </Button>
+                                    </div>
+                                </div>
+                                {item.type !== 'expense' && (
+                                    <div className="grid grid-cols-2 gap-2 text-sm border-t pt-2">
+                                        <div className="bg-blue-50 p-2 rounded">
+                                            <div className="text-[10px] text-blue-700 font-bold uppercase">Danilo</div>
+                                            <div className={cn("font-medium", item.stock_danilo <= item.min_stock ? "text-red-600" : "text-zinc-700")}>
+                                                {item.stock_danilo} <span className="text-[10px]">{item.unit}</span>
+                                            </div>
+                                        </div>
+                                        <div className="bg-amber-50 p-2 rounded">
+                                            <div className="text-[10px] text-amber-700 font-bold uppercase">Adriel</div>
+                                            <div className="font-medium text-zinc-700">
+                                                {item.stock_adriel} <span className="text-[10px]">{item.unit}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="flex justify-between items-center text-xs text-zinc-400 pt-1">
+                                    <span>Total: {item.type === 'expense' ? '-' : `${totalQtd} ${item.unit}`}</span>
+                                    <Button variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => openHistory(item)}>
+                                        <History className="h-3 w-3 mr-1" /> Histórico
+                                    </Button>
+                                </div>
+                            </div>
+                        );
+                    })
+                )}
+            </div>
+
+            <div className="hidden md:block rounded-md border bg-white shadow-sm overflow-hidden">
                 <Table>
                     <TableHeader>
                         <TableRow>
