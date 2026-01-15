@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Plus, ShoppingCart, TrendingUp, Edit, X, Trash2 } from "lucide-react";
+import { Loader2, Plus, ShoppingCart, TrendingUp, Edit, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -78,19 +78,29 @@ export default function Sales() {
         setIsEditOpen(true);
     };
 
+    // SECURE EDIT
+    const [editReason, setEditReason] = useState("");
+
     const handleSaveEdit = async () => {
         if (!editingSale) return;
+        if (!editReason.trim()) {
+            toast({ variant: 'destructive', title: "Justificativa Obrigatória", description: "Informe o motivo da alteração para auditoria." });
+            return;
+        }
 
-        const { error } = await supabase.from('sales').update({
-            total: editingSale.total,
-            client_id: editingSale.client_id === 'anonymous' ? null : editingSale.client_id
-        }).eq('id', editingSale.id);
+        const { error } = await supabase.rpc('update_sale_secure', {
+            p_sale_id: editingSale.id,
+            p_new_total: editingSale.total,
+            p_new_client_id: editingSale.client_id === 'anonymous' ? null : editingSale.client_id,
+            p_reason: editReason
+        });
 
         if (error) {
             toast({ variant: 'destructive', title: "Erro ao atualizar", description: error.message });
         } else {
-            toast({ title: "Venda atualizada!", description: "Valores e Cliente sincronizados." });
+            toast({ title: "Venda atualizada!", description: "Valores sincronizados e auditoria registrada." });
             setIsEditOpen(false);
+            setEditReason("");
             fetchSales();
         }
     };
@@ -200,42 +210,37 @@ export default function Sales() {
                                     <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500 bg-blue-50" onClick={() => handleEditClick(sale)}>
                                         <Edit className="h-4 w-4" />
                                     </Button>
-                                    {sale.status !== 'canceled' && (
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 text-red-500 bg-red-50"
-                                            onClick={async () => {
-                                                if (!confirm('Tem certeza que deseja EXCLUIR permanentemente? O estoque será devolvido.')) return;
-                                                setLoading(true);
-                                                try {
-                                                    const { data: items } = await supabase.from('sale_items').select('*').eq('sale_id', sale.id);
-                                                    if (items) {
-                                                        for (const item of items) {
-                                                            const { data: prod } = await supabase.from('products').select('*').eq('id', item.product_id).single();
-                                                            if (prod) {
-                                                                const field = sale.stock_source === 'danilo' ? 'stock_danilo' : 'stock_adriel';
-                                                                const newStock = (prod[field] || 0) + item.quantity;
-                                                                await supabase.from('products').update({ [field]: newStock }).eq('id', item.product_id);
-                                                            }
-                                                        }
-                                                    }
-                                                    await supabase.from('financial_movements').delete().eq('detail_order_id', sale.id);
-                                                    await supabase.from('sale_items').delete().eq('sale_id', sale.id);
-                                                    const { error } = await supabase.from('sales').delete().eq('id', sale.id);
-                                                    if (error) throw error;
-                                                    toast({ title: "Venda excluída!" });
-                                                    fetchSales();
-                                                } catch (e: any) {
-                                                    alert('Erro: ' + e.message);
-                                                } finally {
-                                                    setLoading(false);
-                                                }
-                                            }}
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                    )}
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 text-red-500 bg-red-50"
+                                        onClick={async () => {
+                                            if (!confirm('Tem certeza que deseja EXCLUIR permanentemente? O estoque será devolvido.')) return;
+                                            const reason = prompt("Digite o motivo da exclusão para auditoria:");
+                                            if (!reason) return;
+
+                                            setLoading(true);
+                                            try {
+                                                const { error } = await supabase.rpc('delete_sale_secure', {
+                                                    p_sale_id: sale.id,
+                                                    p_reason: reason
+                                                });
+
+                                                if (error) throw error;
+
+                                                toast({ title: "Venda excluída e estoque estornado!" });
+                                                fetchSales();
+
+                                            } catch (e: any) {
+                                                alert('Erro: ' + e.message);
+                                            } finally {
+                                                setLoading(false);
+                                            }
+                                        }}
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
+
                                 </div>
                             </div>
                         </div>
@@ -314,31 +319,15 @@ export default function Sales() {
                                                 className="text-red-500 hover:text-red-700 hover:bg-red-50"
                                                 onClick={async () => {
                                                     if (!confirm('Tem certeza que deseja EXCLUIR permanentemente? O estoque será devolvido.')) return;
+                                                    const reason = prompt("Digite o motivo da exclusão para auditoria:");
+                                                    if (!reason) return;
 
                                                     setLoading(true);
                                                     try {
-                                                        // 1. Fetch Items to Revert Stock
-                                                        const { data: items } = await supabase.from('sale_items').select('*').eq('sale_id', sale.id);
-
-                                                        if (items) {
-                                                            for (const item of items) {
-                                                                const { data: prod } = await supabase.from('products').select('*').eq('id', item.product_id).single();
-                                                                if (prod) {
-                                                                    const field = sale.stock_source === 'danilo' ? 'stock_danilo' : 'stock_adriel';
-                                                                    const currentStock = prod[field] || 0;
-                                                                    const newStock = currentStock + item.quantity;
-                                                                    await supabase.from('products').update({ [field]: newStock }).eq('id', item.product_id);
-                                                                }
-                                                            }
-                                                        }
-
-                                                        // 2. Delete Movement
-                                                        await supabase.from('financial_movements').delete().eq('detail_order_id', sale.id);
-
-                                                        // 3. Delete Header (Items cascade if set up, but assuming safe delete)
-                                                        // If no cascade on items, we must delete items first.
-                                                        await supabase.from('sale_items').delete().eq('sale_id', sale.id);
-                                                        const { error } = await supabase.from('sales').delete().eq('id', sale.id);
+                                                        const { error } = await supabase.rpc('delete_sale_secure', {
+                                                            p_sale_id: sale.id,
+                                                            p_reason: reason
+                                                        });
 
                                                         if (error) throw error;
 
@@ -390,6 +379,14 @@ export default function Sales() {
                                         {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Motivo da Alteração (Obrigatório)</Label>
+                                <Input
+                                    value={editReason}
+                                    onChange={e => setEditReason(e.target.value)}
+                                    placeholder="Ex: Cliente pediu desconto, Erro de digitação..."
+                                />
                             </div>
                         </div>
                     )}

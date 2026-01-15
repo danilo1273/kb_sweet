@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil, Save, X } from "lucide-react";
 import { Ingredient, Supplier, ItemDraft } from "@/types";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -35,6 +35,9 @@ export function NewOrderDialog({
     const [draftItem, setDraftItem] = useState<ItemDraft>({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo' });
     const [isSaving, setIsSaving] = useState(false);
 
+    // Editing State
+    const [editIndex, setEditIndex] = useState<number>(-1);
+
     const [unitCost, setUnitCost] = useState<number>(0);
 
     const handleAddItem = () => {
@@ -44,12 +47,47 @@ export function NewOrderDialog({
             const ing = ingredients.find(i => i.id === draftItem.ingredient_id);
             finalName = ing?.name || 'Unknown';
         }
-        setOrderItems([...orderItems, { ...draftItem, item_name: finalName }]);
+
+        const payload = { ...draftItem, item_name: finalName };
+
+        if (editIndex >= 0) {
+            // Update Existing
+            const newItems = [...orderItems];
+            newItems[editIndex] = payload;
+            setOrderItems(newItems);
+            setEditIndex(-1);
+            toast({ title: "Item atualizado" });
+        } else {
+            // Add New
+            setOrderItems([...orderItems, payload]);
+        }
+
+        // Reset Draft
+        setDraftItem({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo', ingredient_id: undefined });
+        setUnitCost(0);
+    };
+
+    const handleEditItem = (index: number) => {
+        const item = orderItems[index];
+        setDraftItem({ ...item });
+        setEditIndex(index);
+
+        // Calculate unit cost
+        if (item.quantity > 0) {
+            setUnitCost(Number((item.cost / item.quantity).toFixed(4)));
+        } else {
+            setUnitCost(0);
+        }
+    };
+
+    const handleCancelEdit = () => {
+        setEditIndex(-1);
         setDraftItem({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo', ingredient_id: undefined });
         setUnitCost(0);
     };
 
     const handleRemoveItem = (index: number) => {
+        if (index === editIndex) handleCancelEdit();
         const newItems = [...orderItems];
         newItems.splice(index, 1);
         setOrderItems(newItems);
@@ -119,10 +157,20 @@ export function NewOrderDialog({
                         </div>
                     </div>
 
-                    <div className="border rounded-md p-3 bg-zinc-50 space-y-3">
-                        <h4 className="font-semibold text-sm">Adicionar Item</h4>
+                    <div className={`border rounded-md p-3 space-y-3 transition-colors ${editIndex >= 0 ? 'bg-amber-50 border-amber-200' : 'bg-zinc-50'}`}>
+                        <div className="flex justify-between items-center">
+                            <h4 className={`font-semibold text-sm ${editIndex >= 0 ? 'text-amber-700' : ''}`}>
+                                {editIndex >= 0 ? 'Editando Item' : 'Adicionar Item'}
+                            </h4>
+                            {editIndex >= 0 && (
+                                <Button variant="ghost" size="sm" onClick={handleCancelEdit} className="h-6 px-2 text-amber-700 hover:text-amber-800 hover:bg-amber-100">
+                                    <X className="h-3 w-3 mr-1" /> Cancelar
+                                </Button>
+                            )}
+                        </div>
+
                         <div className="grid grid-cols-12 gap-2 items-end">
-                            <div className="space-y-1 col-span-4">
+                            <div className="space-y-1 col-span-3">
                                 <Label className="text-[10px]">Produto</Label>
                                 <div className="flex gap-1">
                                     <Select value={draftItem.ingredient_id || 'custom'} onValueChange={(val) => {
@@ -154,7 +202,24 @@ export function NewOrderDialog({
                                 <Input className="h-8" type="number" value={draftItem.cost || ''} onChange={e => onTotalCostChange(Number(e.target.value))} />
                             </div>
                             <div className="space-y-1 col-span-2">
-                                <Button onClick={handleAddItem} className="h-8 w-full" variant="secondary"><Plus className="h-3 w-3 mr-1" /> Adicionar</Button>
+                                <Label className="text-[10px]">Destino</Label>
+                                <Select value={draftItem.destination} onValueChange={(val: any) => setDraftItem({ ...draftItem, destination: val })}>
+                                    <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="danilo">Danilo</SelectItem>
+                                        <SelectItem value="adriel">Adriel</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="space-y-1 col-span-1">
+                                <Button
+                                    onClick={handleAddItem}
+                                    className={`h-8 w-full ${editIndex >= 0 ? 'bg-amber-600 hover:bg-amber-700' : ''}`}
+                                    variant={editIndex >= 0 ? 'default' : 'secondary'}
+                                    title={editIndex >= 0 ? "Atualizar" : "Adicionar"}
+                                >
+                                    {editIndex >= 0 ? <Save className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                                </Button>
                             </div>
                         </div>
                     </div>
@@ -163,13 +228,17 @@ export function NewOrderDialog({
                         <Table>
                             <TableBody>
                                 {orderItems.map((i, x) => (
-                                    <TableRow key={x}>
+                                    <TableRow key={x} className={editIndex === x ? 'bg-amber-50' : ''}>
                                         <TableCell className="py-2">{i.item_name}</TableCell>
                                         <TableCell className="py-2 text-right">{i.quantity} {i.unit}</TableCell>
                                         <TableCell className="py-2 text-right">R$ {Number(i.cost / (i.quantity || 1)).toFixed(2)} un</TableCell>
                                         <TableCell className="py-2 text-right font-bold">R$ {Number(i.cost).toFixed(2)}</TableCell>
                                         <TableCell className="py-2 text-right">
-                                            <Button variant="ghost" size="sm" onClick={() => handleRemoveItem(x)}><Trash2 className="h-3 w-3 text-red-400" /></Button>
+                                            <span className="text-[10px] text-zinc-500 uppercase mr-2 border px-1 rounded">{i.destination}</span>
+                                        </TableCell>
+                                        <TableCell className="py-2 text-right flex justify-end gap-1">
+                                            <Button variant="ghost" size="sm" onClick={() => handleEditItem(x)} className="h-6 w-6 p-0 text-blue-500"><Pencil className="h-3 w-3" /></Button>
+                                            <Button variant="ghost" size="sm" onClick={() => handleRemoveItem(x)} className="h-6 w-6 p-0 text-red-400"><Trash2 className="h-3 w-3" /></Button>
                                         </TableCell>
                                     </TableRow>
                                 ))}

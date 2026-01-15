@@ -9,25 +9,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { Search, Loader2, Edit, Trash2, History, Settings, Plus, Package } from "lucide-react";
+import { Search, Loader2, Edit, Trash2, History, Settings, Plus, Package, ClipboardCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InventoryAuditDialog } from "@/components/inventory/InventoryAuditDialog";
 // import { useIngredients } from "@/hooks/useIngredients";
 import { Ingredient, Category } from "@/types";
 
-interface PurchaseHistory {
+interface UnifiedHistoryItem {
     id: string;
-    created_at: string;
-    supplier?: string; // Legacy or direct
+    date: string;
+    type: 'purchase' | 'usage';
+    description: string;
     quantity: number;
-    cost: number;
     unit: string;
-    purchase_orders?: {
-        id: string;
-        nickname: string;
-        suppliers?: { name: string };
-        profiles?: { full_name: string };
-    };
+    total_value: number;
+    user_name?: string;
+    link_id?: string; // Order ID
 }
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -46,7 +44,7 @@ export default function Inventory() {
 
     // History Modal State
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-    const [historyData, setHistoryData] = useState<PurchaseHistory[]>([]);
+    const [historyData, setHistoryData] = useState<UnifiedHistoryItem[]>([]);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [selectedIngName, setSelectedIngName] = useState("");
     const [isAdmin, setIsAdmin] = useState(false);
@@ -67,6 +65,8 @@ export default function Inventory() {
     const [newCategoryName, setNewCategoryName] = useState("");
     const [newCategoryType, setNewCategoryType] = useState<'stock' | 'expense'>('stock');
 
+    const [isAuditOpen, setIsAuditOpen] = useState(false);
+
     useEffect(() => {
         checkUserRole();
         fetchIngredients();
@@ -75,7 +75,12 @@ export default function Inventory() {
     }, []);
 
     async function fetchCategories() {
-        const { data, error } = await supabase.from('custom_categories').select('*').order('name');
+        // Fetch categories for STOCK (exclude product types)
+        const { data, error } = await supabase.from('custom_categories')
+            .select('*')
+            .neq('type', 'product')
+            .order('name');
+
         if (!error && data) {
             setAvailableCategories(data.map((d: any) => ({
                 id: d.id,
@@ -308,48 +313,182 @@ export default function Inventory() {
         setHistoryLoading(true);
 
         try {
-            // 1. Fetch Request + Order info (Safe Join for Supplier if possible, else just ID)
-            // Try enabling suppliers(name) join. If it fails, we might need to fetch suppliers manually too.
-            // For now, assuming suppliers FK is standard. Removing profiles FK query which is often problematic.
-            const { data: rawData, error } = await supabase
+            const safeName = ingredient.name.replace(/"/g, '\\"');
+
+            // 1. Fetch Purchases
+            const purchasesPromise = supabase
                 .from('purchase_requests')
-                .select('*, purchase_orders(id, nickname, created_by, suppliers(name))')
-                .eq('ingredient_id', ingredient.id)
+                .select('*, purchase_orders(id, nickname, created_by, created_at, suppliers(name))')
+                .or(`ingredient_id.eq.${ingredient.id},item_name.eq."${safeName}"`)
                 .eq('status', 'approved')
+                .order('created_at', { ascending: false })
+                .limit(15);
+
+            // 2. Fetch Production Usage
+            const productionPromise = supabase
+                .from('production_order_items')
+                .select(`
+                    id, quantity_used, waste_quantity, unit, unit_cost,
+                    production_orders!inner (
+                        id, closed_at, quantity, status,
+                        products (name),
+                        profiles:user_id (full_name)
+                    )
+                `)
+                .eq('item_id', ingredient.id)
+                .eq('type', 'ingredient')
+                .eq('production_orders.status', 'closed') // Only closed orders deduct stock
+                .order('id', { ascending: false }) // Approximate time sort
+                .eq('production_orders.status', 'closed') // Only closed orders deduct stock
+                .order('id', { ascending: false }) // Approximate time sort
+                .limit(15);
+
+            // 3. Fetch Sales
+            const salesPromise = supabase
+                .from('sale_items')
+                .select(`
+                    id, quantity, unit_price,
+                    sales!inner (
+                        id, created_at, status, stock_source,
+                        profiles:user_id (full_name)
+                    )
+                `)
+                .eq('product_id', ingredient.id)
+                .neq('sales.status', 'canceled')
+                .order('created_at', { foreignTable: 'sales', ascending: false })
+                .limit(20);
+
+            // 5. Fetch Adjustments
+            const adjustmentsPromise = supabase
+                .from('stock_adjustments')
+                .select('*, profiles:user_id(full_name)')
+                .eq('ingredient_id', ingredient.id)
                 .order('created_at', { ascending: false })
                 .limit(10);
 
-            if (error) {
-                console.error("History fetch error:", error);
-                throw error;
-            }
+            const [purchasesRes, productionRes, adjustmentsRes, salesRes] = await Promise.all([purchasesPromise, productionPromise, adjustmentsPromise, salesPromise]);
 
-            let enrichedData: PurchaseHistory[] = rawData as any;
+            if (purchasesRes.error) throw purchasesRes.error;
+            if (productionRes.error) throw productionRes.error;
+            if (salesRes.error) console.error("Error fetching sales history:", salesRes.error); // Log warning but continue
 
-            // 2. Manual Profile Fetch (Safest approach for User link)
+            // 3. Process Purchases
+            let purchaseItems: UnifiedHistoryItem[] = [];
+
+            // Collect user IDs for manual fetch if needed (though we tried to join profiles)
             const userIds = new Set<string>();
-            rawData?.forEach((r: any) => {
+            purchasesRes.data?.forEach((r: any) => {
                 if (r.purchase_orders?.created_by) userIds.add(r.purchase_orders.created_by);
             });
 
+            // Fetch Profiles Map if needed (Purchase Orders join usually returns simplified or nothing if RLS blocks, but let's assume valid)
+            let profileMap = new Map<string, string>();
             if (userIds.size > 0) {
                 const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', Array.from(userIds));
-                const profileMap = new Map(profiles?.map(p => [p.id, p.full_name]) || []);
-
-                enrichedData = rawData.map((r: any) => {
-                    const creatorId = r.purchase_orders?.created_by;
-                    const creatorName = profileMap.get(creatorId);
-                    return {
-                        ...r,
-                        purchase_orders: {
-                            ...r.purchase_orders,
-                            profiles: creatorName ? { full_name: creatorName } : undefined
-                        }
-                    };
-                });
+                profiles?.forEach(p => profileMap.set(p.id, p.full_name || 'Desconhecido'));
             }
 
-            setHistoryData(enrichedData);
+            purchaseItems = (purchasesRes.data || []).map((r: any) => {
+                const po = r.purchase_orders || {};
+                const supplierName = po.suppliers?.name || r.supplier || 'Fornecedor Externo';
+                const userName = profileMap.get(po.created_by) || 'Sistema'; // Fallback
+
+                return {
+                    id: r.id,
+                    date: r.created_at || new Date().toISOString(),
+                    type: 'purchase',
+                    description: `Compra: ${supplierName}`,
+                    quantity: Number(r.quantity || 0),
+                    unit: r.unit || 'un',
+                    total_value: Number(r.cost || 0),
+                    user_name: userName,
+                    link_id: po.id
+                };
+            });
+
+            // 4. Process Production
+            const productionItems: UnifiedHistoryItem[] = (productionRes.data || []).map((item: any) => {
+                const order = item.production_orders;
+                const prodName = order.products?.name || 'Produto Desconhecido';
+                const qtdUsed = (item.quantity_used || 0) + (item.waste_quantity || 0);
+                const cost = qtdUsed * (item.unit_cost || 0);
+
+                // Safe access to profile name (array or object depending on join)
+                let userName = 'Produção';
+                if (order.profiles) {
+                    if (Array.isArray(order.profiles)) userName = order.profiles[0]?.full_name;
+                    else userName = (order.profiles as any).full_name;
+                }
+
+                return {
+                    id: item.id,
+                    date: order.closed_at || new Date().toISOString(),
+                    type: 'usage',
+                    description: `Produção: ${prodName}`,
+                    quantity: qtdUsed,
+                    unit: item.unit || 'un',
+                    total_value: cost,
+                    user_name: userName,
+                    link_id: order.id // Could link to production view
+                };
+            });
+
+            // Process Sales
+            const salesItems: UnifiedHistoryItem[] = (salesRes.data || []).map((item: any) => {
+                const sale = item.sales;
+                let userName = 'Vendedor';
+                if (sale.profiles) {
+                    if (Array.isArray(sale.profiles)) userName = sale.profiles[0]?.full_name;
+                    else userName = (sale.profiles as any).full_name;
+                }
+
+                return {
+                    id: item.id,
+                    date: sale.created_at,
+                    type: 'usage', // Sales are outgoing, so 'usage' color (red-ish) is appropriate
+                    description: `Venda PDV`,
+                    quantity: Number(item.quantity),
+                    unit: ingredient.unit || 'un',
+                    total_value: Number(item.quantity * item.unit_price),
+                    user_name: userName,
+                    link_id: sale.id
+                };
+            });
+
+            // 6. Process Adjustments
+            const adjustmentItems: UnifiedHistoryItem[] = (adjustmentsRes.data || []).map((adj: any) => {
+                let userName = 'Sistema';
+                if (adj.profiles) {
+                    if (Array.isArray(adj.profiles)) userName = adj.profiles[0]?.full_name;
+                    else userName = (adj.profiles as any).full_name;
+                }
+
+                // If type is 'found' (sobra), allow positive? Normally adjustment shows diff.
+                // quantity_diff is the signed change.
+                const descMap: any = { 'found': 'Sobra de Estoque', 'loss': 'Quebra/Perda', 'adjustment': 'Ajuste Manual' };
+
+                return {
+                    id: adj.id,
+                    date: adj.created_at,
+                    type: adj.quantity_diff >= 0 ? 'purchase' : 'usage', // Reuse visual types for color (green/red) or add new 'adjustment' type supported by UI?
+                    // Let's stick to usage=red (out), purchase=green (in).
+                    // Actually, if we use 'purchase' type it might show supplier fields which are missing.
+                    // Let's patch the type definition or map to existing.
+                    description: `${descMap[adj.type] || 'Ajuste'}: ${adj.reason || '-'} (${adj.stock_owner})`,
+                    quantity: Math.abs(adj.quantity_diff),
+                    unit: ingredient.unit || 'un',
+                    total_value: 0, // No monetary value stored usually, or we could estimate? Keep 0 for now.
+                    user_name: userName
+                };
+            });
+
+
+            // 5. Merge & Sort
+            const allHistory = [...purchaseItems, ...productionItems, ...adjustmentItems, ...salesItems].sort((a, b) =>
+                new Date(b.date).getTime() - new Date(a.date).getTime()
+            );
+
+            setHistoryData(allHistory);
 
         } catch (error: any) {
             console.error(error);
@@ -364,7 +503,23 @@ export default function Inventory() {
         <div className="flex-1 p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
             <div className="flex items-center justify-between">
                 <h2 className="text-3xl font-bold tracking-tight">Estoque de Ingredientes</h2>
+                <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => navigate('/stock-history')}>
+                        <History className="mr-2 h-4 w-4" /> Histórico Global
+                    </Button>
+                    <Button variant="outline" onClick={() => setIsAuditOpen(true)} className="text-blue-700 bg-blue-50 border-blue-200">
+                        <ClipboardCheck className="mr-2 h-4 w-4" /> Realizar Inventário
+                    </Button>
+                </div>
             </div>
+
+            <InventoryAuditDialog
+                isOpen={isAuditOpen}
+                onClose={() => setIsAuditOpen(false)}
+                onSuccess={() => { fetchIngredients(); }}
+                ingredients={ingredients}
+                categories={availableCategories}
+            />
 
             <div className="flex gap-2 mb-4 bg-zinc-50 p-2 rounded-lg border">
                 <div className="relative flex-1">
@@ -434,19 +589,19 @@ export default function Inventory() {
                                         <div className="bg-blue-50 p-2 rounded">
                                             <div className="text-[10px] text-blue-700 font-bold uppercase">Danilo</div>
                                             <div className={cn("font-medium", item.stock_danilo <= item.min_stock ? "text-red-600" : "text-zinc-700")}>
-                                                {item.stock_danilo} <span className="text-[10px]">{item.unit}</span>
+                                                {(item.stock_danilo || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-[10px]">{item.unit}</span>
                                             </div>
                                         </div>
                                         <div className="bg-amber-50 p-2 rounded">
                                             <div className="text-[10px] text-amber-700 font-bold uppercase">Adriel</div>
                                             <div className="font-medium text-zinc-700">
-                                                {item.stock_adriel} <span className="text-[10px]">{item.unit}</span>
+                                                {(item.stock_adriel || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-[10px]">{item.unit}</span>
                                             </div>
                                         </div>
                                     </div>
                                 )}
                                 <div className="flex justify-between items-center text-xs text-zinc-400 pt-1">
-                                    <span>Total: {item.type === 'expense' ? '-' : `${totalQtd} ${item.unit}`}</span>
+                                    <span>Total: {item.type === 'expense' ? '-' : `${totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
                                     <Button variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => openHistory(item)}>
                                         <History className="h-3 w-3 mr-1" /> Histórico
                                     </Button>
@@ -529,14 +684,25 @@ export default function Inventory() {
 
                                             {/* Danilo Columns */}
                                             <TableCell className={cn("text-right bg-blue-50/30", item.stock_danilo <= item.min_stock && item.type !== 'expense' ? "text-red-600 font-bold" : "")}>
-                                                {item.type === 'expense' ? '-' : `${item.stock_danilo} ${item.unit}`}
+                                                {item.type === 'expense' ? '-' : (
+                                                    <div className="flex flex-col items-end">
+                                                        <span>{`${(item.stock_danilo || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
+                                                        {item.unit_type && item.unit_weight && item.unit_weight > 0 && (
+                                                            <span className="text-[10px] text-zinc-500 font-normal opacity-80">
+                                                                = {((item.stock_danilo || 0) * item.unit_weight).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {item.unit_type}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </TableCell>
                                             <TableCell className="text-right text-xs bg-blue-50/30">
                                                 {item.type === 'expense' ? '-' : (
-                                                    <>
-                                                        <div>R$ {item.cost_danilo?.toFixed(2) || '0.00'}</div>
-                                                        <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
-                                                    </>
+                                                    (item.stock_danilo || 0) <= 0 ? <div className="text-zinc-300">-</div> : (
+                                                        <>
+                                                            <div>R$ {item.cost_danilo?.toFixed(2) || '0.00'}</div>
+                                                            <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                                        </>
+                                                    )
                                                 )}
                                             </TableCell>
                                             <TableCell className="text-right text-xs font-bold text-blue-700 bg-blue-50/30">
@@ -545,14 +711,25 @@ export default function Inventory() {
 
                                             {/* Adriel Columns */}
                                             <TableCell className="text-right bg-amber-50/30">
-                                                {item.type === 'expense' ? '-' : `${item.stock_adriel} ${item.unit}`}
+                                                {item.type === 'expense' ? '-' : (
+                                                    <div className="flex flex-col items-end">
+                                                        <span>{`${(item.stock_adriel || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
+                                                        {item.unit_type && item.unit_weight && item.unit_weight > 0 && (
+                                                            <span className="text-[10px] text-zinc-500 font-normal opacity-80">
+                                                                = {((item.stock_adriel || 0) * item.unit_weight).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {item.unit_type}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </TableCell>
                                             <TableCell className="text-right text-xs bg-amber-50/30">
                                                 {item.type === 'expense' ? '-' : (
-                                                    <>
-                                                        <div>R$ {item.cost_adriel?.toFixed(2) || '0.00'}</div>
-                                                        <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
-                                                    </>
+                                                    (item.stock_adriel || 0) <= 0 ? <div className="text-zinc-300">-</div> : (
+                                                        <>
+                                                            <div>R$ {item.cost_adriel?.toFixed(2) || '0.00'}</div>
+                                                            <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                                        </>
+                                                    )
                                                 )}
                                             </TableCell>
                                             <TableCell className="text-right text-xs font-bold text-amber-700 bg-amber-50/30">
@@ -560,7 +737,18 @@ export default function Inventory() {
                                             </TableCell>
 
                                             {/* Total Geral Columns */}
-                                            <TableCell className="text-right font-bold bg-zinc-50">{item.type === 'expense' ? '-' : `${totalQtd} ${item.unit}`}</TableCell>
+                                            <TableCell className="text-right font-bold bg-zinc-50">
+                                                {item.type === 'expense' ? '-' : (
+                                                    <div className="flex flex-col items-end">
+                                                        <span>{`${totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
+                                                        {item.unit_type && item.unit_weight && item.unit_weight > 0 && (
+                                                            <span className="text-[10px] text-zinc-500 font-normal opacity-80 font-mono">
+                                                                = {(totalQtd * item.unit_weight).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {item.unit_type}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </TableCell>
                                             <TableCell className="text-right font-bold text-green-700 bg-zinc-50">{item.type === 'expense' ? '-' : `R$ ${totalVal.toFixed(2)}`}</TableCell>
 
                                             <TableCell className="text-right space-x-1">
@@ -801,51 +989,65 @@ export default function Inventory() {
 
             {/* Dialog de Histórico */}
             <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
-                <DialogContent className="max-w-2xl">
+                <DialogContent className="max-w-3xl">
                     <DialogHeader>
-                        <DialogTitle>Histórico de Compras: {selectedIngName}</DialogTitle>
+                        <DialogTitle>Movimentações: {selectedIngName}</DialogTitle>
                     </DialogHeader>
-                    <div className="border rounded-md overflow-x-auto">
+                    <div className="border rounded-md overflow-x-auto max-h-[60vh]">
                         <Table>
-                            <TableHeader>
+                            <TableHeader className="bg-zinc-50 sticky top-0">
                                 <TableRow>
                                     <TableHead>Data</TableHead>
-                                    <TableHead>Lote</TableHead>
-                                    <TableHead>Fornecedor</TableHead>
-                                    <TableHead>Comprador</TableHead>
-                                    <TableHead>Qtd</TableHead>
-                                    <TableHead>Total</TableHead>
-                                    <TableHead>Unit. (Calc)</TableHead>
+                                    <TableHead>Tipo</TableHead>
+                                    <TableHead>Descrição</TableHead>
+                                    <TableHead>Resp.</TableHead>
+                                    <TableHead className="text-right">Qtd</TableHead>
+                                    <TableHead className="text-right">Valor Total</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {historyLoading ? (
-                                    <TableRow><TableCell colSpan={7} className="text-center"><Loader2 className="animate-spin mx-auto" /></TableCell></TableRow>
+                                    <TableRow><TableCell colSpan={6} className="text-center py-8"><Loader2 className="animate-spin mx-auto text-zinc-400" /></TableCell></TableRow>
                                 ) : historyData.length === 0 ? (
-                                    <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Nenhuma compra registrada.</TableCell></TableRow>
+                                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Nenhuma movimentação recente.</TableCell></TableRow>
                                 ) : (
                                     historyData.map(h => (
-                                        <TableRow key={h.id} className="whitespace-nowrap">
-                                            <TableCell>{new Date(h.created_at).toLocaleDateString()}</TableCell>
-                                            <TableCell className="text-xs font-medium">
-                                                {h.purchase_orders?.id ? (
+                                        <TableRow key={`${h.type}-${h.id}`} className="hover:bg-zinc-50/50">
+                                            <TableCell className="text-xs whitespace-nowrap text-zinc-500">
+                                                {new Date(h.date).toLocaleDateString()} <span className="text-[10px]">{new Date(h.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                            </TableCell>
+                                            <TableCell>
+                                                <span className={cn(
+                                                    "text-[10px] px-2 py-1 rounded-full font-bold uppercase",
+                                                    h.type === 'purchase' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                                                )}>
+                                                    {h.type === 'purchase' ? 'Entrada' : 'Baixa'}
+                                                </span>
+                                            </TableCell>
+                                            <TableCell className="font-medium text-sm">
+                                                {h.description}
+                                                {h.link_id && (
                                                     <Button
                                                         variant="link"
-                                                        className="p-0 h-auto font-medium text-blue-600 underline decoration-blue-300 underline-offset-2"
-                                                        onClick={() => navigate(`/purchases?openOrder=${h.purchase_orders?.id}`)}
+                                                        className="h-auto p-0 ml-2 text-[10px] text-blue-500 underline decoration-blue-200"
+                                                        onClick={() => {
+                                                            setIsHistoryOpen(false);
+                                                            if (h.type === 'purchase') navigate(`/purchases?openOrder=${h.link_id}`);
+                                                            if (h.type === 'usage') navigate(`/production?openOrder=${h.link_id}`);
+                                                        }}
                                                     >
-                                                        {h.purchase_orders?.nickname || 'Ver Lote'}
+                                                        #{h.link_id.slice(0, 6)}...
                                                     </Button>
-                                                ) : (
-                                                    <span className="text-zinc-400">-</span>
                                                 )}
                                             </TableCell>
-                                            <TableCell>{h.purchase_orders?.suppliers?.name || h.supplier || '-'}</TableCell>
-                                            <TableCell>{h.purchase_orders?.profiles?.full_name?.split(' ')[0] || '-'}</TableCell>
-                                            <TableCell>{h.quantity} {h.unit}</TableCell>
-                                            <TableCell>R$ {h.cost?.toFixed(2)}</TableCell>
-                                            <TableCell className="text-muted-foreground text-xs">
-                                                {h.quantity > 0 && h.cost > 0 ? `R$ ${(h.cost / h.quantity).toFixed(2)}` : '-'}
+                                            <TableCell className="text-xs text-zinc-600">{h.user_name || '-'}</TableCell>
+                                            <TableCell className="text-right font-semibold">
+                                                <span className={h.type === 'purchase' ? "text-green-700" : "text-red-700"}>
+                                                    {h.type === 'purchase' ? '+' : '-'}{h.quantity.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} {h.unit}
+                                                </span>
+                                            </TableCell>
+                                            <TableCell className="text-right text-xs">
+                                                R$ {h.total_value.toFixed(2)}
                                             </TableCell>
                                         </TableRow>
                                     ))

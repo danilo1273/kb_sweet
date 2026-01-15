@@ -22,6 +22,8 @@ const Clients = lazy(() => import('@/pages/Clients'));
 const Sales = lazy(() => import('@/pages/Sales'));
 const POS = lazy(() => import('@/pages/POS'));
 const Banking = lazy(() => import('@/pages/Banking'));
+const StockHistory = lazy(() => import('@/pages/StockHistory'));
+const AuditLogs = lazy(() => import('@/pages/AuditLogs'));
 
 function App() {
     const [session, setSession] = useState<Session | null>(null);
@@ -59,9 +61,8 @@ function App() {
                     <Route path="/sales" element={<Sales />} />
                     <Route path="/pos" element={<POS />} />
                     <Route path="/inventory" element={<Inventory />} />
+                    <Route path="/stock-history" element={<StockHistory />} />
                     <Route path="/recipes" element={<Recipes />} />
-                    <Route path="/financial" element={<Financial />} />
-                    <Route path="/financial" element={<Financial />} />
                     <Route path="/financial" element={<Financial />} />
                     <Route path="/banking" element={<Banking />} />
                     <Route path="/purchases" element={<Purchases />} />
@@ -74,6 +75,11 @@ function App() {
                     <Route path="/admin/registers" element={
                         <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
                             <AdminRegisters />
+                        </Suspense>
+                    } />
+                    <Route path="/audit" element={
+                        <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
+                            <AuditLogs />
                         </Suspense>
                     } />
 

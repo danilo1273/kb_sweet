@@ -66,11 +66,51 @@ export function EditItemDialog({
                         </div>
                         <div className="space-y-2">
                             <Label>Quantidade</Label>
-                            <Input type="number" value={editedValues.quantity || ''} onChange={(e) => onEditedValuesChange({ ...editedValues, quantity: Number(e.target.value) })} />
+                            <Input
+                                type="number"
+                                value={editedValues.quantity || ''}
+                                onChange={(e) => {
+                                    const qty = Number(e.target.value);
+                                    const unitCost = editedValues.unit_cost || (editedValues.cost && editedValues.quantity ? editedValues.cost / editedValues.quantity : 0);
+                                    onEditedValuesChange({
+                                        ...editedValues,
+                                        quantity: qty,
+                                        cost: unitCost * qty
+                                    });
+                                }}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Custo Unit. R$</Label>
+                            <Input
+                                type="number"
+                                value={editedValues.unit_cost !== undefined ? editedValues.unit_cost : (editedValues.cost && editedValues.quantity ? (editedValues.cost / editedValues.quantity).toFixed(2) : '')}
+                                onChange={(e) => {
+                                    const val = Number(e.target.value);
+                                    const qty = editedValues.quantity || 0;
+                                    onEditedValuesChange({
+                                        ...editedValues,
+                                        unit_cost: val,
+                                        cost: val * qty
+                                    });
+                                }}
+                            />
                         </div>
                         <div className="space-y-2">
                             <Label>Custo Total R$</Label>
-                            <Input type="number" value={editedValues.cost || ''} onChange={(e) => onEditedValuesChange({ ...editedValues, cost: Number(e.target.value) })} />
+                            <Input
+                                type="number"
+                                value={editedValues.cost || ''}
+                                onChange={(e) => {
+                                    const val = Number(e.target.value);
+                                    const qty = editedValues.quantity || 0;
+                                    onEditedValuesChange({
+                                        ...editedValues,
+                                        cost: val,
+                                        unit_cost: qty > 0 ? val / qty : 0
+                                    });
+                                }}
+                            />
                         </div>
                     </div>
                     {!isExpense && (

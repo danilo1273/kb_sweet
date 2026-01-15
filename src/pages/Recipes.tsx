@@ -10,7 +10,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Search, Loader2, Edit, Trash2, Image as ImageIcon, X, Box, Layers } from "lucide-react";
+import { Plus, Search, Loader2, Edit, Trash2, Image as ImageIcon, X, Box, Layers, Settings, UploadCloud } from "lucide-react";
+
+interface Category {
+    id: number;
+    name: string;
+    type: 'stock' | 'expense' | 'product'; // added product
+}
 
 interface Product {
     id: string;
@@ -23,6 +29,8 @@ interface Product {
     stock_quantity: number;
     batch_size?: number;
     unit?: string;
+    stock_danilo?: number;
+    stock_adriel?: number;
 }
 
 interface Ingredient {
@@ -68,11 +76,62 @@ export default function Recipes() {
         quantity: 0,
         unit: 'g'
     });
+    const [editingBomId, setEditingBomId] = useState<string | null>(null);
+
+    // Categories
+    const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
+    const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
+    const [newCategoryName, setNewCategoryName] = useState("");
+
+    // Image Upload State
+    const [uploading, setUploading] = useState(false);
 
     useEffect(() => {
         fetchProducts();
         fetchResources();
+        fetchCategories();
     }, []);
+
+    async function fetchCategories() {
+        // Fetch categories appropriate for products/recipes ONLY
+        const { data, error } = await supabase.from('custom_categories')
+            .select('*')
+            .eq('type', 'product')
+            .order('name');
+
+        if (!error && data) {
+            setAvailableCategories(data.map((d: any) => ({
+                id: d.id,
+                name: d.name,
+                type: d.type || 'stock'
+            })));
+        }
+    }
+
+    async function handleAddCategory() {
+        if (!newCategoryName) return;
+        const name = newCategoryName.trim();
+        const { error } = await supabase.from('custom_categories').insert({ name, type: 'product' });
+
+        if (error) {
+            toast({ variant: 'destructive', title: "Erro", description: error.message });
+        } else {
+            toast({ title: "Categoria adicionada!" });
+            fetchCategories();
+            setNewCategoryName("");
+        }
+    }
+
+    async function handleDeleteCategory(id: number) {
+        if (!confirm("Excluir esta categoria?")) return;
+        const { error } = await supabase.from('custom_categories').delete().eq('id', id);
+        if (error) {
+            toast({ variant: 'destructive', title: "Erro ao excluir", description: error.message });
+        } else {
+            toast({ title: "Categoria removida" });
+            fetchCategories();
+        }
+    }
 
     async function fetchProducts() {
         setLoading(true);
@@ -142,6 +201,39 @@ export default function Recipes() {
             toast({ variant: "destructive", title: "Erro ao salvar", description: error.message });
         } finally {
             setIsSaving(false);
+        }
+    }
+
+    async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+        if (!e.target.files || e.target.files.length === 0) return;
+
+        const file = e.target.files[0];
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}.${fileExt}`;
+        const filePath = `${fileName}`;
+
+        setUploading(true);
+        try {
+            // Try uploading to 'product-images' bucket
+            const { error: uploadError } = await supabase.storage
+                .from('product-images')
+                .upload(filePath, file);
+
+            if (uploadError) {
+                console.error('Upload Error:', uploadError);
+                throw new Error("Falha ao fazer upload. Verifique se o bucket 'product-images' existe no Supabase.");
+            }
+
+            const { data } = supabase.storage.from('product-images').getPublicUrl(filePath);
+
+            if (data) {
+                setCurrentProduct(prev => ({ ...prev, image_url: data.publicUrl }));
+                toast({ title: "Imagem enviada com sucesso!" });
+            }
+        } catch (error: any) {
+            toast({ variant: 'destructive', title: "Erro no upload", description: error.message });
+        } finally {
+            setUploading(false);
         }
     }
 
@@ -220,15 +312,43 @@ export default function Recipes() {
             payload.child_product_id = newBomItem.target_id;
         }
 
-        const { error } = await supabase.from('product_bom').insert([payload]);
+        let error;
+
+        if (editingBomId) {
+            // UPDATE
+            const { error: err } = await supabase
+                .from('product_bom')
+                .update({
+                    quantity: newBomItem.quantity,
+                    unit: newBomItem.unit,
+                    // We allow changing the item too? Yes, why not.
+                    ingredient_id: payload.ingredient_id || null,
+                    child_product_id: payload.child_product_id || null
+                })
+                .eq('id', editingBomId);
+            error = err;
+        } else {
+            // INSERT
+            const { error: err } = await supabase.from('product_bom').insert([payload]);
+            error = err;
+        }
 
         if (error) {
-            toast({ variant: 'destructive', title: "Erro ao adicionar", description: error.message });
+            toast({ variant: 'destructive', title: "Erro ao salvar item", description: error.message });
         } else {
-            toast({ title: "Item adicionado" });
+            toast({ title: editingBomId ? "Item atualizado" : "Item adicionado" });
             fetchBom(currentProduct.id);
             setNewBomItem({ target_id: '', quantity: 0, unit: 'g' });
-            // Custo será recalculado no useEffect de bomItems
+            setEditingBomId(null);
+
+            // Refetch products to get updated cost
+            fetchProducts();
+
+            // Also update current product cost locally
+            const { data: updatedProd } = await supabase.from('products').select('*').eq('id', currentProduct.id).single();
+            if (updatedProd) {
+                setCurrentProduct(prev => ({ ...prev, cost: updatedProd.cost }));
+            }
         }
     }
 
@@ -236,53 +356,55 @@ export default function Recipes() {
         const { error } = await supabase.from('product_bom').delete().eq('id', id);
         if (error) toast({ variant: 'destructive', title: "Erro ao remover" });
         else {
+            if (editingBomId === id) {
+                setEditingBomId(null);
+                setNewBomItem({ target_id: '', quantity: 0, unit: 'g' });
+            }
             fetchBom(currentProduct.id!);
-            // Recalcular com lista atualizada (removendo item localmente para calculo imediato ou esperando fetch)
-            // Para simplicidade, vamos chamar calculateAndUpdateCost APÓS o fetch atualizar o estado, 
-            // mas como o fetch é async e setBomItems também, o melhor é forçar o calculo.
-            // Vamos mudar a estratégia: Criar um useEffect que monitora bomItems.
+
+            // Refetch products to get updated cost
+            fetchProducts();
+
+            // Also update current product cost locally
+            const { data: updatedProd } = await supabase.from('products').select('*').eq('id', currentProduct.id).single();
+            if (updatedProd) {
+                setCurrentProduct(prev => ({ ...prev, cost: updatedProd.cost }));
+            }
+        }
+    }
+
+    function handleEditBomItem(item: BomItem) {
+        setEditingBomId(item.id);
+
+        // Determine type and target
+        if (item.ingredients) {
+            setBomType('ingredient');
+            setNewBomItem({
+                target_id: item.ingredient_id || '',
+                quantity: item.quantity,
+                unit: item.unit
+            });
+        } else if (item.child_product) {
+            setBomType('product');
+            setNewBomItem({
+                target_id: item.child_product_id || '',
+                quantity: item.quantity,
+                unit: item.unit
+            });
         }
     }
 
     // Effect para recalcular custo sempre que a lista de BOM mudar e tivermos um produto aberto
+    // REMOVED: Client-side cost calculation replaced by DB Triggers (secure)
+    /*
     useEffect(() => {
         if (currentProduct.id && bomItems.length > 0) {
             calculateAndUpdateCost();
         }
     }, [bomItems]);
+    */
 
-    async function calculateAndUpdateCost() {
-        if (!currentProduct.id) return;
-        let totalCost = 0;
-
-        bomItems.forEach(item => {
-            let itemCost = 0;
-
-            if (item.ingredients) {
-                // É um INGREDIENTE
-                const ing = item.ingredients;
-                if (ing.unit_weight && ing.cost) {
-                    const costPerBaseUnit = ing.cost / ing.unit_weight;
-                    let quantityInBase = item.quantity;
-                    if (['kg', 'l'].includes(item.unit.toLowerCase())) quantityInBase *= 1000;
-                    itemCost = costPerBaseUnit * quantityInBase;
-                }
-            } else if (item.child_product) {
-                // É um PRODUTO INTERMEDIÁRIO
-                const sub = item.child_product;
-                itemCost = (sub.cost || 0) * item.quantity;
-            }
-
-            totalCost += itemCost;
-        });
-
-        // Só atualiza se o custo mudou significativamente para evitar loops ou updates desnecessários
-        if (Math.abs(totalCost - (currentProduct.cost || 0)) > 0.01) {
-            await supabase.from('products').update({ cost: totalCost }).eq('id', currentProduct.id!);
-            setCurrentProduct(prev => ({ ...prev, cost: totalCost }));
-            // toast({ title: "Custo atualizado!", description: `Novo custo: R$ ${totalCost.toFixed(2)}` }); // Ocultando toast para não poluir
-        }
-    }
+    // REMOVED: Function calculateAndUpdateCost replaced by DB triggers (20260113_cost_automation.sql)
 
     const openNew = () => {
         setCurrentProduct({ type: 'finished' });
@@ -361,7 +483,7 @@ export default function Recipes() {
                                                 {product.category || 'Geral'}
                                             </span>
                                             <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">
-                                                Estoque: {product.stock_quantity || 0}
+                                                Estoque: {product.stock_danilo || 0} {product.unit || 'un'}
                                             </span>
                                         </div>
                                     </div>
@@ -369,7 +491,16 @@ export default function Recipes() {
                                         <span className="font-bold text-green-600">R$ {product.price.toFixed(2)}</span>
                                     )}
                                 </div>
-                                <p className="text-sm text-zinc-500 mt-2">Custo: R$ {product.cost?.toFixed(2)}</p>
+                                <div className="mt-2 text-sm text-zinc-500">
+                                    <p>
+                                        Custo Unit.: R$ {(product.cost || 0).toFixed(2)} / {product.unit || 'un'}
+                                    </p>
+                                    {(product.batch_size || 0) > 1 && (
+                                        <p className="text-xs text-zinc-400">
+                                            Lote ({product.batch_size} {product.unit}): R$ {(product.cost && product.batch_size ? (product.cost * product.batch_size).toFixed(2) : (product.cost || 0).toFixed(2))}
+                                        </p>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     ))
@@ -410,6 +541,7 @@ export default function Recipes() {
                                             <SelectContent>
                                                 <SelectItem value="finished">Produto Acabado (Venda)</SelectItem>
                                                 <SelectItem value="intermediate">Base / Intermediário (Recheio, Massa)</SelectItem>
+                                                <SelectItem value="resale">Revenda (Mercadoria)</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -417,7 +549,12 @@ export default function Recipes() {
 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
-                                        <Label htmlFor="category">Categoria</Label>
+                                        <div className="flex items-center justify-between">
+                                            <Label htmlFor="category">Categoria</Label>
+                                            <Button variant="ghost" size="sm" onClick={() => setIsManageCategoriesOpen(true)} className="h-6 w-6 p-0" title="Gerenciar Categorias">
+                                                <Settings className="h-3 w-3 text-zinc-500" />
+                                            </Button>
+                                        </div>
                                         <Select
                                             value={currentProduct.category}
                                             onValueChange={(val) => setCurrentProduct({ ...currentProduct, category: val })}
@@ -426,12 +563,18 @@ export default function Recipes() {
                                                 <SelectValue placeholder="Selecione..." />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="Bolos">Bolos</SelectItem>
-                                                <SelectItem value="Doces">Doces</SelectItem>
-                                                <SelectItem value="Salgados">Salgados</SelectItem>
-                                                <SelectItem value="Bebidas">Bebidas</SelectItem>
-                                                <SelectItem value="Recheios">Recheios</SelectItem>
-                                                <SelectItem value="Massas">Massas</SelectItem>
+                                                {/* Combine hardcoded expected categories with dynamic ones to ensure defaults exist if DB is empty, or just use DB */}
+                                                {availableCategories.length === 0 ? (
+                                                    <>
+                                                        <SelectItem value="Bolos">Bolos</SelectItem>
+                                                        <SelectItem value="Doces">Doces</SelectItem>
+                                                        <SelectItem value="Salgados">Salgados</SelectItem>
+                                                    </>
+                                                ) : (
+                                                    availableCategories.map(c => (
+                                                        <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                                                    ))
+                                                )}
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -449,13 +592,49 @@ export default function Recipes() {
                                 </div>
 
                                 <div className="space-y-2">
-                                    <Label htmlFor="image_url">URL da Imagem</Label>
-                                    <Input
-                                        id="image_url"
-                                        value={currentProduct.image_url || ''}
-                                        onChange={(e) => setCurrentProduct({ ...currentProduct, image_url: e.target.value })}
-                                        placeholder="https://..."
-                                    />
+                                    <Label>Imagem do Produto</Label>
+                                    <div className="flex flex-col gap-3">
+                                        {currentProduct.image_url && (
+                                            <div className="relative aspect-video w-full max-w-[200px] rounded-lg overflow-hidden border bg-zinc-100 mx-auto">
+                                                <img src={currentProduct.image_url} alt="Preview" className="w-full h-full object-cover" />
+                                                <Button
+                                                    type="button"
+                                                    variant="destructive"
+                                                    size="icon"
+                                                    className="absolute top-2 right-2 h-6 w-6"
+                                                    onClick={() => setCurrentProduct({ ...currentProduct, image_url: '' })}
+                                                >
+                                                    <X className="h-3 w-3" />
+                                                </Button>
+                                            </div>
+                                        )}
+
+                                        <div className="flex items-center gap-2">
+                                            <Input
+                                                id="image-upload"
+                                                type="file"
+                                                accept="image/*"
+                                                className="hidden"
+                                                onChange={handleImageUpload}
+                                                disabled={uploading}
+                                            />
+                                            <Label
+                                                htmlFor="image-upload"
+                                                className={cn(
+                                                    "flex-1 flex items-center justify-center gap-2 h-10 px-4 py-2 border rounded-md cursor-pointer hover:bg-zinc-50 transition-colors border-dashed border-zinc-300",
+                                                    uploading && "opacity-50 cursor-not-allowed"
+                                                )}
+                                            >
+                                                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                                                {uploading ? "Enviando..." : (currentProduct.image_url ? "Trocar Imagem" : "Carregar Imagem")}
+                                            </Label>
+
+                                            {/* Fallback Text Input Toggle could go here if needed, but keeping it simple */}
+                                        </div>
+                                        <p className="text-[10px] text-zinc-500 text-center">
+                                            {currentProduct.image_url ? "Imagem carregada via Supabase Storage" : "Clique para selecionar uma imagem"}
+                                        </p>
+                                    </div>
                                 </div>
 
                                 <div className="space-y-2">
@@ -583,8 +762,11 @@ export default function Recipes() {
                                                     <Input
                                                         type="number"
                                                         className="bg-white"
-                                                        value={newBomItem.quantity}
-                                                        onChange={(e) => setNewBomItem({ ...newBomItem, quantity: Number(e.target.value) })}
+                                                        value={newBomItem.quantity || ''}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            setNewBomItem({ ...newBomItem, quantity: val === '' ? 0 : parseFloat(val) })
+                                                        }}
                                                     />
                                                 </div>
                                                 <div className="w-[80px] space-y-1">
@@ -605,7 +787,19 @@ export default function Recipes() {
                                                         </SelectContent>
                                                     </Select>
                                                 </div>
-                                                <Button onClick={handleAddBomItem} size="icon"><Plus className="h-4 w-4" /></Button>
+                                                <Button onClick={handleAddBomItem} size="icon" title={editingBomId ? "Salvar Alteração" : "Adicionar Item"}>
+                                                    {editingBomId ? <div className="h-4 w-4 font-bold text-xs">OK</div> : <Plus className="h-4 w-4" />}
+                                                </Button>
+                                                {editingBomId && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        onClick={() => { setEditingBomId(null); setNewBomItem({ target_id: '', quantity: 0, unit: 'g' }); }}
+                                                        title="Cancelar Edição"
+                                                    >
+                                                        <X className="h-4 w-4" />
+                                                    </Button>
+                                                )}
                                             </div>
                                         </div>
 
@@ -647,7 +841,17 @@ export default function Recipes() {
                                                                     } else if (item.child_product) {
                                                                         name = item.child_product.name;
                                                                         typeLabel = <Layers className="h-3 w-3 text-amber-500" />;
-                                                                        cost = (item.child_product.cost || 0) * item.quantity;
+
+                                                                        // Since we now save Unit Cost, we use it directly.
+                                                                        // No need to divide by batch_size anymore.
+
+                                                                        let subCost = item.child_product.cost || 0;
+                                                                        // Remove redundant division:
+                                                                        // if (item.child_product.batch_size && item.child_product.batch_size > 0) {
+                                                                        //    subCost = subCost / item.child_product.batch_size;
+                                                                        // }
+
+                                                                        cost = subCost * item.quantity;
                                                                     }
 
                                                                     return (
@@ -657,9 +861,14 @@ export default function Recipes() {
                                                                             <TableCell>{item.quantity} {item.unit}</TableCell>
                                                                             <TableCell>R$ {cost.toFixed(2)}</TableCell>
                                                                             <TableCell>
-                                                                                <Button variant="ghost" size="icon" onClick={() => handleDeleteBomItem(item.id)}>
-                                                                                    <X className="h-4 w-4 text-red-500" />
-                                                                                </Button>
+                                                                                <div className="flex items-center justify-end gap-1">
+                                                                                    <Button variant="ghost" size="icon" onClick={() => handleEditBomItem(item)} className="h-8 w-8 text-zinc-500 hover:text-blue-600">
+                                                                                        <Edit className="h-3 w-3" />
+                                                                                    </Button>
+                                                                                    <Button variant="ghost" size="icon" onClick={() => handleDeleteBomItem(item.id)} className="h-8 w-8 text-zinc-500 hover:text-red-500">
+                                                                                        <X className="h-4 w-4" />
+                                                                                    </Button>
+                                                                                </div>
                                                                             </TableCell>
                                                                         </TableRow>
                                                                     );
@@ -689,7 +898,16 @@ export default function Recipes() {
                                                                 name = item.child_product.name;
                                                                 Icon = Layers;
                                                                 iconColor = "text-amber-500";
-                                                                cost = (item.child_product.cost || 0) * item.quantity;
+                                                                // Since we now save Unit Cost, we use it directly.
+                                                                // No need to divide by batch_size anymore.
+
+                                                                let subCost = item.child_product.cost || 0;
+                                                                // Remove redundant division:
+                                                                // if (item.child_product.batch_size && item.child_product.batch_size > 0) {
+                                                                //    subCost = subCost / item.child_product.batch_size;
+                                                                // }
+
+                                                                cost = subCost * item.quantity;
                                                             }
 
                                                             return (
@@ -701,9 +919,14 @@ export default function Recipes() {
                                                                             <div className="text-xs text-zinc-500">{item.quantity} {item.unit} • R$ {cost.toFixed(2)}</div>
                                                                         </div>
                                                                     </div>
-                                                                    <Button variant="ghost" size="sm" onClick={() => handleDeleteBomItem(item.id)} className="h-8 w-8 p-0">
-                                                                        <X className="h-4 w-4 text-red-500" />
-                                                                    </Button>
+                                                                    <div className="flex items-center">
+                                                                        <Button variant="ghost" size="sm" onClick={() => handleEditBomItem(item)} className="h-8 w-8 p-0 text-zinc-400 hover:text-blue-600">
+                                                                            <Edit className="h-3 w-3" />
+                                                                        </Button>
+                                                                        <Button variant="ghost" size="sm" onClick={() => handleDeleteBomItem(item.id)} className="h-8 w-8 p-0 text-zinc-400 hover:text-red-500">
+                                                                            <X className="h-4 w-4" />
+                                                                        </Button>
+                                                                    </div>
                                                                 </div>
                                                             );
                                                         })}
@@ -728,6 +951,45 @@ export default function Recipes() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-        </div >
+
+            {/* Manage Categories Dialog */}
+            <Dialog open={isManageCategoriesOpen} onOpenChange={setIsManageCategoriesOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Gerenciar Categorias</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="flex bg-zinc-50 p-1 rounded-md mb-2">
+                            <div className="flex-1 text-center text-sm font-medium py-1 rounded bg-white shadow-sm text-zinc-800">Produtos/Receitas</div>
+                        </div>
+                        <div className="flex gap-2">
+                            <Input
+                                placeholder="Nova Categoria..."
+                                value={newCategoryName}
+                                onChange={e => setNewCategoryName(e.target.value)}
+                            />
+                            <Button onClick={handleAddCategory}><Plus className="h-4 w-4" /></Button>
+                        </div>
+                        <div className="border rounded-md max-h-[200px] overflow-y-auto">
+                            {availableCategories.length === 0 ? (
+                                <div className="p-4 text-center text-sm text-zinc-500">Nenhuma categoria encontrada.</div>
+                            ) : (
+                                availableCategories.map(cat => (
+                                    <div key={cat.id} className="flex justify-between items-center p-2 border-b last:border-0 hover:bg-zinc-50">
+                                        <span className="text-sm">{cat.name}</span>
+                                        <Button variant="ghost" size="sm" onClick={() => handleDeleteCategory(cat.id)} className="h-6 w-6 p-0 text-red-400 hover:text-red-600">
+                                            <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsManageCategoriesOpen(false)}>Fechar</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </div>
     );
 }

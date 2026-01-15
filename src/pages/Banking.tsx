@@ -1,5 +1,6 @@
 
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useBanking, BankAccountWithBalance } from '@/hooks/useBanking';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -113,6 +114,7 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
     onAddTransaction: (type: 'income' | 'expense', val: number, desc: string, cat: string, date: string) => Promise<void>,
     loading?: boolean
 }) {
+    const navigate = useNavigate();
     const [month, setMonth] = useState(new Date().getMonth());
     const [year, setYear] = useState(new Date().getFullYear());
     const [movements, setMovements] = useState<FinancialMovement[]>([]);
@@ -201,19 +203,87 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
                                     {movements.length === 0 ? (
                                         <tr><td colSpan={4} className="p-8 text-center text-zinc-500">Nenhum lançamento neste período.</td></tr>
                                     ) : (
-                                        movements.map((m) => (
-                                            <tr key={m.id} className="border-b transition-colors hover:bg-muted/50">
-                                                <td className="p-4 align-middle">{new Date(m.payment_date || m.created_at).toLocaleDateString('pt-BR')}</td>
-                                                <td className="p-4 align-middle">{m.description}</td>
-                                                <td className={`p-4 align-middle text-right font-medium ${m.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                                                    {m.type === 'expense' ? '- ' : '+ '}
-                                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(m.amount))}
-                                                </td>
-                                                <td className="p-4 align-middle">
-                                                    {m.type === 'income' ? <ArrowUpCircle className="h-4 w-4 text-green-500" /> : <ArrowDownCircle className="h-4 w-4 text-red-500" />}
-                                                </td>
-                                            </tr>
-                                        ))
+                                        (() => {
+                                            const grouped: any[] = [];
+                                            const orderGroups: Record<string, any> = {};
+
+                                            movements.forEach((m: any) => {
+                                                if (m.order_id) {
+                                                    if (!orderGroups[m.order_id]) {
+                                                        const group = {
+                                                            ...m,
+                                                            isGroup: true,
+                                                            items: [m],
+                                                            totalAmount: Number(m.amount)
+                                                        };
+                                                        orderGroups[m.order_id] = group;
+                                                        grouped.push(group);
+                                                    } else {
+                                                        orderGroups[m.order_id].items.push(m);
+                                                        orderGroups[m.order_id].totalAmount += Number(m.amount);
+                                                    }
+                                                } else {
+                                                    grouped.push(m);
+                                                }
+                                            });
+
+                                            // Make sure we have navigation
+                                            // navigate is not passed? We need it.
+                                            // We will assume window.location or add useNavigate in next step.
+                                            // For now using window.location.href as fallback or simple anchor.
+                                            // Better: Use `navigate` from parent or hook.
+                                            // Since I can't easily add hook in this replace block without re-rendering whole file,
+                                            // I'll use a simple callback concept or pass `onOpenOrder`.
+                                            // But wait, I can add `useNavigate` to the top of component in a separate edit.
+                                            // For this block, I'll assume `navigate` is available or use window.
+                                            // I'll construct the rows.
+
+                                            return grouped.map((m: any) => {
+                                                const isGroup = m.isGroup;
+                                                const dateStr = new Date(m.payment_date || m.created_at).toLocaleDateString('pt-BR');
+                                                const amountVal = isGroup ? m.totalAmount : Number(m.amount);
+
+                                                return isGroup ? (
+                                                    <tr key={'group-' + m.order_id} className="border-b transition-colors hover:bg-muted/50 bg-slate-50/50">
+                                                        <td className="p-4 align-middle font-medium">{dateStr}</td>
+                                                        <td className="p-4 align-middle">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-semibold text-slate-700">Lote: {m.order_nickname || 'Sem Nome'}</span>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    className="h-6 text-xs text-blue-600 hover:text-blue-800"
+                                                                    onClick={() => navigate(`/purchases?openOrder=${m.order_id}`)}
+                                                                >
+                                                                    (Abrir Visualização)
+                                                                </Button>
+                                                            </div>
+                                                            <div className="text-xs text-slate-500 pl-1">
+                                                                {m.items.length} itens agrupados
+                                                            </div>
+                                                        </td>
+                                                        <td className={`p-4 align-middle text-right font-bold text-red-600`}>
+                                                            - {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amountVal)}
+                                                        </td>
+                                                        <td className="p-4 align-middle">
+                                                            <ArrowDownCircle className="h-4 w-4 text-red-500" />
+                                                        </td>
+                                                    </tr>
+                                                ) : (
+                                                    <tr key={m.id} className="border-b transition-colors hover:bg-muted/50">
+                                                        <td className="p-4 align-middle">{dateStr}</td>
+                                                        <td className="p-4 align-middle">{m.description}</td>
+                                                        <td className={`p-4 align-middle text-right font-medium ${m.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                                                            {m.type === 'expense' ? '- ' : '+ '}
+                                                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(m.amount))}
+                                                        </td>
+                                                        <td className="p-4 align-middle">
+                                                            {m.type === 'income' ? <ArrowUpCircle className="h-4 w-4 text-green-500" /> : <ArrowDownCircle className="h-4 w-4 text-red-500" />}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            });
+                                        })()
                                     )}
                                 </tbody>
                             </table>

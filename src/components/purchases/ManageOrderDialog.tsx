@@ -6,10 +6,11 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Pencil, Save, Check, Ban, Loader2 } from "lucide-react";
+import { Plus, Trash2, Pencil, Save, Check, Ban, Loader2, PackageSearch } from "lucide-react";
 import { usePurchases } from "@/hooks/usePurchases";
 import { useToast } from "@/components/ui/use-toast";
 import { ItemDraft } from "@/types";
+import { StockConsultationDialog } from "@/components/pos/StockConsultationDialog";
 
 interface ManageOrderDialogProps {
     isOpen: boolean;
@@ -25,7 +26,7 @@ interface ManageOrderDialogProps {
     onEditItem: (item: any) => void;
     currentUserId: string;
     currentUserRoles: string[];
-    onDeleteOrder: (id: string) => void;
+    onDeleteOrder: (id: string, reason: string, userId: string) => void;
     onOrderUpdated?: () => void;
 }
 
@@ -47,7 +48,10 @@ export function ManageOrderDialog({
     onOrderUpdated
 }: ManageOrderDialogProps) {
     const { toast } = useToast();
-    const { addRequestToOrder, deleteRequestFromOrder, updateOrderHeader, fetchOrders, approveRequest, batchApproveRequests, updateOrderStatus } = usePurchases();
+    const { addRequestToOrder, deleteRequestFromOrder, updateOrderHeader, fetchOrders, approveRequest, batchApproveRequests, updateOrderStatus, reprocessOrderToPending } = usePurchases();
+
+    // Consultation Dialog
+    const [isConsultOpen, setIsConsultOpen] = useState(false);
 
     // LOCK LOGIC
     const hasItems = order?.requests?.length > 0;
@@ -143,51 +147,77 @@ export function ManageOrderDialog({
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
+                <DialogHeader className="flex flex-row justify-between items-center pr-8">
                     <DialogTitle>{isReadOnly ? 'Visualizar Lote / Pedido' : 'Gerenciar Lote / Pedido'}</DialogTitle>
+                    <Button variant="outline" size="sm" onClick={() => setIsConsultOpen(true)} className="gap-2">
+                        <PackageSearch className="h-4 w-4" /> Ver Estoque
+                    </Button>
                 </DialogHeader>
 
                 {order && (
                     <div className="py-4 space-y-6">
-                        <div className="grid grid-cols-2 gap-4 border-b pb-4">
-                            <div className="space-y-2">
-                                <Label>Fornecedor</Label>
-                                <div className="flex gap-2">
-                                    <Select
-                                        value={headerSupplier}
-                                        onValueChange={setHeaderSupplier}
-                                        disabled={disableEditing}
-                                    >
-                                        <SelectTrigger className="flex-1"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="default">Fornecedor (campo obrigatório)</SelectItem>
-                                            {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-                                        </SelectContent>
-                                    </Select>
-                                    {!disableEditing && (
-                                        <Button variant="outline" size="icon" onClick={onNewSupplier} title="Novo Fornecedor">
-                                            <Plus className="h-4 w-4" />
-                                        </Button>
-                                    )}
+                        {isReadOnly ? (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border-b pb-4 bg-slate-50 p-3 rounded-lg">
+                                <div>
+                                    <Label className="text-muted-foreground text-xs">Fornecedor</Label>
+                                    <div className="font-medium text-sm">{order.supplier_name || 'Não informado'}</div>
+                                </div>
+                                <div>
+                                    <Label className="text-muted-foreground text-xs">Apelido</Label>
+                                    <div className="font-medium text-sm">{order.nickname || '-'}</div>
+                                </div>
+                                <div>
+                                    <Label className="text-muted-foreground text-xs">Comprador</Label>
+                                    <div className="font-medium text-sm">{order.creator_name || 'Desconhecido'}</div>
+                                </div>
+                                {order.approver_name && (
+                                    <div>
+                                        <Label className="text-muted-foreground text-xs">Aprovador</Label>
+                                        <div className="font-medium text-sm text-green-700">{order.approver_name}</div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-4 border-b pb-4">
+                                <div className="space-y-2">
+                                    <Label>Fornecedor</Label>
+                                    <div className="flex gap-2">
+                                        <Select
+                                            value={headerSupplier}
+                                            onValueChange={setHeaderSupplier}
+                                            disabled={disableEditing}
+                                        >
+                                            <SelectTrigger className="flex-1"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="default">Fornecedor (campo obrigatório)</SelectItem>
+                                                {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                        {!disableEditing && (
+                                            <Button variant="outline" size="icon" onClick={onNewSupplier} title="Novo Fornecedor">
+                                                <Plus className="h-4 w-4" />
+                                            </Button>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Apelido</Label>
+                                    <div className="flex gap-2">
+                                        <Input
+                                            value={headerNickname}
+                                            onChange={e => setHeaderNickname(e.target.value)}
+                                            readOnly={disableEditing}
+                                            className={disableEditing ? "bg-zinc-100" : ""}
+                                        />
+                                        {!disableEditing && (
+                                            <Button onClick={handleSaveHeader} disabled={isSavingHeader} size="icon" variant="ghost">
+                                                {isSavingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                            </Button>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
-                            <div className="space-y-2">
-                                <Label>Apelido</Label>
-                                <div className="flex gap-2">
-                                    <Input
-                                        value={headerNickname}
-                                        onChange={e => setHeaderNickname(e.target.value)}
-                                        readOnly={disableEditing}
-                                        className={disableEditing ? "bg-zinc-100" : ""}
-                                    />
-                                    {!disableEditing && (
-                                        <Button onClick={handleSaveHeader} disabled={isSavingHeader} size="icon" variant="ghost">
-                                            {isSavingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                                        </Button>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
+                        )}
 
                         <div className="space-y-2">
                             <h4 className="font-semibold text-sm text-zinc-700">Itens neste Lote ({order.requests?.length || 0})</h4>
@@ -211,10 +241,10 @@ export function ManageOrderDialog({
                                                 <div className="flex justify-end gap-2 pt-2 border-t mt-1">
                                                     {item.status === 'pending' && canApprove && (
                                                         <>
-                                                            <Button variant="ghost" size="sm" onClick={() => approveRequest(item, true)} className="h-8 w-8 p-0 text-green-600 bg-green-50">
+                                                            <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, true, currentUserId); onOrderUpdated?.(); }} className="h-8 w-8 p-0 text-green-600 bg-green-50">
                                                                 <Check className="h-4 w-4" />
                                                             </Button>
-                                                            <Button variant="ghost" size="sm" onClick={() => approveRequest(item, false)} className="h-8 w-8 p-0 text-red-600 bg-red-50">
+                                                            <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, false, currentUserId); onOrderUpdated?.(); }} className="h-8 w-8 p-0 text-red-600 bg-red-50">
                                                                 <Ban className="h-4 w-4" />
                                                             </Button>
                                                         </>
@@ -252,10 +282,10 @@ export function ManageOrderDialog({
                                                         <TableCell className="text-right flex justify-end gap-1">
                                                             {item.status === 'pending' && canApprove && (
                                                                 <>
-                                                                    <Button variant="ghost" size="sm" onClick={() => approveRequest(item, true)} className="h-6 w-6 p-0 text-green-600 hover:text-green-700 hover:bg-green-50" title="Aprovar">
+                                                                    <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, true, currentUserId); onOrderUpdated?.(); }} className="h-6 w-6 p-0 text-green-600 hover:text-green-700 hover:bg-green-50" title="Aprovar">
                                                                         <Check className="h-4 w-4" />
                                                                     </Button>
-                                                                    <Button variant="ghost" size="sm" onClick={() => approveRequest(item, false)} className="h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-50" title="Rejeitar">
+                                                                    <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, false, currentUserId); onOrderUpdated?.(); }} className="h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-50" title="Rejeitar">
                                                                         <Ban className="h-4 w-4" />
                                                                     </Button>
                                                                 </>
@@ -369,7 +399,8 @@ export function ManageOrderDialog({
                                     variant="outline"
                                     onClick={async () => {
                                         if (confirm("Aprovar TODOS os itens pendentes?")) {
-                                            await batchApproveRequests(order.requests, true);
+                                            await batchApproveRequests(order.requests, true, currentUserId);
+                                            onOrderUpdated?.();
                                             onOpenChange(false);
                                         }
                                     }}
@@ -381,7 +412,8 @@ export function ManageOrderDialog({
                                     variant="outline"
                                     onClick={async () => {
                                         if (confirm("Reprovar TODOS os itens pendentes?")) {
-                                            await batchApproveRequests(order.requests, false);
+                                            await batchApproveRequests(order.requests, false, currentUserId);
+                                            onOrderUpdated?.();
                                             onOpenChange(false);
                                         }
                                     }}
@@ -390,6 +422,23 @@ export function ManageOrderDialog({
                                     <Ban className="mr-2 h-4 w-4" /> Reprovar Todos
                                 </Button>
                             </>
+                        )}
+
+                        {/* Creator Action: Finish Editing when Edit Approved */}
+                        {isEditApproved && (order.created_by === currentUserId || isAdmin) && (
+                            <Button
+                                variant="default"
+                                onClick={async () => {
+                                    if (confirm("Finalizar edição? O pedido voltará para o ciclo de aprovação.")) {
+                                        await reprocessOrderToPending(order.id);
+                                        onOrderUpdated?.();
+                                        onOpenChange(false);
+                                    }
+                                }}
+                                className="bg-blue-600 hover:bg-blue-700 text-white"
+                            >
+                                <Save className="mr-2 h-4 w-4" /> Finalizar Edição
+                            </Button>
                         )}
 
                         {/* Approver Actions for Edit Request */}
@@ -447,7 +496,8 @@ export function ManageOrderDialog({
                                         return;
                                     }
                                     if (confirm("Tem certeza que deseja EXCLUIR este LOTE inteiro? Todos os itens serão removidos.")) {
-                                        onDeleteOrder(order.id);
+                                        const reason = prompt("Digite o motivo da exclusão:");
+                                        if (reason) onDeleteOrder(order.id, reason, currentUserId);
                                     }
                                 }}
                             >
@@ -457,6 +507,10 @@ export function ManageOrderDialog({
                         <Button variant="outline" onClick={() => onOpenChange(false)}>Fechar</Button>
                     </div>
                 </DialogFooter>
+                <StockConsultationDialog
+                    isOpen={isConsultOpen}
+                    onOpenChange={setIsConsultOpen}
+                />
             </DialogContent >
         </Dialog >
     );

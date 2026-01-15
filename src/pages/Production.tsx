@@ -1,5 +1,6 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,12 +88,38 @@ export default function Production() {
     const [orderItems, setOrderItems] = useState<ProductionOrderItem[]>([]);
     const [actualOutputQuantity, setActualOutputQuantity] = useState(0);
 
+    // URL Params for Deep Linking
+    const [searchParams] = useSearchParams();
+    const openOrderId = searchParams.get('openOrder');
+
     // Fetch Data
     // Fetch Data
     useEffect(() => {
         fetchInitialData();
         checkUser();
     }, []);
+
+    // Handle Deep Link
+    useEffect(() => {
+        if (openOrderId) {
+            handleDeepLink(openOrderId);
+        }
+    }, [openOrderId]);
+
+    async function handleDeepLink(id: string) {
+        // Fetch specific order if not in list or to be safe
+        const { data, error } = await supabase
+            .from('production_orders')
+            .select('*, products(name, stock_quantity, cost, unit, batch_size), profiles(email, full_name)')
+            .eq('id', id)
+            .single();
+
+        if (data && !error) {
+            // If closed, switch tab to history for context
+            if (data.status === 'closed') setActiveTab('history');
+            openExecution(data);
+        }
+    }
 
     async function checkUser() {
         const { data: { user } } = await supabase.auth.getUser();
@@ -222,6 +249,45 @@ export default function Production() {
         setActualOutputQuantity(order.quantity); // Default to planned
     }
 
+    const { totalProjectedCost, unitProjectedCost } = useMemo(() => {
+        let total = 0;
+        if (!selectedOrder) return { totalProjectedCost: 0, unitProjectedCost: 0 };
+
+        orderItems.forEach(item => {
+            const qty = (item.quantity_used ?? item.quantity_planned) + (item.waste_quantity || 0);
+
+            // Find cost info
+            let cost = 0;
+            let unitWeight = 1;
+
+            if (item.type === 'ingredient') {
+                const ing = ingredients.find(i => i.id === item.item_id);
+                if (ing) {
+                    unitWeight = ing.unit_weight || 1;
+                    if (unitWeight > 0) cost = ing.cost / unitWeight;
+                    else cost = ing.cost;
+                }
+            } else {
+                const prod = products.find(p => p.id === item.item_id);
+                if (prod) {
+                    // Products now store Unit Cost directly
+                    cost = prod.cost || 0;
+                }
+            }
+
+            total += qty * cost;
+        });
+
+        const safeOutput = actualOutputQuantity > 0 ? actualOutputQuantity : (selectedOrder?.quantity || 1);
+        return {
+            totalProjectedCost: total,
+            unitProjectedCost: total / safeOutput
+        };
+
+    }, [orderItems, actualOutputQuantity, ingredients, products, selectedOrder]);
+
+
+
     // Update LOCAL state of item usage
     function updateItemUsage(itemId: string, field: 'quantity_used' | 'waste_quantity', value: number) {
         setOrderItems(prev => prev.map(item =>
@@ -229,29 +295,10 @@ export default function Production() {
         ));
     }
 
-    // Save changes to items (auto-save or before close?)
-    async function saveOrderItems() {
-        const updates = orderItems.map(item => ({
-            id: item.id,
-            order_id: item.order_id,
-            type: item.type,
-            item_id: item.item_id,
-            name: item.name,
-            unit: item.unit,
-            quantity_planned: item.quantity_planned,
-            quantity_used: item.quantity_used,
-            waste_quantity: item.waste_quantity,
-            unit_cost: item.unit_cost
-        }));
-
-        const { error } = await supabase.from('production_order_items').upsert(updates);
-        if (error) throw error;
-    }
-
     async function handleAdminAction(action: 'delete' | 'reopen', orderId: string) {
         if (action === 'delete') {
             if (!confirm("Tem certeza? Esta ação é irreversível e se a ordem estiver FECHADA, o estoque será revertido.")) return;
-            const { error } = await supabase.rpc('delete_production_order', { p_order_id: orderId });
+            const { error } = await supabase.rpc('delete_production_order_secure', { p_order_id: orderId, p_user_id: currentUserId });
             if (error) toast({ variant: 'destructive', title: "Erro ao excluir", description: error.message });
             else {
                 toast({ title: "Ordem excluída com sucesso" });
@@ -270,21 +317,33 @@ export default function Production() {
 
     async function handleCloseOrder() {
         if (!selectedOrder) return;
-        if (!confirm("Isso irá baixar o estoque dos insumos e dar entrada no produto final. Confirmar?")) return;
+        if (!confirm("Isso irá baixar o estoque dos insumos (com conversões seguras) e dar entrada no produto final. Confirmar?")) return;
 
         setIsSaving(true);
         try {
-            await saveOrderItems();
+            // Get User ID
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error("Usuário não autenticado");
 
-            const { error } = await supabase.rpc('close_production_order', {
+            // Prepare atomic payload
+            const itemsPayload = orderItems.map(item => ({
+                id: item.id,
+                quantity_used: item.quantity_used || 0,
+                waste_quantity: item.waste_quantity || 0
+            }));
+
+            // Call Secure RPC directly
+            const { error } = await supabase.rpc('close_production_order_secure', {
                 p_order_id: selectedOrder.id,
+                p_items_usage: itemsPayload,
                 p_actual_output_quantity: actualOutputQuantity,
-                p_target_stock: targetStock
+                p_target_stock: targetStock,
+                p_user_id: user.id
             });
 
             if (error) throw error;
 
-            toast({ title: "Produção Concluída!", description: "Estoque atualizado com sucesso." });
+            toast({ title: "Produção Concluída!", description: "Estoque atualizado e auditado com sucesso." });
             setIsExecutionDialogOpen(false);
             fetchOrders();
 
@@ -416,23 +475,23 @@ export default function Production() {
                                             <div className="grid grid-cols-2 gap-2 text-sm bg-zinc-50 p-2 rounded">
                                                 <div>
                                                     <span className="text-xs text-zinc-500">Qtd Produzida</span>
-                                                    <div className="font-medium">{order.quantity}</div>
+                                                    <div className="font-medium">{order.quantity} {order.products?.unit || 'un'}</div>
                                                 </div>
                                                 <div className="text-right">
                                                     <span className="text-xs text-zinc-500">Custo Total</span>
-                                                    <div className="font-bold text-green-700">R$ {order.cost_at_production?.toFixed(2)}</div>
+                                                    <div className="font-bold text-green-700">R$ {order.quantity > 0 && order.cost_at_production ? (order.cost_at_production * order.quantity).toFixed(2) : '0.00'}</div>
                                                 </div>
                                             </div>
-                                            {isAdmin && (
-                                                <div className="flex justify-end gap-2 pt-2 border-t mt-1">
-                                                    <Button variant="outline" size="sm" onClick={() => handleAdminAction('reopen', order.id)} className="h-8 text-xs">
-                                                        <Edit className="h-3 w-3 mr-1" /> Corrigir
-                                                    </Button>
+                                            <div className="flex justify-end gap-2 pt-2 border-t mt-1">
+                                                <Button variant="outline" size="sm" onClick={() => handleAdminAction('reopen', order.id)} className="h-8 text-xs">
+                                                    <Edit className="h-3 w-3 mr-1" /> Corrigir
+                                                </Button>
+                                                {isAdmin && (
                                                     <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
-                                                </div>
-                                            )}
+                                                )}
+                                            </div>
                                         </div>
                                     ))
                                 )}
@@ -463,10 +522,10 @@ export default function Production() {
                                                     <TableCell className="text-zinc-500">
                                                         {order.profiles?.full_name?.split(' ')[0] || order.profiles?.email?.split('@')[0] || '-'}
                                                     </TableCell>
-                                                    <TableCell>{order.quantity}</TableCell>
-                                                    <TableCell>R$ {order.cost_at_production?.toFixed(2)}</TableCell>
+                                                    <TableCell>{order.quantity} {order.products?.unit || 'un'}</TableCell>
+                                                    <TableCell>R$ {order.quantity > 0 && order.cost_at_production ? (order.cost_at_production * order.quantity).toFixed(2) : '0.00'}</TableCell>
                                                     <TableCell className="text-zinc-500 font-mono">
-                                                        R$ {order.quantity > 0 && order.cost_at_production ? (order.cost_at_production / order.quantity).toFixed(2) : '-'}
+                                                        R$ {order.cost_at_production?.toFixed(2) || '0.00'}
                                                     </TableCell>
                                                     <TableCell>
                                                         <Badge variant={order.status === 'closed' ? 'default' : 'secondary'} className={order.status === 'closed' ? 'bg-green-600 hover:bg-green-700' : 'bg-zinc-500'}>
@@ -474,16 +533,16 @@ export default function Production() {
                                                         </Badge>
                                                     </TableCell>
                                                     <TableCell className="text-right">
-                                                        {isAdmin && (
-                                                            <div className="flex justify-end gap-1">
-                                                                <Button variant="outline" size="sm" onClick={() => handleAdminAction('reopen', order.id)} title="Corrigir / Reabrir">
-                                                                    <Edit className="h-3 w-3 mr-1" /> Corrigir
-                                                                </Button>
+                                                        <div className="flex justify-end gap-1">
+                                                            <Button variant="outline" size="sm" onClick={() => handleAdminAction('reopen', order.id)} title="Corrigir / Reabrir">
+                                                                <Edit className="h-3 w-3 mr-1" /> Corrigir
+                                                            </Button>
+                                                            {isAdmin && (
                                                                 <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0" title="Excluir (Reverter Estoque)">
                                                                     <Trash2 className="h-4 w-4" />
                                                                 </Button>
-                                                            </div>
-                                                        )}
+                                                            )}
+                                                        </div>
                                                     </TableCell>
                                                 </TableRow>
                                             ))
@@ -552,8 +611,14 @@ export default function Production() {
                         <DialogTitle className="flex items-center gap-2">
                             <Factory className="h-5 w-5 text-blue-600" />
                             Executar OP: <span className="text-zinc-500 font-normal">{selectedOrder?.products?.name} (Qtd: {selectedOrder?.quantity})</span>
+                            {selectedOrder?.status === 'closed' && <Badge variant="secondary">Visualização (Encerrado)</Badge>}
                         </DialogTitle>
-                        <DialogDescription>Confirme os insumos utilizados e aponte desperdícios antes de finalizar.</DialogDescription>
+                        <DialogDescription>
+                            {selectedOrder?.status === 'closed'
+                                ? "Detalhes da produção finalizada e insumos utilizados."
+                                : "Confirme os insumos utilizados e aponte desperdícios antes de finalizar."
+                            }
+                        </DialogDescription>
                     </DialogHeader>
 
                     <div className="py-4 space-y-6">
@@ -582,6 +647,9 @@ export default function Production() {
                                             let stockUnit = '-';
                                             let unitWeight = 1;
                                             let unitType = '';
+
+                                            // Determine Closure Status
+                                            const isClosed = selectedOrder?.status === 'closed';
 
                                             if (stockInfo) {
                                                 if ('stock_danilo' in stockInfo) {
@@ -618,7 +686,7 @@ export default function Production() {
 
                                             const realQty = item.quantity_used ?? item.quantity_planned;
                                             const totalNeeded = realQty + (item.waste_quantity || 0);
-                                            const isInsufficient = totalNeeded > (displayStock + 0.001);
+                                            const isInsufficient = !isClosed && totalNeeded > (displayStock + 0.001);
 
                                             return (
                                                 <TableRow key={item.id} className={isInsufficient ? "bg-red-50/50" : ""}>
@@ -639,7 +707,7 @@ export default function Production() {
                                                     <TableCell className="text-xs font-mono">
                                                         <div className="flex flex-col">
                                                             <span className={cn("font-bold", isInsufficient ? "text-red-600" : "text-zinc-700")}>
-                                                                {displayStock.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} {consumptionUnit}
+                                                                {displayStock.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {consumptionUnit}
                                                             </span>
                                                             <span className="text-[10px] text-zinc-400">
                                                                 Estoque: {currentStock} {stockUnit}
@@ -653,6 +721,7 @@ export default function Production() {
                                                         <div className="flex items-center gap-1.5">
                                                             <Input
                                                                 type="number"
+                                                                disabled={isClosed}
                                                                 className={cn(
                                                                     "h-9 w-24 text-center font-medium",
                                                                     isInsufficient ? "border-red-300 bg-red-50 focus-visible:ring-red-500" : "bg-white"
@@ -667,6 +736,7 @@ export default function Production() {
                                                         <div className="flex items-center gap-1.5">
                                                             <Input
                                                                 type="number"
+                                                                disabled={isClosed}
                                                                 className="h-9 w-24 border-amber-200 focus:ring-amber-500 text-center font-medium bg-amber-50/10 placeholder:text-amber-300"
                                                                 value={item.waste_quantity || ''}
                                                                 onChange={e => updateItemUsage(item.id, 'waste_quantity', Number(e.target.value))}
@@ -723,9 +793,10 @@ export default function Production() {
                                     else if (stockUnitLower === 'l' && consumptionUnit === 'ml') displayStock = currentStock * 1000;
                                     else if (stockUnitLower === 'ml' && consumptionUnit === 'l') displayStock = currentStock / 1000;
 
+                                    const isClosed = selectedOrder?.status === 'closed';
                                     const realQty = item.quantity_used ?? item.quantity_planned;
                                     const totalNeeded = realQty + (item.waste_quantity || 0);
-                                    const isInsufficient = totalNeeded > (displayStock + 0.001);
+                                    const isInsufficient = !isClosed && totalNeeded > (displayStock + 0.001);
 
                                     return (
                                         <div key={item.id} className={cn("bg-white p-3 rounded-lg border shadow-sm space-y-3", isInsufficient ? "border-red-300 bg-red-50/30" : "")}>
@@ -735,7 +806,7 @@ export default function Production() {
                                                     <span className="font-semibold text-sm">{item.name}</span>
                                                 </div>
                                                 <Badge variant="outline" className="text-xs bg-zinc-50">
-                                                    Est: {displayStock.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}{consumptionUnit}
+                                                    Est: {displayStock.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}{consumptionUnit}
                                                 </Badge>
                                             </div>
 
@@ -750,6 +821,7 @@ export default function Production() {
                                                     <Label className="text-xs text-zinc-500">Qtd Real ({consumptionUnit})</Label>
                                                     <Input
                                                         type="number"
+                                                        disabled={isClosed}
                                                         className={cn("h-9", isInsufficient ? "border-red-300 focus-visible:ring-red-500" : "")}
                                                         value={item.quantity_used ?? item.quantity_planned}
                                                         onChange={e => updateItemUsage(item.id, 'quantity_used', Number(e.target.value))}
@@ -759,6 +831,7 @@ export default function Production() {
                                                     <Label className="text-xs text-amber-600">Desperdício ({consumptionUnit})</Label>
                                                     <Input
                                                         type="number"
+                                                        disabled={isClosed}
                                                         className="h-9 border-amber-200 focus:ring-amber-500 bg-amber-50/10"
                                                         value={item.waste_quantity || ''}
                                                         onChange={e => updateItemUsage(item.id, 'waste_quantity', Number(e.target.value))}
@@ -808,7 +881,7 @@ export default function Production() {
                         const realQty = i.quantity_used ?? i.quantity_planned;
                         const totalNeeded = realQty + (i.waste_quantity || 0);
                         return totalNeeded > (displayStock + 0.001);
-                    }) && (
+                    }) && selectedOrder?.status !== 'closed' && (
                             <div className="bg-red-50 p-4 rounded-md flex items-start gap-3 border border-red-200 mb-4 mx-4">
                                 <Trash2 className="h-5 w-5 text-red-600 mt-0.5" />
                                 <div>
@@ -820,16 +893,37 @@ export default function Production() {
                             </div>
                         )}
 
-                    <div className="bg-blue-50 p-4 rounded-md flex items-start gap-3 border border-blue-100 mx-4">
-                        <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5" />
-                        <div>
-                            <h4 className="font-medium text-blue-900">Resumo da Ação</h4>
-                            <p className="text-sm text-blue-700 mt-1">
-                                Ao confirmar, o sistema irá baixar do estoque: <br />
-                                <strong>(Qtd Real + Desperdício)</strong> de cada item listado acima.
-                            </p>
+                    {selectedOrder?.status !== 'closed' && (
+                        <div className="bg-blue-50 p-4 rounded-md flex items-start gap-3 border border-blue-100 mx-4">
+                            <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5" />
+                            <div>
+                                <h4 className="font-medium text-blue-900">Resumo da Ação</h4>
+                                <p className="text-sm text-blue-700 mt-1">
+                                    Ao confirmar, o sistema irá baixar do estoque: <br />
+                                    <strong>(Qtd Real + Desperdício)</strong> de cada item listado acima.
+                                </p>
+                            </div>
                         </div>
-                    </div>
+                    )}
+
+                    {/* Cost Projection Block */}
+                    {selectedOrder?.status !== 'closed' && (
+                        <div className="grid grid-cols-2 gap-4 p-4 border rounded-md bg-white mx-4 mt-2 shadow-sm">
+                            <div>
+                                <p className="text-xs text-zinc-500 uppercase font-bold">Custo Total Projetado</p>
+                                <p className="text-xl font-bold text-zinc-900">R$ {totalProjectedCost.toFixed(2)}</p>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-xs text-zinc-500 uppercase font-bold">Custo Unitário Projetado</p>
+                                <p className="text-xl font-bold text-green-600">
+                                    R$ {unitProjectedCost.toFixed(2)}
+                                    <span className="text-xs text-zinc-400 font-normal ml-1">
+                                        / {selectedOrder?.products?.unit || 'un'}
+                                    </span>
+                                </p>
+                            </div>
+                        </div>
+                    )}
 
                     <div className="flex items-center gap-4 p-4 border rounded-md bg-zinc-50 mx-4 my-6">
                         <div className="flex-1">
@@ -837,9 +931,20 @@ export default function Production() {
                             <p className="text-xs text-muted-foreground mb-2">Se houve quebra ou rendimento maior que o planejado.</p>
                             <div className="relative">
                                 <Input
-                                    type="number"
+                                    type="text"
+                                    inputMode="decimal"
+                                    disabled={selectedOrder?.status === 'closed'}
                                     value={actualOutputQuantity}
-                                    onChange={e => setActualOutputQuantity(Number(e.target.value))}
+                                    onChange={e => {
+                                        // Allow only numbers and one dot
+                                        const raw = e.target.value.replace(/[^0-9.]/g, '');
+                                        // prevent multiple dots
+                                        const parts = raw.split('.');
+                                        const clean = parts[0] + (parts.length > 1 ? '.' + parts[1] : '');
+
+                                        const val = parseFloat(clean);
+                                        setActualOutputQuantity(isNaN(val) ? 0 : val);
+                                    }}
                                     className="pr-16"
                                 />
                                 <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-zinc-500 bg-zinc-50 px-3 border-l rounded-r-md">
@@ -851,7 +956,11 @@ export default function Production() {
                         <div className="w-[200px]">
                             <Label className="text-base font-semibold">Destino do Estoque</Label>
                             <p className="text-xs text-muted-foreground mb-2">Onde o produto será armazenado?</p>
-                            <Select value={targetStock} onValueChange={(v: 'danilo' | 'adriel') => setTargetStock(v)}>
+                            <Select
+                                value={targetStock}
+                                onValueChange={(v: 'danilo' | 'adriel') => setTargetStock(v)}
+                                disabled={selectedOrder?.status === 'closed'}
+                            >
                                 <SelectTrigger>
                                     <SelectValue />
                                 </SelectTrigger>
@@ -864,12 +973,16 @@ export default function Production() {
                     </div>
 
                     <DialogFooter className="px-4 pb-4">
-                        <Button variant="outline" onClick={() => setIsExecutionDialogOpen(false)}>Voltar</Button>
-                        <Button onClick={handleCloseOrder} disabled={isSaving} className="bg-green-600 hover:bg-green-700">
-                            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            <CheckCircle2 className="mr-2 h-4 w-4" />
-                            Finalizar e Baixar Estoque
+                        <Button variant="outline" onClick={() => setIsExecutionDialogOpen(false)}>
+                            {selectedOrder?.status === 'closed' ? 'Fechar' : 'Voltar'}
                         </Button>
+                        {selectedOrder?.status !== 'closed' && (
+                            <Button onClick={handleCloseOrder} disabled={isSaving} className="bg-green-600 hover:bg-green-700">
+                                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                <CheckCircle2 className="mr-2 h-4 w-4" />
+                                Finalizar e Baixar Estoque
+                            </Button>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

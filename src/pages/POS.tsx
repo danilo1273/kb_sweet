@@ -3,12 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
+// Dialog imports removed
 import { Label } from "@/components/ui/label";
 import {
     Select,
@@ -21,9 +16,6 @@ import { useToast } from "@/components/ui/use-toast";
 import {
     Search,
     Trash2,
-    CreditCard,
-    Banknote,
-    QrCode,
     ArrowLeft,
     Loader2,
     ShoppingCart,
@@ -34,12 +26,14 @@ import { useNavigate } from "react-router-dom";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
 import { usePOS } from "@/hooks/usePOS"; // Import Hook
+import { StockConsultationDialog } from "@/components/pos/StockConsultationDialog";
 import { POSProduct as Product, POSOrderItem as OrderItem } from "@/types";
 
 interface Client {
     id: string;
     name: string;
 }
+
 
 export default function POS() {
     const navigate = useNavigate();
@@ -62,8 +56,6 @@ export default function POS() {
     const [stockSource, setStockSource] = useState<'danilo' | 'adriel'>('danilo');
 
     // Checkout State
-    const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-    const [paymentMethod, setPaymentMethod] = useState("money");
     const [globalDiscount, setGlobalDiscount] = useState<number>(0);
 
 
@@ -165,7 +157,7 @@ export default function POS() {
             orderItems,
             total,
             globalDiscount,
-            paymentMethod,
+            'pending', // Default payment method for pending sales
             selectedClient,
             stockSource
         );
@@ -173,13 +165,11 @@ export default function POS() {
         if (success) {
             setOrderItems([]);
             setGlobalDiscount(0);
-            setIsCheckoutOpen(false);
             loadData(); // Reload stock
             toast({ title: "Venda realizada!", description: "Redirecionando para histórico..." });
             navigate('/sales');
         }
     };
-
 
     return (
         <div className="h-screen flex flex-col bg-zinc-50 overflow-hidden">
@@ -193,15 +183,18 @@ export default function POS() {
                             </Button>
                             Novo Pedido
                         </div>
-                        <Select value={stockSource} onValueChange={(v: any) => setStockSource(v)}>
-                            <SelectTrigger className="w-[140px] h-8 text-xs bg-zinc-100 border-zinc-200">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="danilo">Estoque DANILO</SelectItem>
-                                <SelectItem value="adriel">Estoque ADRIEL</SelectItem>
-                            </SelectContent>
-                        </Select>
+                        <div className="flex gap-2">
+                            <StockConsultationDialog />
+                            <Select value={stockSource} onValueChange={(v: any) => setStockSource(v)}>
+                                <SelectTrigger className="w-[140px] h-8 text-xs bg-zinc-100 border-zinc-200">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="danilo">Estoque DANILO</SelectItem>
+                                    <SelectItem value="adriel">Estoque ADRIEL</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
 
                     <div className="relative z-40">
@@ -309,8 +302,8 @@ export default function POS() {
                                         className="h-9 mt-1 font-bold text-green-700 bg-green-50/50 border-green-200"
                                         type="number"
                                         step="0.01"
-                                        value={item.total.toFixed(2)}
-                                        onChange={e => updateItem(item.tempId, 'total', Number(e.target.value))}
+                                        value={item.total || ''}
+                                        onChange={e => updateItem(item.tempId, 'total', parseFloat(e.target.value))}
                                     />
                                 </div>
                             </div>
@@ -353,48 +346,13 @@ export default function POS() {
                     <Button
                         size="lg"
                         className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 text-lg"
-                        disabled={orderItems.length === 0}
-                        onClick={() => setIsCheckoutOpen(true)}
+                        disabled={orderItems.length === 0 || processingSale}
+                        onClick={handleFinalizeSale}
                     >
-                        FINALIZAR VENDA
+                        {processingSale ? <Loader2 className="animate-spin mr-2" /> : "FINALIZAR VENDA (PENDENTE)"}
                     </Button>
                 </div>
             </div>
-
-            {/* CHECKOUT DIALOG */}
-            <Dialog open={isCheckoutOpen} onOpenChange={setIsCheckoutOpen}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Confirmar Pagamento</DialogTitle>
-                    </DialogHeader>
-                    <div className="grid grid-cols-2 gap-3 py-4">
-                        {[
-                            { id: 'money', label: 'Dinheiro', icon: Banknote },
-                            { id: 'pix', label: 'PIX', icon: QrCode },
-                            { id: 'credit_card', label: 'Crédito', icon: CreditCard },
-                            { id: 'debit_card', label: 'Débito', icon: CreditCard },
-                        ].map(m => (
-                            <Button
-                                key={m.id}
-                                variant={paymentMethod === m.id ? "default" : "outline"}
-                                className={cn("h-16 flex flex-col gap-1", paymentMethod === m.id && "bg-blue-600 hover:bg-blue-700")}
-                                onClick={() => setPaymentMethod(m.id)}
-                            >
-                                <m.icon className="h-5 w-5" />
-                                {m.label}
-                            </Button>
-                        ))}
-                    </div>
-                    <div className="bg-zinc-100 p-3 rounded text-center mb-4">
-                        <p className="text-zinc-600 text-sm">Lucro Estimado</p>
-                        <p className="font-bold text-green-700">R$ {estimatedProfit.toFixed(2)} ({marginPercent.toFixed(0)}%)</p>
-                    </div>
-                    <Button onClick={handleFinalizeSale} className="w-full bg-green-600 hover:bg-green-700 h-12 text-lg font-bold" disabled={processingSale}>
-                        {processingSale ? <Loader2 className="animate-spin mr-2" /> : null}
-                        CONFIRMAR PAGAMENTO
-                    </Button>
-                </DialogContent>
-            </Dialog>
 
         </div>
     );

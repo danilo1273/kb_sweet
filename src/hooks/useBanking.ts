@@ -120,12 +120,37 @@ export function useBanking() {
             .eq('bank_account_id', accountId)
             .gte('payment_date', startDate)
             .lte('payment_date', endDate)
-            .order('payment_date', { ascending: true }); // Ascending to calc running balance interactively? 
-        // Or Descending for display? Usually statements are recent top.
-        // But for running balance calc, we need start -> end.
+            .order('payment_date', { ascending: true });
 
         if (error) throw error;
-        return data as FinancialMovement[];
+
+        // Enrich with Order Info for grouping
+        const reqIds = data?.map(m => m.related_purchase_id).filter(Boolean) || [];
+        if (reqIds.length > 0) {
+            const { data: reqs } = await supabase
+                .from('purchase_requests')
+                .select('id, order_id, purchase_orders(id, nickname)')
+                .in('id', reqIds);
+
+            const reqMap: Record<string, any> = {};
+            reqs?.forEach(r => {
+                reqMap[r.id] = {
+                    id: r.purchase_orders?.id,
+                    nickname: r.purchase_orders?.nickname
+                };
+            });
+
+            return data.map(m => {
+                const orderInfo = m.related_purchase_id ? reqMap[m.related_purchase_id] : null;
+                return {
+                    ...m,
+                    order_id: orderInfo?.id,
+                    order_nickname: orderInfo?.nickname
+                };
+            }) as (FinancialMovement & { order_id?: string, order_nickname?: string })[];
+        }
+
+        return data as (FinancialMovement & { order_id?: string, order_nickname?: string })[];
     };
 
     return {

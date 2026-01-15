@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+// Table imports removed as they were unused
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, RotateCcw, Clock, Package, Loader2 } from "lucide-react";
+import { Plus, Clock, Package, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -16,7 +16,7 @@ import { CreateSupplierDialog } from "@/components/purchases/CreateSupplierDialo
 import { ManageCategoriesDialog } from "@/components/purchases/ManageCategoriesDialog";
 import { ManageUnitsDialog } from "@/components/purchases/ManageUnitsDialog";
 import { usePurchases } from "@/hooks/usePurchases";
-import { PurchaseOrder, PurchaseRequest, Ingredient, Supplier, ItemDraft, Category } from "@/types";
+import { PurchaseOrder, PurchaseRequest, Ingredient, Supplier, Category } from "@/types";
 import { motion, AnimatePresence } from "framer-motion";
 
 const Purchases = () => {
@@ -70,6 +70,21 @@ const Purchases = () => {
         fetchOrders();
         fetchMeta();
     }, [fetchOrders]);
+
+    useEffect(() => {
+        if (orders.length > 0) {
+            const params = new URLSearchParams(window.location.search);
+            const orderId = params.get('openOrder');
+            if (orderId) {
+                const order = orders.find(o => o.id === orderId);
+                if (order) {
+                    setSelectedOrderId(orderId);
+                    setIsManageOrderOpen(true);
+                    setIsManageOrderReadOnly(true);
+                }
+            }
+        }
+    }, [orders]);
 
 
     async function fetchMeta() {
@@ -170,12 +185,20 @@ const Purchases = () => {
 
     function openEditItem(item: PurchaseRequest) {
         setEditingItem(item);
+
+        let initialIngId = item.ingredient_id;
+        // Auto-match by name if ID is missing (fixes "forgotten" links)
+        if (!initialIngId && item.item_name) {
+            const match = ingredients.find(i => i.name.toLowerCase().trim() === item.item_name?.toLowerCase().trim());
+            if (match) initialIngId = match.id;
+        }
+
         setEditedValues({
             quantity: item.quantity,
             cost: item.cost,
             item_name: item.item_name,
             unit: item.unit,
-            ingredient_id: item.ingredient_id,
+            ingredient_id: initialIngId,
             destination: item.destination || 'danilo'
         });
         setIsEditItemOpen(true);
@@ -234,7 +257,7 @@ const Purchases = () => {
         try {
             if (!newSupplierName.trim()) return toast({ variant: 'destructive', title: "Nome obrigatório" });
 
-            const { data, error } = await supabase.from('suppliers').insert({ name: newSupplierName.trim() }).select().single();
+            const { error } = await supabase.from('suppliers').insert({ name: newSupplierName.trim() }).select().single();
             if (error) throw error;
 
             toast({ title: "Fornecedor cadastrado" });
@@ -249,75 +272,6 @@ const Purchases = () => {
         }
     }
 
-    async function handleSyncStock() {
-        if (!confirm("Recalcular estoque e custos médios? Isso reconstruirá os valores com base apenas nos pedidos 'Aprovados'.")) return;
-        // setLoading removed
-        try {
-            const { data: allApproved } = await supabase.from('purchase_requests').select('*').eq('status', 'approved');
-            const { data: currentIngs } = await supabase.from('ingredients').select('*');
-            if (!currentIngs) throw new Error("Não foi possível carregar ingredientes para sincronização.");
-
-            const stockMap: Record<string, { qD: number, vD: number, qA: number, vA: number }> = {};
-
-            // Inicializa mapa com zeros para todos os ingredientes existentes
-            currentIngs.forEach(ing => {
-                stockMap[ing.id] = { qD: 0, vD: 0, qA: 0, vA: 0 };
-            });
-
-            for (const p of allApproved || []) {
-                let id = p.ingredient_id;
-                if (!id && p.item_name) {
-                    const norm = normalizeString(p.item_name);
-                    const m = currentIngs.find(i => normalizeString(i.name) === norm);
-                    if (m) id = m.id;
-                }
-
-                if (id && stockMap[id]) {
-                    const ing = currentIngs.find(i => i.id === id);
-                    if (!ing) continue;
-
-                    if (!ing) continue;
-
-                    const factor = (normalizeString(p.unit) === normalizeString(ing.purchase_unit || '')) ? (Number(ing.purchase_unit_factor) || 1) : 1;
-                    const convertedQty = Number(p.quantity) * factor;
-                    const costVal = Number(p.cost);
-
-                    if (p.destination === 'adriel') {
-                        stockMap[id].qA += convertedQty;
-                        stockMap[id].vA += costVal;
-                    } else {
-                        stockMap[id].qD += convertedQty;
-                        stockMap[id].vD += costVal;
-                    }
-                }
-            }
-
-            for (const [id, s] of Object.entries(stockMap)) {
-                const totalQty = s.qD + s.qA;
-                const totalVal = s.vD + s.vA;
-
-                const costDanilo = s.qD > 0 ? (s.vD / s.qD) : 0;
-                const costAdriel = s.qA > 0 ? (s.vA / s.qA) : 0;
-                const costGlobal = totalQty > 0 ? (totalVal / totalQty) : 0;
-
-                await supabase.from('ingredients').update({
-                    stock_danilo: s.qD,
-                    stock_adriel: s.qA,
-                    cost_danilo: costDanilo,
-                    cost_adriel: costAdriel,
-                    cost: costGlobal
-                }).eq('id', id);
-            }
-            toast({ title: "Estoques e Custos recalculados com sucesso" });
-            fetchOrders();
-            fetchMeta();
-        } catch (error: any) {
-            toast({ variant: "destructive", title: "Erro na sincronização", description: error.message });
-        } finally {
-            // setLoading removed
-        }
-    }
-
     const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
     const normalizeString = (str: string) =>
@@ -328,18 +282,27 @@ const Purchases = () => {
             .replace(/\s+/g, ' ');
 
     const formatStatus = (status: string) => {
-        switch (status) {
-            case 'pending': return 'Pendente';
-            case 'approved': return 'Aprovado';
-            case 'rejected': return 'Rejeitado';
-            case 'edit_requested': return 'Edição Solicitada';
-            case 'edit_approved': return 'Edição Autorizada';
-            case 'partial': return 'Parcial';
-            default: return status;
-        }
+        const map: Record<string, string> = {
+            'pending': 'Pendente',
+            'approved': 'Aprovado',
+            'rejected': 'Rejeitado',
+            'open': 'Aberto',
+            'closed': 'Fechado',
+            'edit_requested': 'Edição Solicitada',
+            'edit_approved': 'Edição Autorizada',
+            'partial': 'Parcial'
+        };
+        return map[status] || status;
     };
 
     const getOrderStatus = (order: PurchaseOrder) => {
+        // DEBUG: Temporary check for "Compra Teste"
+        if (order.nickname === 'Compra Teste') {
+            const reqs = order.requests || [];
+            const statuses = reqs.map(r => r.status);
+            // Uncomment to debug if needed, but for now silent observation or targeted log
+            console.log(`DEBUG: Order ${order.nickname}`, { orderStatus: order.status, reqStatuses: statuses });
+        }
         // 1. Check Order-Level Status First (New Workflow)
         if (order.status === 'edit_requested') return { label: 'Edição Solicitada', color: 'bg-amber-100 text-amber-800 border-amber-500 border', value: 'editing' };
         if (order.status === 'edit_approved') return { label: 'Edição Liberada', color: 'bg-blue-100 text-blue-800 border-blue-500 border', value: 'editing' };
@@ -378,9 +341,6 @@ const Purchases = () => {
                 </div>
                 <div className="flex flex-col gap-2 md:items-end">
                     <div className="flex gap-2">
-                        <Button variant="outline" onClick={handleSyncStock} disabled={loading} className="text-orange-600 border-orange-200">
-                            <RotateCcw className="mr-2 h-4 w-4" /> Sync
-                        </Button>
                         <Button onClick={() => setIsOrderDialogOpen(true)} variant="gradient">
                             <Plus className="mr-2 h-4 w-4" /> Novo Pedido
                         </Button>
@@ -409,7 +369,17 @@ const Purchases = () => {
                     title="Nenhum pedido encontrado"
                     description={
                         filterStatus !== 'all'
-                            ? `Não há pedidos com o status "${filterStatus}".`
+                            ? `Não há pedidos com o status "${{
+                                'pending': 'Pendente',
+                                'approved': 'Aprovado',
+                                'rejected': 'Rejeitado',
+                                'open': 'Aberto',
+                                'closed': 'Fechado',
+                                'edit_requested': 'Edição Solicitada',
+                                'edit_approved': 'Edição Autorizada',
+                                'partial': 'Parcial',
+                                'editing': 'Em Edição'
+                            }[filterStatus] || filterStatus}".`
                             : "Comece criando um novo pedido de compra."
                     }
                     actionLabel="Novo Pedido"

@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
@@ -7,8 +6,23 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Search, Loader2, Edit, Trash2, User } from "lucide-react";
+import { Plus, Search, Loader2, Edit, Trash2, User, Eye, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+
+interface FinancialMovement {
+    id: string;
+    amount: number;
+    status: 'pending' | 'paid';
+    type: 'income' | 'expense';
+    description: string;
+    due_date: string;
+    payment_date: string;
+    created_at: string;
+}
 
 interface Client {
     id: string;
@@ -16,6 +30,7 @@ interface Client {
     phone: string;
     document: string;
     email: string;
+    financial_movements: FinancialMovement[];
 }
 
 export default function Clients() {
@@ -24,25 +39,37 @@ export default function Clients() {
     const [searchTerm, setSearchTerm] = useState("");
     const { toast } = useToast();
 
-    // Dialog
+    // Dialogs
     const [isDialogOpen, setIsDialogOpen] = useState(false);
+    const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [currentClient, setCurrentClient] = useState<Partial<Client>>({});
     const [isSaving, setIsSaving] = useState(false);
+    const [isAdmin, setIsAdmin] = useState(false);
 
     useEffect(() => {
         fetchClients();
+        checkUserRole();
     }, []);
+
+    async function checkUserRole() {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.email === 'admin@kbsweet.com' || user?.user_metadata?.role === 'admin') { // Simple Admin Check
+            setIsAdmin(true);
+        }
+    }
 
     async function fetchClients() {
         setLoading(true);
         const { data, error } = await supabase
             .from('clients')
-            .select('*, financial_movements(amount, status, type)')
+            .select('*, financial_movements(id, amount, status, type, description, due_date, payment_date, created_at)')
             .order('name');
+
         if (error) {
             toast({ variant: "destructive", title: "Erro ao carregar clientes" });
         } else {
-            setClients(data || []);
+            // Cast correctly
+            setClients((data as any) || []);
         }
         setLoading(false);
     }
@@ -52,11 +79,14 @@ export default function Clients() {
         setIsSaving(true);
 
         try {
-            if (currentClient.id) {
-                const { error } = await supabase.from('clients').update(currentClient).eq('id', currentClient.id);
+            // Remove nested objects (like financial_movements) before saving
+            const { financial_movements, ...clientData } = currentClient as any;
+
+            if (clientData.id) {
+                const { error } = await supabase.from('clients').update(clientData).eq('id', clientData.id);
                 if (error) throw error;
             } else {
-                const { error } = await supabase.from('clients').insert([currentClient]);
+                const { error } = await supabase.from('clients').insert([clientData]);
                 if (error) throw error;
             }
             toast({ title: "Cliente salvo com sucesso!" });
@@ -64,15 +94,33 @@ export default function Clients() {
             fetchClients();
             setCurrentClient({});
         } catch (error: any) {
+            console.error(error);
             toast({ variant: 'destructive', title: "Erro ao salvar", description: error.message });
         } finally {
             setIsSaving(false);
         }
     }
 
-    async function handleDelete(id: string) {
-        if (!confirm("Excluir este cliente?")) return;
-        const { error } = await supabase.from('clients').delete().eq('id', id);
+    async function handleDelete(client: Client) {
+        const hasHistory = client.financial_movements && client.financial_movements.length > 0;
+
+        if (hasHistory) {
+            if (!isAdmin) {
+                return toast({
+                    variant: 'destructive',
+                    title: "Exclusão Bloqueada",
+                    description: "Este cliente possui histórico financeiro. Apenas administradores podem excluir."
+                });
+            }
+
+            if (!confirm(`ATENÇÃO: Este cliente possui ${client.financial_movements.length} registros financeiros. A exclusão apagará TUDO. Deseja realmente excluir permanentemente?`)) {
+                return;
+            }
+        } else {
+            if (!confirm("Excluir este cliente?")) return;
+        }
+
+        const { error } = await supabase.from('clients').delete().eq('id', client.id);
         if (error) toast({ variant: 'destructive', title: "Erro ao excluir" });
         else {
             toast({ title: "Cliente removido" });
@@ -84,6 +132,15 @@ export default function Clients() {
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.phone?.includes(searchTerm)
     );
+
+    // Helpers for summary
+    const getSummary = (movements: FinancialMovement[]) => {
+        const income = movements.filter(m => m.type === 'income');
+        const totalBought = income.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+        const pending = income.filter(m => m.status === 'pending').reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+        const paid = income.filter(m => m.status === 'paid').reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+        return { totalBought, pending, paid };
+    };
 
     return (
         <div className="flex-1 p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
@@ -115,14 +172,7 @@ export default function Clients() {
                     <div className="text-center py-8 text-muted-foreground">Nenhum cliente encontrado.</div>
                 ) : (
                     filteredClients.map(client => {
-                        const movements = (client as any).financial_movements || [];
-                        const totalBought = movements
-                            .filter((m: any) => m.type === 'income')
-                            .reduce((acc: number, curr: any) => acc + (Number(curr.amount) || 0), 0);
-
-                        const totalPending = movements
-                            .filter((m: any) => m.type === 'income' && m.status === 'pending')
-                            .reduce((acc: number, curr: any) => acc + (Number(curr.amount) || 0), 0);
+                        const { totalBought, pending } = getSummary(client.financial_movements || []);
 
                         return (
                             <div key={client.id} className="bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3">
@@ -136,10 +186,10 @@ export default function Clients() {
                                             <div className="text-xs text-zinc-500">{client.phone || '-'}</div>
                                         </div>
                                     </div>
-                                    {totalPending > 0 ? (
+                                    {pending > 0 ? (
                                         <div className="text-right">
                                             <span className="text-[10px] text-red-600 block">Pendente</span>
-                                            <Badge variant="destructive" className="bg-red-50 text-red-700 hover:bg-red-100 border-red-200">R$ {totalPending.toFixed(2)}</Badge>
+                                            <Badge variant="destructive" className="bg-red-50 text-red-700 hover:bg-red-100 border-red-200">R$ {pending.toFixed(2)}</Badge>
                                         </div>
                                     ) : (
                                         <Badge variant="secondary" className="bg-green-50 text-green-700">Em dia</Badge>
@@ -150,10 +200,13 @@ export default function Clients() {
                                     <span className="font-bold">R$ {totalBought.toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-end gap-2 pt-2 border-t">
+                                    <Button variant="outline" size="sm" onClick={() => { setCurrentClient(client); setIsDetailsOpen(true); }} className="h-8 text-xs">
+                                        <Eye className="h-3 w-3 mr-1" /> Ver
+                                    </Button>
                                     <Button variant="outline" size="sm" onClick={() => { setCurrentClient(client); setIsDialogOpen(true); }} className="h-8 text-xs">
                                         <Edit className="h-3 w-3 mr-1" /> Editar
                                     </Button>
-                                    <Button variant="ghost" size="sm" onClick={() => handleDelete(client.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
+                                    <Button variant="ghost" size="sm" onClick={() => handleDelete(client)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
                                         <Trash2 className="h-4 w-4" />
                                     </Button>
                                 </div>
@@ -182,14 +235,7 @@ export default function Clients() {
                             <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Nenhum cliente encontrado.</TableCell></TableRow>
                         ) : (
                             filteredClients.map(client => {
-                                const movements = (client as any).financial_movements || [];
-                                const totalBought = movements
-                                    .filter((m: any) => m.type === 'income') // Only sales/income
-                                    .reduce((acc: number, curr: any) => acc + (Number(curr.amount) || 0), 0);
-
-                                const totalPending = movements
-                                    .filter((m: any) => m.type === 'income' && m.status === 'pending')
-                                    .reduce((acc: number, curr: any) => acc + (Number(curr.amount) || 0), 0);
+                                const { totalBought, pending } = getSummary(client.financial_movements || []);
 
                                 return (
                                     <TableRow key={client.id}>
@@ -205,19 +251,22 @@ export default function Clients() {
                                             <span className="font-bold text-zinc-700">R$ {totalBought.toFixed(2)}</span>
                                         </TableCell>
                                         <TableCell>
-                                            {totalPending > 0 ? (
+                                            {pending > 0 ? (
                                                 <span className="font-bold text-red-600 bg-red-50 px-2 py-1 rounded-md">
-                                                    R$ {totalPending.toFixed(2)}
+                                                    R$ {pending.toFixed(2)}
                                                 </span>
                                             ) : (
                                                 <span className="text-green-600 text-xs font-medium bg-green-50 px-2 py-1 rounded-md">Em dia</span>
                                             )}
                                         </TableCell>
                                         <TableCell className="text-right space-x-2">
+                                            <Button variant="ghost" size="icon" onClick={() => { setCurrentClient(client); setIsDetailsOpen(true); }} title="Detalhes">
+                                                <Eye className="h-4 w-4 text-blue-500" />
+                                            </Button>
                                             <Button variant="ghost" size="icon" onClick={() => { setCurrentClient(client); setIsDialogOpen(true); }}>
                                                 <Edit className="h-4 w-4" />
                                             </Button>
-                                            <Button variant="ghost" size="icon" onClick={() => handleDelete(client.id)}>
+                                            <Button variant="ghost" size="icon" onClick={() => handleDelete(client)}>
                                                 <Trash2 className="h-4 w-4 text-red-500" />
                                             </Button>
                                         </TableCell>
@@ -230,8 +279,9 @@ export default function Clients() {
                 </Table>
             </div>
 
+            {/* Dialog Editar/Novo */}
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogContent aria-describedby={undefined}>
+                <DialogContent>
                     <DialogHeader>
                         <DialogTitle>{currentClient.id ? 'Editar' : 'Novo'} Cliente</DialogTitle>
                     </DialogHeader>
@@ -261,6 +311,118 @@ export default function Clients() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Dialog Detalhes */}
+            <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
+                <DialogContent className="max-w-2xl bg-zinc-50/95 max-h-[90vh] flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <User className="h-5 w-5" />
+                            {currentClient.name}
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    {currentClient.id && (
+                        <ClientDetailsContent client={currentClient as Client} />
+                    )}
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsDetailsOpen(false)}>Fechar</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
+}
+
+function ClientDetailsContent({ client }: { client: Client }) {
+    const movements = client.financial_movements || [];
+    const income = movements.filter(m => m.type === 'income');
+
+    const pendingMovements = income.filter(m => m.status === 'pending');
+    const paidMovements = income.filter(m => m.status === 'paid');
+
+    const totalBought = income.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    const totalPending = pendingMovements.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+    return (
+        <div className="space-y-6 overflow-hidden flex flex-col flex-1">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-3 gap-4">
+                <Card>
+                    <CardContent className="p-4 pt-4">
+                        <div className="text-xs text-zinc-500 font-medium uppercase">Total Comprado</div>
+                        <div className="text-xl font-bold text-zinc-900">R$ {totalBought.toFixed(2)}</div>
+                    </CardContent>
+                </Card>
+                <Card className="bg-red-50 border-red-100">
+                    <CardContent className="p-4 pt-4">
+                        <div className="text-xs text-red-600 font-medium uppercase">Em Aberto</div>
+                        <div className="text-xl font-bold text-red-700">R$ {totalPending.toFixed(2)}</div>
+                    </CardContent>
+                </Card>
+                <Card className="bg-green-50 border-green-100">
+                    <CardContent className="p-4 pt-4">
+                        <div className="text-xs text-green-600 font-medium uppercase">Pago</div>
+                        <div className="text-xl font-bold text-green-700">R$ {(totalBought - totalPending).toFixed(2)}</div>
+                    </CardContent>
+                </Card>
+            </div>
+
+            <Tabs defaultValue="pending" className="flex flex-col flex-1 overflow-hidden">
+                <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="pending" className="gap-2">
+                        <AlertTriangle className="h-3 w-3" /> Pendentes ({pendingMovements.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="history">Histórico ({paidMovements.length})</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="pending" className="flex-1 overflow-hidden flex flex-col mt-2">
+                    <ScrollArea className="flex-1 border rounded-md bg-white p-2 h-[300px]">
+                        {pendingMovements.length === 0 ? (
+                            <div className="text-center py-10 text-zinc-400 text-sm">Nenhuma pendência.</div>
+                        ) : (
+                            <div className="space-y-2">
+                                {pendingMovements.map(m => (
+                                    <div key={m.id} className="flex justify-between items-center p-3 border rounded-lg hover:bg-zinc-50 transition-colors">
+                                        <div>
+                                            <div className="font-medium text-sm">{m.description}</div>
+                                            <div className="text-xs text-zinc-500">Vencimento: {m.due_date ? new Date(m.due_date).toLocaleDateString() : '-'}</div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="font-bold text-red-600">R$ {Number(m.amount).toFixed(2)}</div>
+                                            <Badge variant="outline" className="text-[10px] text-red-500 border-red-200">Pendente</Badge>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </ScrollArea>
+                </TabsContent>
+
+                <TabsContent value="history" className="flex-1 overflow-hidden flex flex-col mt-2">
+                    <ScrollArea className="flex-1 border rounded-md bg-white p-2 h-[300px]">
+                        {paidMovements.length === 0 ? (
+                            <div className="text-center py-10 text-zinc-400 text-sm">Nenhum histórico.</div>
+                        ) : (
+                            <div className="space-y-2">
+                                {paidMovements.map(m => (
+                                    <div key={m.id} className="flex justify-between items-center p-3 border rounded-lg hover:bg-zinc-50 transition-colors">
+                                        <div>
+                                            <div className="font-medium text-sm">{m.description}</div>
+                                            <div className="text-xs text-zinc-500">Pago em: {m.payment_date ? new Date(m.payment_date).toLocaleDateString() : '-'}</div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="font-bold text-green-600">R$ {Number(m.amount).toFixed(2)}</div>
+                                            <Badge variant="outline" className="text-[10px] text-green-500 border-green-200">Pago</Badge>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </ScrollArea>
+                </TabsContent>
+            </Tabs>
         </div>
     );
 }

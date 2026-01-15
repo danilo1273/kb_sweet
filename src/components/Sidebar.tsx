@@ -11,7 +11,8 @@ import {
     X,
     Factory,
     Database,
-    Building2
+    Building2,
+    ShieldCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/supabaseClient";
@@ -62,6 +63,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         { name: "Bancos", href: "/banking", icon: Building2, roles: ['admin', 'financial'] },
         { name: "Cadastros", href: "/admin/registers", icon: Database, roles: ['admin'] },
         { name: "Usuários", href: "/admin", icon: User, roles: ['admin'] },
+        { name: "Auditoria", href: "/audit", icon: ShieldCheck, roles: ['admin'] },
         { name: "Perfis", href: "/profile", icon: User, roles: [] }, // Todos
     ];
 
