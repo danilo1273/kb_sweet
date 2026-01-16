@@ -116,15 +116,7 @@ export default function Sales() {
                     <p className="text-zinc-500">Histórico e Lançamento de Vendas.</p>
                 </div>
                 <div className="flex gap-2">
-                    <Button onClick={async () => {
-                        if (!confirm("Deseja excluir TODAS as vendas canceladas permanentemente?")) return;
-                        setLoading(true);
-                        const { error } = await supabase.from('sales').delete().eq('status', 'canceled');
-                        if (error) toast({ variant: 'destructive', title: "Erro", description: error.message });
-                        else { toast({ title: "Limpeza concluída!" }); fetchSales(); }
-                    }} variant="ghost" className="text-red-400 hover:text-red-500 hover:bg-red-50">
-                        <Trash2 className="mr-2 h-4 w-4" /> Limpar Cancelados
-                    </Button>
+
                     <Button onClick={() => navigate('/clients')} variant="outline">
                         Gerenciar Clientes
                     </Button>

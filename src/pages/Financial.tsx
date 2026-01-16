@@ -555,50 +555,84 @@ export default function Financial() {
 
                 {/* Shared Filters Bar */}
                 <div className="flex flex-wrap gap-4 items-center bg-white p-4 rounded-lg shadow-sm border">
-                    <div className="flex items-center gap-2 text-sm text-zinc-500"><Filter className="h-4 w-4" /> Filtros:</div>
-                    <Select value={filterBuyer} onValueChange={setFilterBuyer}>
-                        <SelectTrigger className="w-[180px]"><SelectValue placeholder="Comprador" /></SelectTrigger>
-                        <SelectContent><SelectItem value="all">Todos</SelectItem>{availableBuyers.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
-                    </Select>
+                    {/* <div className="flex items-center gap-2 text-sm text-zinc-500"><Filter className="h-4 w-4" /> Filtros:</div> */}
+
+                    <div className="flex flex-col gap-1">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400">Comprador</label>
+                        <Select value={filterBuyer} onValueChange={setFilterBuyer}>
+                            <SelectTrigger className="w-[180px] h-9"><SelectValue placeholder="Todos" /></SelectTrigger>
+                            <SelectContent><SelectItem value="all">Todos</SelectItem>{availableBuyers.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
+                        </Select>
+                    </div>
 
                     {/* Only show Supplier filter for Payable? Or rename? */}
                     {activeTab === 'payable' && (
-                        <Select value={filterSupplier} onValueChange={setFilterSupplier}>
-                            <SelectTrigger className="w-[180px]"><SelectValue placeholder="Fornecedor" /></SelectTrigger>
-                            <SelectContent><SelectItem value="all">Todos</SelectItem>{availableSuppliers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                        </Select>
+                        <div className="flex flex-col gap-1">
+                            <label className="text-[10px] uppercase font-bold text-zinc-400">Fornecedor</label>
+                            <Select value={filterSupplier} onValueChange={setFilterSupplier}>
+                                <SelectTrigger className="w-[180px] h-9"><SelectValue placeholder="Todos" /></SelectTrigger>
+                                <SelectContent><SelectItem value="all">Todos</SelectItem>{availableSuppliers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </div>
                     )}
 
-                    <Select value={filterStatus} onValueChange={setFilterStatus}>
-                        <SelectTrigger className="w-[180px]"><SelectValue placeholder="Status" /></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Todos Status</SelectItem>
-                            <SelectItem value="pending">Pendentes</SelectItem>
-                            <SelectItem value="paid">Baixados / Realizados</SelectItem>
-                        </SelectContent>
-                    </Select>
+                    <div className="flex flex-col gap-1">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400">Status</label>
+                        <Select value={filterStatus} onValueChange={setFilterStatus}>
+                            <SelectTrigger className="w-[180px] h-9"><SelectValue placeholder="Status" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos Status</SelectItem>
+                                <SelectItem value="pending">Pendentes</SelectItem>
+                                <SelectItem value="paid">Baixados / Realizados</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
 
-                    <div className="flex items-center gap-2 border-l pl-4 ml-2">
-                        <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-min" />
-                        <span className="text-zinc-300">-</span>
-                        <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-min" />
+                    <div className="flex flex-col gap-1 border-l pl-4 ml-2">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400">Período</label>
+                        <div className="flex items-center gap-2">
+                            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-min h-9" />
+                            <span className="text-zinc-300">-</span>
+                            <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-min h-9" />
+                        </div>
                     </div>
 
                     {/* Quick Stats for Selection */}
                     {selectedBatchesList.length > 0 && (
                         <div className="ml-auto flex items-center gap-4 animate-in fade-in slide-in-from-right-5">
-                            <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded text-sm font-medium border border-blue-100">
-                                Seleção: {selectionTotalPending > 0.01 ? `Pendente R$ ${selectionTotalPending.toFixed(2)}` : `Pago R$ ${selectionTotalPaid.toFixed(2)}`}
+                            <div className="flex flex-col items-end">
+                                <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded text-sm font-medium border border-blue-100 shadow-sm">
+                                    Total: {selectionTotalPending > 0.01 ? `Pendente R$ ${selectionTotalPending.toFixed(2)}` : `Pago R$ ${selectionTotalPaid.toFixed(2)}`}
+                                </div>
+                                {/* Breakdown by Buyer */}
+                                <div className="text-[10px] text-zinc-500 mt-1 flex gap-2">
+                                    {Object.entries(selectedBatchesList.reduce((acc, batch) => {
+                                        batch.movements.forEach(m => {
+                                            const matchesTab = activeTab === 'payable' ? m.type === 'expense' : m.type === 'income';
+                                            const matchesStatus = selectionTotalPending > 0.01 ? m.status === 'pending' : m.status === 'paid';
+
+                                            if (matchesTab && matchesStatus) {
+                                                const buyer = m.detail_buyer || 'Outros';
+                                                acc[buyer] = (acc[buyer] || 0) + Math.abs(m.amount);
+                                            }
+                                        });
+                                        return acc;
+                                    }, {} as Record<string, number>)).map(([buyer, total]) => (
+                                        <span key={buyer} title={buyer} className="bg-zinc-100 px-1.5 rounded border border-zinc-200">
+                                            {buyer.split(' ')[0]}: R$ {total.toFixed(2)}
+                                        </span>
+                                    ))}
+                                </div>
                             </div>
 
                             {selectionTotalPending > 0.01 && (
-                                <Button size="sm" onClick={() => processBatchAction('pay')} className={activeTab === 'payable' ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"}>
+                                <Button size="sm" onClick={() => processBatchAction('pay')} className={activeTab === 'payable' ? "bg-red-600 hover:bg-red-700 h-9" : "bg-green-600 hover:bg-green-700 h-9"}>
                                     <CheckCircle className="mr-2 h-3 w-3" /> {activeTab === 'payable' ? 'Baixar Seleção' : 'Receber Seleção'}
                                 </Button>
                             )}
 
                             {selectionTotalPending <= 0.01 && selectionTotalPaid > 0 && (
-                                <Button size="sm" variant="outline" onClick={() => processBatchAction('reverse')} className="text-orange-600 border-orange-200 hover:bg-orange-50">
+                                <Button size="sm" variant="outline" onClick={() => processBatchAction('reverse')} className="text-orange-600 border-orange-200 hover:bg-orange-50 h-9">
                                     <RotateCcw className="mr-2 h-3 w-3" /> Estornar Seleção
                                 </Button>
                             )}
