@@ -1,9 +1,9 @@
-
 import { useEffect, useState, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { supabase } from '@/supabaseClient';
 import { Toaster } from '@/components/ui/toaster';
 import Login from '@/pages/Login';
+import Register from '@/pages/Register';
 import Dashboard from '@/pages/Dashboard';
 import Profile from '@/pages/Profile';
 import Inventory from '@/pages/Inventory';
@@ -15,8 +15,11 @@ import { Sidebar } from '@/components/Sidebar';
 import { UserProfileHeader } from '@/components/UserProfileHeader';
 import { Session } from '@supabase/supabase-js';
 import { Loader2 } from 'lucide-react';
+import AdminLayout from '@/layouts/AdminLayout';
+import AdminCompanies from '@/pages/admin/Companies';
+import AdminLogin from '@/pages/admin/AdminLogin';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
-const AdminUsers = lazy(() => import('@/pages/AdminUsers'));
 const AdminRegisters = lazy(() => import('@/pages/AdminRegisters'));
 const Clients = lazy(() => import('@/pages/Clients'));
 const Sales = lazy(() => import('@/pages/Sales'));
@@ -52,6 +55,17 @@ function App() {
         <>
             <Routes>
                 <Route path="/login" element={!session ? <Login /> : <Navigate to="/dashboard" />} />
+                <Route path="/register" element={!session ? <Register /> : <Navigate to="/dashboard" />} />
+
+                {/* SaaS Admin Portal */}
+                <Route path="/admin" element={
+                    <ErrorBoundary>
+                        <AdminLayout />
+                    </ErrorBoundary>
+                }>
+                    <Route index element={<AdminCompanies />} />
+                </Route>
+                <Route path="/admin/login" element={!session ? <AdminLogin /> : <Navigate to="/admin" />} />
 
                 <Route element={<ProtectedLayout session={session} />}>
                     <Route path="/dashboard" element={<Dashboard />} />
@@ -67,11 +81,9 @@ function App() {
                     <Route path="/banking" element={<Banking />} />
                     <Route path="/purchases" element={<Purchases />} />
                     <Route path="/production" element={<Production />} />
-                    <Route path="/admin" element={
-                        <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
-                            <AdminUsers />
-                        </Suspense>
-                    } />
+                    {/* Old Admin Routes - Commented out to avoid conflict with new SaaS Admin
+                    <Route path="/admin/users" element={...} />
+                    */}
                     <Route path="/admin/registers" element={
                         <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
                             <AdminRegisters />

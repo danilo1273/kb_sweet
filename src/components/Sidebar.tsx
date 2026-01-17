@@ -29,6 +29,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     const location = useLocation();
     const [roles, setRoles] = useState<string[]>([]);
 
+    const [companyLogo, setCompanyLogo] = useState<string | null>(null);
+
     useEffect(() => {
         getRoles();
     }, []);
@@ -36,7 +38,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     async function getRoles() {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-            const { data } = await supabase.from('profiles').select('role, roles').eq('id', user.id).single();
+            const { data } = await supabase.from('profiles').select('role, roles, company_id').eq('id', user.id).single();
             let userRoles: string[] = [];
             if (data?.roles && Array.isArray(data.roles)) {
                 userRoles = data.roles;
@@ -44,6 +46,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 userRoles = [data.role];
             }
             setRoles(userRoles);
+
+            if (data?.company_id) {
+                const { data: company } = await supabase.from('companies').select('logo_url').eq('id', data.company_id).single();
+                if (company?.logo_url) {
+                    setCompanyLogo(company.logo_url);
+                }
+            }
         }
     }
 
@@ -69,6 +78,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
     const navItems = allNavItems.filter(item => {
         if (item.roles.length === 0) return true;
+        // Allow super_admin to access everything
+        if (roles.includes('super_admin')) return true;
+
         // Se o usuário tiver pelo menos uma role permitida
         return item.roles.some(r => roles.includes(r));
     });
@@ -88,7 +100,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 isOpen ? "translate-x-0" : "-translate-x-full"
             )}>
                 <div className="flex h-24 items-center justify-between border-b border-zinc-800 p-4">
-                    <img src="/logo.png" alt="KB Sweet Logo" className="h-16 object-contain" />
+                    <img src={companyLogo || "/logo-kb.png"} alt="Logo" className="h-16 object-contain" />
                     <Button
                         variant="ghost"
                         size="icon"

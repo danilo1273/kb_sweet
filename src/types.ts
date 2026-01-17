@@ -1,3 +1,22 @@
+export interface Company {
+    id: string;
+    name: string;
+    status: 'active' | 'suspended';
+    plan: 'basic' | 'pro' | 'enterprise';
+    created_at: string;
+    logo_url?: string;
+}
+
+export interface Profile {
+    id: string;
+    full_name: string | null;
+    avatar_url: string | null;
+    email: string;
+    role: string;
+    roles: string[];
+    company_id?: string;
+}
+
 export interface FinancialMovement {
     id: string;
     description: string;

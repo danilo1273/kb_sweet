@@ -52,7 +52,7 @@ export function UserProfileHeader({ onMenuClick }: UserProfileHeaderProps) {
 
                 {/* Logo - Visible only description says "ao lado do logo acima kb sweet" - Assuming mobile context or brand reinforcement */}
                 <div className="flex items-center gap-2 lg:hidden">
-                    <img src="/logo.png" alt="Logo" className="h-8" />
+                    <img src="/logo-kb.png" alt="Logo" className="h-8" />
                     <span className="font-bold text-zinc-900 border-l pl-2 border-zinc-200">KB Sweet</span>
                 </div>
             </div>
