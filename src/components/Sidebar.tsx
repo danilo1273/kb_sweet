@@ -123,7 +123,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                                 onClick={onClose}
                                 className={cn(
                                     "flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors hover:bg-zinc-800",
-                                    isActive ? "bg-zinc-800 text-primary" : "text-zinc-400"
+                                    isActive ? "bg-purple-600 text-white shadow-md shadow-purple-900/20" : "text-zinc-400 hover:text-white hover:bg-zinc-800"
                                 )}
                             >
                                 <Icon className="h-5 w-5" />
