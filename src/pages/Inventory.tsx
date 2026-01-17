@@ -252,6 +252,7 @@ export default function Inventory() {
                 unit_weight: Number(currentIngredient.unit_weight || 1), // Fator de Conversão
                 unit_type: currentIngredient.unit_type, // Nome da Unidade Secundária
                 type: currentIngredient.type,
+                cost: currentIngredient.cost,
                 // Legacy fields cleanup (optional, or keep generic)
                 purchase_unit: null,
                 purchase_unit_factor: 1
@@ -507,9 +508,11 @@ export default function Inventory() {
                     <Button variant="outline" onClick={() => navigate('/stock-history')}>
                         <History className="mr-2 h-4 w-4" /> Histórico Global
                     </Button>
-                    <Button variant="outline" onClick={() => setIsAuditOpen(true)} className="text-blue-700 bg-blue-50 border-blue-200">
-                        <ClipboardCheck className="mr-2 h-4 w-4" /> Realizar Inventário
-                    </Button>
+                    {isAdmin && (
+                        <Button variant="outline" onClick={() => setIsAuditOpen(true)} className="text-blue-700 bg-blue-50 border-blue-200">
+                            <ClipboardCheck className="mr-2 h-4 w-4" /> Realizar Inventário
+                        </Button>
+                    )}
                 </div>
             </div>
 
@@ -900,6 +903,8 @@ export default function Inventory() {
                                     onChange={(e) => setCurrentIngredient({ ...currentIngredient, min_stock: Number(e.target.value) })}
                                 />
                             </div>
+
+
                         </div>
                     )}
 

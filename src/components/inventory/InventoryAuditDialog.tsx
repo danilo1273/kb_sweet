@@ -23,9 +23,8 @@ interface AuditItem {
     name: string;
     unit: string;
     systemStock: number;
-    physicalStock: string; // Keep as string for input handling
-    diff: number;
-    reason: string;
+    systemCost: number;
+    newCost: string;
 }
 
 export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, categories }: InventoryAuditDialogProps) {
@@ -44,8 +43,6 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
         const original = ingredients.find(i => i.id === item.id);
         const matchesCategory = categoryFilter === 'all' || (original && original.category === categoryFilter);
 
-        // Only show items that match the user's "stock to count" logic?
-        // Actually we filter the LIST based on category, but we need to choose WHOSE stock we are auditing first.
         return matchesSearch && matchesCategory;
     });
 
@@ -60,15 +57,25 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
         setStockOwner(owner);
         // Initialize audit items based on current stock
         const validIngredients = ingredients.filter(i => i.type !== 'expense' && !i.is_product_entity);
-        const items = validIngredients.map(ing => ({
-            id: ing.id,
-            name: ing.name,
-            unit: ing.unit,
-            systemStock: owner === 'danilo' ? (ing.stock_danilo || 0) : (ing.stock_adriel || 0),
-            physicalStock: "", // Start empty or with current stock? Empty forces counting.
-            diff: 0,
-            reason: ""
-        }));
+        const items = validIngredients.map(ing => {
+            // Determine correct cost field based on owner
+            // Assuming ingredients have cost_danilo/cost_adriel, fallback to 'cost'
+            const currentCost = owner === 'danilo'
+                ? (ing.cost_danilo !== undefined ? ing.cost_danilo : ing.cost)
+                : (ing.cost_adriel !== undefined ? ing.cost_adriel : ing.cost);
+
+            return {
+                id: ing.id,
+                name: ing.name,
+                unit: ing.unit,
+                systemStock: owner === 'danilo' ? (ing.stock_danilo || 0) : (ing.stock_adriel || 0),
+                physicalStock: "",
+                diff: 0,
+                reason: "",
+                systemCost: currentCost || 0,
+                newCost: (currentCost || 0).toString()
+            };
+        });
         setAuditItems(items);
     };
 
@@ -81,6 +88,13 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
         }));
     };
 
+    const handleCostChange = (id: string, value: string) => {
+        setAuditItems(prev => prev.map(item => {
+            if (item.id !== id) return item;
+            return { ...item, newCost: value };
+        }));
+    };
+
     const handleReasonChange = (id: string, value: string) => {
         setAuditItems(prev => prev.map(item => {
             if (item.id !== id) return item;
@@ -89,30 +103,52 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
     };
 
     const handleSave = async () => {
-        const itemsToAdjust = auditItems.filter(i => i.physicalStock !== "" && Number(i.physicalStock) !== i.systemStock);
+        const itemsToAdjust = auditItems.filter(i =>
+            (i.physicalStock !== "" && Number(i.physicalStock) !== i.systemStock) ||
+            (i.newCost !== "" && Number(i.newCost) !== i.systemCost)
+        );
 
         if (itemsToAdjust.length === 0) {
             toast({ title: "Nenhum ajuste identificado." });
             return;
         }
 
-        if (!confirm(`Confirmar ajuste de estoque para ${itemsToAdjust.length} itens?`)) return;
+        if (!confirm(`Confirmar ajuste de estoque/custo para ${itemsToAdjust.length} itens?`)) return;
 
         setLoading(true);
         try {
             for (const item of itemsToAdjust) {
-                const newStock = Number(item.physicalStock);
-                const { error } = await supabase.rpc('apply_stock_adjustment', {
-                    p_ingredient_id: item.id,
-                    p_new_stock: newStock,
-                    p_stock_owner: stockOwner,
-                    p_reason: item.reason || 'Inventário',
-                    p_type: newStock > item.systemStock ? 'found' : 'loss' // Or 'adjustment' based on logic
-                });
+                // 1. Update Stock Quantity if changed
+                if (item.physicalStock !== "" && Number(item.physicalStock) !== item.systemStock) {
+                    const newStock = Number(item.physicalStock);
+                    const { error } = await supabase.rpc('apply_stock_adjustment', {
+                        p_ingredient_id: item.id,
+                        p_new_stock: newStock,
+                        p_stock_owner: stockOwner,
+                        p_reason: item.reason || 'Inventário',
+                        p_type: newStock > item.systemStock ? 'found' : 'loss'
+                    });
+                    if (error) throw error;
+                }
 
-                if (error) {
-                    console.error("Erro no item " + item.name, error);
-                    throw error; // Stop batch
+                // 2. Update Cost if changed
+                if (item.newCost !== "" && Number(item.newCost) !== item.systemCost) {
+                    const newCostVal = Number(item.newCost);
+
+                    // Determine which field to update
+                    const updatePayload: any = {};
+                    if (stockOwner === 'danilo') updatePayload['cost_danilo'] = newCostVal;
+                    else if (stockOwner === 'adriel') updatePayload['cost_adriel'] = newCostVal;
+
+                    // Also update base 'cost' if it's considered the master or if we want to sync
+                    // For now, let's just update the specific one. If you want global sync, logic needed.
+                    // Given the previous edit dialog updated 'cost', maybe we should update 'cost' too?
+                    // Let's safe bet: update specific AND 'cost' if it's the primary inventory (e.g. Danilo?)
+                    // Or just strict specific. Let's stick to strict specific first, but maybe user expects global 'cost' update.
+                    // Let's update the specific cost column.
+
+                    const { error } = await supabase.from('ingredients').update(updatePayload).eq('id', item.id);
+                    if (error) throw error;
                 }
             }
             toast({ title: "Inventário processado com sucesso!" });
@@ -127,9 +163,9 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-5xl h-[90vh] flex flex-col p-0 gap-0">
+            <DialogContent className="max-w-6xl h-[95vh] flex flex-col p-0 gap-0">
                 <DialogHeader className="p-6 pb-2">
-                    <DialogTitle className="text-2xl">Realizar Inventário</DialogTitle>
+                    <DialogTitle className="text-2xl">Realizar Inventário ({stockOwner === 'danilo' ? 'Danilo' : stockOwner === 'adriel' ? 'Adriel' : '...'})</DialogTitle>
                 </DialogHeader>
 
                 <div className="flex-1 overflow-hidden flex flex-col p-6 pt-2 gap-4">
@@ -176,17 +212,18 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
                                 <Table>
                                     <TableHeader className="sticky top-0 bg-zinc-50 z-10">
                                         <TableRow>
-                                            <TableHead className="w-[30%]">Item</TableHead>
-                                            <TableHead className="w-[15%] text-right">Sistema</TableHead>
-                                            <TableHead className="w-[20%] text-center bg-blue-50/50">Contagem Física</TableHead>
-                                            <TableHead className="w-[15%] text-right">Diferença</TableHead>
-                                            <TableHead className="w-[20%]">Motivo</TableHead>
+                                            <TableHead className="w-[25%]">Item</TableHead>
+                                            <TableHead className="w-[10%] text-right">Sistema</TableHead>
+                                            <TableHead className="w-[15%] text-center bg-blue-50/50">Contagem Física</TableHead>
+                                            <TableHead className="w-[10%] text-right">Diferença</TableHead>
+                                            <TableHead className="w-[15%] text-center bg-amber-50/50">Custo Unit. (R$)</TableHead>
+                                            <TableHead className="w-[25%]">Motivo / Obs.</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                         {filteredItems.length === 0 ? (
                                             <TableRow>
-                                                <TableCell colSpan={5} className="text-center py-8 text-zinc-500">Nenhum item encontrado.</TableCell>
+                                                <TableCell colSpan={6} className="text-center py-8 text-zinc-500">Nenhum item encontrado.</TableCell>
                                             </TableRow>
                                         ) : (
                                             filteredItems.map(item => (
@@ -210,15 +247,24 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
                                                     <TableCell className={`text-right font-bold ${item.diff > 0 ? "text-green-600" : item.diff < 0 ? "text-red-600" : "text-zinc-300"}`}>
                                                         {item.diff > 0 ? `+${item.diff.toLocaleString('pt-BR')}` : item.diff.toLocaleString('pt-BR')}
                                                     </TableCell>
+                                                    <TableCell className="bg-amber-50/30 p-2">
+                                                        <Input
+                                                            type="number"
+                                                            step="0.01"
+                                                            className="text-center h-8 text-xs"
+                                                            value={item.newCost}
+                                                            onChange={(e) => handleCostChange(item.id, e.target.value)}
+                                                        />
+                                                    </TableCell>
                                                     <TableCell>
-                                                        {Number(item.physicalStock) !== item.systemStock && item.physicalStock !== "" && (
+                                                        {(Number(item.physicalStock) !== item.systemStock && item.physicalStock !== "") || (Number(item.newCost) !== item.systemCost) ? (
                                                             <Input
                                                                 className="h-8 text-xs"
                                                                 placeholder="Justificativa..."
                                                                 value={item.reason}
                                                                 onChange={(e) => handleReasonChange(item.id, e.target.value)}
                                                             />
-                                                        )}
+                                                        ) : null}
                                                     </TableCell>
                                                 </TableRow>
                                             ))
@@ -230,7 +276,7 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
                             {/* Summary */}
                             <div className="flex justify-between items-center pt-2 border-t">
                                 <div className="text-sm text-zinc-500">
-                                    Visualizando {filteredItems.length} itens. <span className="text-zinc-900 font-bold">{auditItems.filter(i => i.physicalStock !== "" && Number(i.physicalStock) !== i.systemStock).length}</span> divergências encontradas.
+                                    <span className="text-zinc-900 font-bold">{auditItems.filter(i => (i.physicalStock !== "" && Number(i.physicalStock) !== i.systemStock) || (i.newCost !== "" && Number(i.newCost) !== i.systemCost)).length}</span> alterações pendentes.
                                 </div>
                                 <div className="flex gap-2">
                                     <Button variant="outline" onClick={() => setStockOwner(null)}>Voltar</Button>

@@ -40,6 +40,8 @@ interface Ingredient {
     unit_weight: number;
     unit_type: 'weight' | 'volume' | 'unit';
     cost: number;
+    cost_danilo?: number;
+    cost_adriel?: number;
 }
 
 interface BomItem {
@@ -122,6 +124,127 @@ export default function Recipes() {
         }
     }
 
+    // --- GLOBAL RECALCULATION LOGIC ---
+    useEffect(() => {
+        // Run once on mount to refresh costs
+        recalculateGlobalCosts();
+    }, []);
+
+    async function recalculateGlobalCosts() {
+        try {
+            console.log("Starting global cost recalculation...");
+
+            // 1. Fetch ALL products and ingredients
+            const { data: allProducts, error: pErr } = await supabase.from('products').select('*');
+            const { data: allIngredients, error: iErr } = await supabase.from('ingredients').select('*');
+
+            if (pErr || iErr) {
+                console.error("Error fetching data for recalc", pErr, iErr);
+                return;
+            }
+
+            // 2. Fetch ALL BOM items
+            const { data: allBoms, error: bErr } = await supabase.from('product_bom').select('*');
+            if (bErr) { console.error(bErr); return; }
+
+            // Map for quick access
+            const ingMap = new Map(allIngredients?.map((i: any) => [i.id, i]));
+            const productMap = new Map(allProducts?.map((p: any) => [p.id, p]));
+
+            // 3. Build Dependency Graph
+            // (Naive approach: Just separate Intermediates and Finished.
+            //  Ideally topological sort, but for now: Bases first, then Finished.)
+            //  Assuming max 1 level of nesting for simplicity initially, or iterate passes.
+
+            // Let's do 2 passes. Pass 1: Intermediates. Pass 2: Finished.
+            // If deeper nesting is used, a topological sort is needed later.
+
+            const intermediates = allProducts?.filter((p: any) => p.type === 'intermediate') || [];
+            const finished = allProducts?.filter((p: any) => p.type !== 'intermediate') || [];
+
+            const processList = [...intermediates, ...finished];
+            const updates: any[] = [];
+
+            // We need to update productMap as we go, so subsequent items use updated costs.
+
+            for (const prod of processList) {
+                const bom = allBoms?.filter((b: any) => b.product_id === prod.id) || [];
+                if (bom.length === 0) continue; // No BOM, no cost calc (unless manual) - skip
+
+                let totalCost = 0;
+                for (const item of bom) {
+                    if (item.ingredient_id) {
+                        const ing: any = ingMap.get(item.ingredient_id);
+                        if (ing) {
+                            const unitBaseCost = ing.cost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0);
+                            if (ing.unit_weight && unitBaseCost) {
+                                let qty = item.quantity;
+                                if (['kg', 'l'].includes(item.unit)) qty *= 1000;
+                                totalCost += (unitBaseCost / ing.unit_weight) * qty;
+                            } else if (unitBaseCost) {
+                                // Fallback (unsafe but better than 0 if units match?)
+                                // Let's stick to safe: if no weight, 0 unless we are sure.
+                                // Actually let's replicate logic:
+                                // If item.unit == 'un' and ing.unit == 'un', multiply cost.
+                                if (item.unit === 'un' && ing.unit === 'un') {
+                                    totalCost += unitBaseCost * item.quantity;
+                                }
+                            }
+                        }
+                    } else if (item.child_product_id) {
+                        const child = productMap.get(item.child_product_id);
+                        if (child) {
+                            // Use Unit Cost from child
+                            const childCost = Number(child.cost || 0);
+                            totalCost += childCost * item.quantity;
+                        }
+                    }
+                }
+
+                // Calculate Unit Cost (Price per gram/unit)
+                const batchSize = Number(prod.batch_size) || 1;
+                const unitCost = totalCost / batchSize;
+
+                // Diff check (avoid useless updates)
+                const currentUnitCost = Number(prod.cost || 0);
+                const diff = Math.abs(unitCost - currentUnitCost);
+
+                // If diff > 0.0001 (small float tolerance), update
+                if (diff > 0.0001) {
+                    updates.push({ id: prod.id, cost: unitCost });
+                    // Update map immediately for dependents
+                    productMap.set(prod.id, { ...prod, cost: unitCost });
+                }
+            }
+
+            if (updates.length > 0) {
+                console.log(`Updating ${updates.length} product costs...`);
+                for (const up of updates) {
+                    await supabase.from('products').update({ cost: up.cost }).eq('id', up.id);
+                }
+
+                // If current product is open, refresh it
+                if (currentProduct.id) {
+                    const openUpdate = updates.find(u => u.id === currentProduct.id);
+                    if (openUpdate) {
+                        setCurrentProduct(prev => ({ ...prev, cost: openUpdate.cost }));
+                        // We also need to trigger re-render of UI display?
+                        // calculatedCost state handles dynamic BOM.
+                        // currentProduct.cost handles "Last Saved".
+                    }
+                }
+
+                // Reload list to reflect changes
+                fetchProducts();
+            } else {
+                console.log("No cost updates needed.");
+            }
+
+        } catch (e) {
+            console.error("Auto cost recalc failed", e);
+        }
+    }
+
     async function handleDeleteCategory(id: number) {
         if (!confirm("Excluir esta categoria?")) return;
         const { error } = await supabase.from('custom_categories').delete().eq('id', id);
@@ -176,7 +299,11 @@ export default function Recipes() {
                 name: currentProduct.name,
                 category: currentProduct.category || 'Geral',
                 price: Number(currentProduct.price || 0),
-                cost: Number(currentProduct.cost || 0),
+                // Use calculated cost if available (dynamic), otherwise fallback to manual entry/saved
+                // Correctly calculate Unit Cost = Total / BatchSize
+                cost: calculatedCost > 0
+                    ? (calculatedCost / (Number(currentProduct.batch_size) || 1))
+                    : Number(currentProduct.cost || 0),
                 image_url: currentProduct.image_url,
                 type: currentProduct.type || 'finished',
                 batch_size: Number(currentProduct.batch_size || 1),
@@ -394,17 +521,39 @@ export default function Recipes() {
         }
     }
 
-    // Effect para recalcular custo sempre que a lista de BOM mudar e tivermos um produto aberto
-    // REMOVED: Client-side cost calculation replaced by DB Triggers (secure)
-    /*
-    useEffect(() => {
-        if (currentProduct.id && bomItems.length > 0) {
-            calculateAndUpdateCost();
-        }
-    }, [bomItems]);
-    */
+    // Dynamic Cost Calculation
+    const [calculatedCost, setCalculatedCost] = useState(0);
 
-    // REMOVED: Function calculateAndUpdateCost replaced by DB triggers (20260113_cost_automation.sql)
+    useEffect(() => {
+        let total = 0;
+        bomItems.forEach(item => {
+            let itemCost = 0;
+            if (item.ingredients) {
+                const ing = item.ingredients;
+                // Use global cost, or fallback to the highest cost from stock sources (conservative approach)
+                const unitBaseCost = ing.cost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0);
+
+                if (ing.unit_weight && unitBaseCost) {
+                    let qty = item.quantity;
+                    if (['kg', 'l'].includes(item.unit)) qty *= 1000;
+
+                    itemCost = (unitBaseCost / ing.unit_weight) * qty;
+                } else if (unitBaseCost) {
+                    itemCost = 0; // If no unit_weight but has cost, we can't safely calculate unless units equal?
+                    // existing logic fallback: 
+                    // itemCost = unitBaseCost * item.quantity ?? No, unsafe without conversion check.
+                }
+            } else if (item.child_product) {
+                // Child Product Cost
+                // Use the child product's cost directly
+                itemCost = (item.child_product.cost || 0) * item.quantity;
+            }
+            total += itemCost;
+        });
+        setCalculatedCost(total);
+        // Also update currentProduct to ensure save picks it up?
+        // Better to just use calculatedCost in save/render.
+    }, [bomItems]);
 
     const openNew = () => {
         setCurrentProduct({ type: 'finished' });
@@ -673,11 +822,22 @@ export default function Recipes() {
                                 </div>
 
                                 <div className="p-4 bg-zinc-50 rounded border text-sm text-zinc-600 space-y-2">
-                                    <div className="flex justify-between">
-                                        <span>Custo Atual (Cadastrado):</span>
-                                        <span className="font-bold">R$ {currentProduct.cost?.toFixed(2) || '0.00'}</span>
+                                    <div className="flex justify-between items-center text-zinc-500">
+                                        <span>Custo Total da Receita:</span>
+                                        <span>R$ {calculatedCost.toFixed(2)}</span>
                                     </div>
-                                    <p className="text-xs text-muted-foreground">O custo é atualizado automaticamente ao salvar a ficha técnica ou produzir.</p>
+                                    <div className="flex justify-between items-center font-bold text-blue-600 border-t pt-2 mt-2">
+                                        <span>Custo Unitário (Dinâmico):</span>
+                                        <span>R$ {(calculatedCost / (Number(currentProduct.batch_size) || 1)).toFixed(4)} / {currentProduct.unit || 'un'}</span>
+                                    </div>
+                                    <div className="flex justify-between text-xs text-zinc-400">
+                                        <span>Último Custo Salvo:</span>
+                                        <span>R$ {currentProduct.cost?.toFixed(4) || '0.00'} / {currentProduct.unit || 'un'}</span>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground mt-2">
+                                        O <strong>Custo Unitário</strong> é calculado dividindo o Custo Total pelo Rendimento ({currentProduct.batch_size || 1} {currentProduct.unit}).
+                                        Ao salvar, este valor unitário será atualizado no produto.
+                                    </p>
                                 </div>
                             </div>
                         </TabsContent>
@@ -832,11 +992,15 @@ export default function Recipes() {
                                                                     if (item.ingredients) {
                                                                         name = item.ingredients.name;
                                                                         typeLabel = <Box className="h-3 w-3 text-blue-500" />;
-                                                                        if (item.ingredients.unit_weight && item.ingredients.cost) {
+
+                                                                        const ing = item.ingredients;
+                                                                        const unitBaseCost = ing.cost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0);
+
+                                                                        if (ing.unit_weight && unitBaseCost) {
                                                                             // Simple Calc
                                                                             let qty = item.quantity;
                                                                             if (['kg', 'l'].includes(item.unit)) qty *= 1000;
-                                                                            cost = (item.ingredients.cost / item.ingredients.unit_weight) * qty;
+                                                                            cost = (unitBaseCost / ing.unit_weight) * qty;
                                                                         }
                                                                     } else if (item.child_product) {
                                                                         name = item.child_product.name;
@@ -889,10 +1053,14 @@ export default function Recipes() {
                                                                 name = item.ingredients.name;
                                                                 Icon = Box;
                                                                 iconColor = "text-blue-500";
-                                                                if (item.ingredients.unit_weight && item.ingredients.cost) {
+
+                                                                const ing = item.ingredients;
+                                                                const unitBaseCost = ing.cost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0);
+
+                                                                if (ing.unit_weight && unitBaseCost) {
                                                                     let qty = item.quantity;
                                                                     if (['kg', 'l'].includes(item.unit)) qty *= 1000;
-                                                                    cost = (item.ingredients.cost / item.ingredients.unit_weight) * qty;
+                                                                    cost = (unitBaseCost / ing.unit_weight) * qty;
                                                                 }
                                                             } else if (item.child_product) {
                                                                 name = item.child_product.name;

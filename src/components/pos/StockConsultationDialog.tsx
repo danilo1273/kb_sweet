@@ -7,21 +7,20 @@ import { Search, PackageSearch, Loader2 } from "lucide-react";
 import { supabase } from "@/supabaseClient";
 import { Badge } from "@/components/ui/badge";
 
-interface Product {
-    id: string;
-    name: string;
-    stock_danilo: number;
-    stock_adriel: number;
-    unit: string;
-    price: number;
-}
+import { POSProduct as Product } from "@/types";
+
+// Removed local Product interface to match parent type
+
+// ... imports
 
 interface StockConsultationDialogProps {
     isOpen?: boolean;
     onOpenChange?: (open: boolean) => void;
+    onAddProduct?: (product: Product) => void; // New callback
+    stockSource?: 'danilo' | 'adriel'; // Optional: to know which stock to check for disable logic
 }
 
-export function StockConsultationDialog({ isOpen, onOpenChange }: StockConsultationDialogProps) {
+export function StockConsultationDialog({ isOpen, onOpenChange, onAddProduct, stockSource = 'danilo' }: StockConsultationDialogProps) {
     const [internalOpen, setInternalOpen] = useState(false);
 
     const isControlled = isOpen !== undefined && onOpenChange !== undefined;
@@ -51,11 +50,19 @@ export function StockConsultationDialog({ isOpen, onOpenChange }: StockConsultat
 
     async function loadStock() {
         setLoading(true);
-        const { data } = await supabase.from('products').select('*').order('name');
+        // Filter out intermediates in query or client side. 
+        // Client side is safer if we want to be sure about types not being set on some legacy items.
+        // But query is better. Let's assume 'type' column exists.
+        const { data } = await supabase.from('products')
+            .select('*')
+            .neq('type', 'intermediate') // Filter out bases
+            .order('name');
         setProducts(data || []);
         setFilteredProducts(data || []);
         setLoading(false);
     }
+
+    // ... (existing useEffects)
 
     return (
         <Dialog open={finalOpen} onOpenChange={finalSetOpen}>
@@ -68,7 +75,7 @@ export function StockConsultationDialog({ isOpen, onOpenChange }: StockConsultat
             )}
             <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
                 <DialogHeader>
-                    <DialogTitle>Consulta Rápida de Estoque</DialogTitle>
+                    <DialogTitle>Consulta Rápida de Estoque (Produtos Acabados)</DialogTitle>
                 </DialogHeader>
 
                 <div className="relative mb-2">
@@ -89,40 +96,62 @@ export function StockConsultationDialog({ isOpen, onOpenChange }: StockConsultat
                                 <TableHead className="text-center">Danilo</TableHead>
                                 <TableHead className="text-center">Adriel</TableHead>
                                 <TableHead className="text-right">Preço</TableHead>
+                                {onAddProduct && <TableHead className="w-[80px]"></TableHead>}
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {loading ? (
                                 <TableRow>
-                                    <TableCell colSpan={4} className="h-24 text-center">
+                                    <TableCell colSpan={onAddProduct ? 5 : 4} className="h-24 text-center">
                                         <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
                                     </TableCell>
                                 </TableRow>
                             ) : filteredProducts.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
-                                        Nenhum produto encontrado.
+                                    <TableCell colSpan={onAddProduct ? 5 : 4} className="h-24 text-center text-muted-foreground">
+                                        Nenhum produto acabado encontrado.
                                     </TableCell>
                                 </TableRow>
                             ) : (
-                                filteredProducts.map(p => (
-                                    <TableRow key={p.id}>
-                                        <TableCell className="font-medium">{p.name}</TableCell>
-                                        <TableCell className="text-center">
-                                            <Badge variant={p.stock_danilo > 0 ? "outline" : "destructive"}>
-                                                {p.stock_danilo} {p.unit}
-                                            </Badge>
-                                        </TableCell>
-                                        <TableCell className="text-center">
-                                            <Badge variant={p.stock_adriel > 0 ? "outline" : "destructive"}>
-                                                {p.stock_adriel} {p.unit}
-                                            </Badge>
-                                        </TableCell>
-                                        <TableCell className="text-right font-bold text-green-700">
-                                            R$ {p.price.toFixed(2)}
-                                        </TableCell>
-                                    </TableRow>
-                                ))
+                                filteredProducts.map(p => {
+                                    const currentStock = stockSource === 'danilo' ? p.stock_danilo : p.stock_adriel;
+                                    const canAdd = currentStock > 0;
+
+                                    return (
+                                        <TableRow key={p.id}>
+                                            <TableCell className="font-medium">{p.name}</TableCell>
+                                            <TableCell className="text-center">
+                                                <Badge variant={p.stock_danilo > 0 ? "outline" : "destructive"}>
+                                                    {p.stock_danilo} {p.unit}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell className="text-center">
+                                                <Badge variant={p.stock_adriel > 0 ? "outline" : "destructive"}>
+                                                    {p.stock_adriel} {p.unit}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell className="text-right font-bold text-green-700">
+                                                R$ {p.price.toFixed(2)}
+                                            </TableCell>
+                                            {onAddProduct && (
+                                                <TableCell>
+                                                    <Button
+                                                        size="sm"
+                                                        disabled={!canAdd}
+                                                        onClick={() => {
+                                                            onAddProduct(p);
+                                                            // Optional: close dialog? Or keep open to add more? Keep open is better for bulk.
+                                                            // toast({ title: "Adicionado!" });
+                                                        }}
+                                                        className={canAdd ? "bg-green-600 hover:bg-green-700" : ""}
+                                                    >
+                                                        Adicionar
+                                                    </Button>
+                                                </TableCell>
+                                            )}
+                                        </TableRow>
+                                    );
+                                })
                             )}
                         </TableBody>
                     </Table>

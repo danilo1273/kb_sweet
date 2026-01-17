@@ -10,7 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Loader2, Box, Layers, CheckCircle2, Factory, History, PlayCircle, Trash2, Edit } from "lucide-react";
+import { Plus, Loader2, Box, Layers, CheckCircle2, Factory, History, PlayCircle, Trash2, Edit, ClipboardList } from "lucide-react";
+import { ProductionPlanningDialog } from "@/components/production/ProductionPlanningDialog";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +25,7 @@ interface Product {
     type: 'finished' | 'intermediate';
     batch_size?: number;
     unit?: string;
+    image_url?: string;
 }
 
 interface Ingredient {
@@ -33,6 +35,8 @@ interface Ingredient {
     stock_danilo: number;
     stock_adriel: number;
     cost: number;
+    cost_danilo?: number;
+    cost_adriel?: number;
     unit_weight: number;
     unit_type: string;
 }
@@ -48,6 +52,7 @@ interface ProductionOrder {
     products?: Product;
     cost_at_production?: number;
     profiles?: { email: string; full_name: string };
+    stock_source?: 'danilo' | 'adriel';
 }
 
 interface ProductionOrderItem {
@@ -63,9 +68,18 @@ interface ProductionOrderItem {
     unit_cost: number;
 }
 
+interface ProductBOM {
+    id: string;
+    product_id: string;
+    ingredient_id?: string;
+    child_product_id?: string;
+    quantity: number;
+    unit: string;
+}
+
 export default function Production() {
     const { toast } = useToast();
-    const [, setLoading] = useState(true);
+    const [loading, setLoading] = useState(true);
     const [orders, setOrders] = useState<ProductionOrder[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [ingredients, setIngredients] = useState<Ingredient[]>([]);
@@ -75,6 +89,8 @@ export default function Production() {
     // UI State
     const [activeTab, setActiveTab] = useState<'open' | 'history'>('open');
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+    const [isPlanningDialogOpen, setIsPlanningDialogOpen] = useState(false);
+    const [planningOrder, setPlanningOrder] = useState<ProductionOrder | null>(null);
     const [isExecutionDialogOpen, setIsExecutionDialogOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [targetStock, setTargetStock] = useState<'danilo' | 'adriel'>('danilo');
@@ -110,7 +126,7 @@ export default function Production() {
         // Fetch specific order if not in list or to be safe
         const { data, error } = await supabase
             .from('production_orders')
-            .select('*, products(name, stock_quantity, cost, unit, batch_size), profiles(email, full_name)')
+            .select('*, products(name, stock_quantity, cost, unit, batch_size, image_url), profiles(email, full_name)')
             .eq('id', id)
             .single();
 
@@ -136,8 +152,24 @@ export default function Production() {
 
     // Also refetch orders when tabs change or after ops
     useEffect(() => {
-        fetchOrders();
+        setOrders([]); // Avoid flashing wrong data
+        setLoading(true);
+        fetchOrders().finally(() => setLoading(false));
     }, [activeTab]);
+
+    const [boms, setBoms] = useState<ProductBOM[]>([]); // New state
+
+    // ... 
+
+    async function fetchResources() {
+        const { data: prods } = await supabase.from('products').select('*').order('name');
+        const { data: ings } = await supabase.from('ingredients').select('*').eq('is_active', true).order('name');
+        const { data: bomData } = await supabase.from('product_bom').select('*'); // Fetch BOMs
+
+        if (prods) setProducts(prods);
+        if (ings) setIngredients(ings);
+        if (bomData) setBoms(bomData);
+    }
 
     async function fetchInitialData() {
         setLoading(true);
@@ -145,28 +177,150 @@ export default function Production() {
         setLoading(false);
     }
 
-    async function fetchResources() {
-        const { data: prods } = await supabase.from('products').select('*').order('name');
-        const { data: ings } = await supabase.from('ingredients').select('*').eq('is_active', true).order('name');
-        if (prods) setProducts(prods);
-        if (ings) setIngredients(ings);
-    }
-
     async function fetchOrders() {
         let query = supabase
             .from('production_orders')
-            .select('*, products(name, stock_quantity, cost, unit, batch_size), profiles(email, full_name)')
+            .select('*, products(name, stock_quantity, cost, unit, batch_size, image_url), profiles(email, full_name)')
             .order('created_at', { ascending: false });
 
         if (activeTab === 'open') {
+            query = query.neq('status', 'closed').neq('status', 'canceled');
+            // Or usually 'open'?
+            // Checking previous behavior: often just status=open.
+            // But some might be 'in_progress'? 'open' is the enum in DB usually.
+            // Wait, previous code had status: 'open' | 'closed' | 'canceled'.
             query = query.eq('status', 'open');
         } else {
-            query = query.neq('status', 'open');
+            query = query.in('status', ['closed', 'canceled']);
         }
 
-        const { data } = await query;
-        setOrders(data || []);
+        const { data, error } = await query;
+        if (error) {
+            console.error('Error fetching orders:', error);
+            toast({
+                title: "Erro",
+                description: "Não foi possível carregar as ordens de produção.",
+                variant: 'destructive'
+            });
+        } else {
+            setOrders(data as ProductionOrder[]);
+        }
     }
+
+    // ... existing functions ...
+
+    // Helper to calculate cost dynamically if stored cost is zero
+    function getProductCost(product: Product): number {
+        if (product.cost && product.cost > 0) return product.cost;
+
+        // Try to calculate from BOM
+        const productBoms = boms.filter(b => b.product_id === product.id);
+        if (productBoms.length === 0) return 0;
+
+        let totalRecipeCost = 0;
+
+        productBoms.forEach(bomItem => {
+            let itemCost = 0;
+            let itemWeight = 1;
+
+            // Handle Ingredient
+            if (bomItem.ingredient_id) {
+                const ing = ingredients.find(i => i.id === bomItem.ingredient_id);
+                if (ing) {
+                    // Use fallback cost logic
+                    const baseCost = ing.cost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0);
+                    itemWeight = ing.unit_weight || 1;
+
+                    // Simplified Cost Calc:
+                    // If BOM Quantity is relative (e.g. 395g), we multiply by Price/Weight
+                    // If BOM Quantity is units (e.g. 1 can), we multiply by Price
+
+                    // HEURISTIC:
+                    // If BaseCost is > 1.00 (likely a full unit price)
+                    // AND Unit of Ingredient is 'un' or 'cx' or 'lata'
+                    // AND BOM Quantity is large (e.g. > 10, implies grams)
+                    // THEN divide by weight.
+
+                    // BETTER HEURISTIC (Matches Recipes.tsx / previous logic):
+                    // If ing.unit_weight > 0 (meaning it's defined like 395g)
+                    // And usage is clearly fractional (g/ml vs un)
+
+                    // For Production execution, we often just want a rough estimate if "Cost" is 0.
+                    // Let's reuse the logic from `useMemo`:
+
+                    // Let's reuse the logic from `useMemo`:
+                    // let computedUnitCost = baseCost;
+                    // if (itemWeight > 0) computedUnitCost = baseCost / itemWeight;
+
+                    // However, we don't know the BOM item UNIT here (it's not in the simple interface?)
+                    // DB `product_bom` table has `unit` column? Yes per Step 885.
+                    // We can use bomItem.quantity directly if we assume it aligns with cost.
+
+                    // Safest fallback -> Use simple multiplication if weight is 1, else divide?
+
+                    // Let's assume the safest path:
+                    // Cost = Qty * (BaseCost / UnitWeight)
+                    itemCost = bomItem.quantity * (baseCost / (itemWeight || 1));
+
+                    // Correction: If UnitWeight is 1 or null, we just multiply.
+                }
+            }
+            // Handle Sub-Product
+            else if (bomItem.child_product_id) {
+                const comp = products.find(p => p.id === bomItem.child_product_id);
+                if (comp) {
+                    itemCost = getProductCost(comp) * bomItem.quantity;
+                }
+            }
+
+            totalRecipeCost += itemCost;
+        });
+
+        const batchSize = product.batch_size || 1;
+        return totalRecipeCost / batchSize;
+    }
+
+    const { totalProjectedCost, unitProjectedCost } = useMemo(() => {
+        let total = 0;
+        if (!selectedOrder) return { totalProjectedCost: 0, unitProjectedCost: 0 };
+
+        orderItems.forEach(item => {
+            const qty = (item.quantity_used ?? item.quantity_planned) + (item.waste_quantity || 0);
+
+            // Find cost info
+            let cost = 0;
+            let unitWeight = 1;
+
+            if (item.type === 'ingredient') {
+                const ing = ingredients.find(i => i.id === item.item_id);
+                if (ing) {
+                    unitWeight = ing.unit_weight || 1;
+                    // Fix: Use fallback cost if standard cost is zero
+                    const baseCost = ing.cost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0);
+
+                    if (unitWeight > 0) cost = baseCost / unitWeight;
+                    else cost = baseCost;
+                }
+            } else {
+                const prod = products.find(p => p.id === item.item_id);
+                if (prod) {
+                    // Start with stored cost, fallback to dynamic clac
+                    cost = prod.cost || getProductCost(prod);
+                }
+            }
+
+            total += qty * cost;
+        });
+
+        const safeOutput = actualOutputQuantity > 0 ? actualOutputQuantity : (selectedOrder?.quantity || 1);
+        return {
+            totalProjectedCost: total,
+            unitProjectedCost: total / safeOutput
+        };
+
+    }, [orderItems, actualOutputQuantity, ingredients, products, selectedOrder, boms]); // Added boms dependency
+
+
 
     // --- Actions ---
 
@@ -245,46 +399,15 @@ export default function Production() {
         }
         console.log("Items found:", data);
 
-        setOrderItems(data || []);
+        // Pre-fill quantity_used with planned if used is 0 (first time opening)
+        const itemsWithUsage = (data || []).map((item: any) => ({
+            ...item,
+            quantity_used: item.quantity_used > 0 ? item.quantity_used : item.quantity_planned
+        }));
+
+        setOrderItems(itemsWithUsage);
         setActualOutputQuantity(order.quantity); // Default to planned
     }
-
-    const { totalProjectedCost, unitProjectedCost } = useMemo(() => {
-        let total = 0;
-        if (!selectedOrder) return { totalProjectedCost: 0, unitProjectedCost: 0 };
-
-        orderItems.forEach(item => {
-            const qty = (item.quantity_used ?? item.quantity_planned) + (item.waste_quantity || 0);
-
-            // Find cost info
-            let cost = 0;
-            let unitWeight = 1;
-
-            if (item.type === 'ingredient') {
-                const ing = ingredients.find(i => i.id === item.item_id);
-                if (ing) {
-                    unitWeight = ing.unit_weight || 1;
-                    if (unitWeight > 0) cost = ing.cost / unitWeight;
-                    else cost = ing.cost;
-                }
-            } else {
-                const prod = products.find(p => p.id === item.item_id);
-                if (prod) {
-                    // Products now store Unit Cost directly
-                    cost = prod.cost || 0;
-                }
-            }
-
-            total += qty * cost;
-        });
-
-        const safeOutput = actualOutputQuantity > 0 ? actualOutputQuantity : (selectedOrder?.quantity || 1);
-        return {
-            totalProjectedCost: total,
-            unitProjectedCost: total / safeOutput
-        };
-
-    }, [orderItems, actualOutputQuantity, ingredients, products, selectedOrder]);
 
 
 
@@ -295,26 +418,55 @@ export default function Production() {
         ));
     }
 
+    // --- Confirmation Dialog State ---
+    const [confirmationDialog, setConfirmationDialog] = useState<{
+        open: boolean;
+        title: string;
+        description: string;
+        onConfirm: () => Promise<void> | void;
+        variant?: 'destructive' | 'default';
+        confirmText?: string;
+    }>({ open: false, title: '', description: '', onConfirm: () => { } });
+
+    // --- Actions ---
+
     async function handleAdminAction(action: 'delete' | 'reopen', orderId: string) {
         if (action === 'delete') {
-            if (!confirm("Tem certeza? Esta ação é irreversível e se a ordem estiver FECHADA, o estoque será revertido.")) return;
+            setConfirmationDialog({
+                open: true,
+                title: "Excluir Ordem",
+                description: "Tem certeza? Esta ação é irreversível e se a ordem estiver FECHADA, o estoque será revertido.",
+                variant: 'destructive',
+                confirmText: 'Sim, excluir',
+                onConfirm: () => executeAdminAction('delete', orderId)
+            });
+        } else if (action === 'reopen') {
+            setConfirmationDialog({
+                open: true,
+                title: "Reabrir Ordem",
+                description: "Reabrir esta ordem? O estoque consumido será devolvido e a ordem ficará 'Aberta' para edição.",
+                confirmText: 'Reabrir',
+                onConfirm: () => executeAdminAction('reopen', orderId)
+            });
+        }
+    }
 
-            // Optimistic Update: Immediately remove from UI
+    async function executeAdminAction(action: 'delete' | 'reopen', orderId: string) {
+        setConfirmationDialog(prev => ({ ...prev, open: false })); // Close dialog
+
+        if (action === 'delete') {
+            // Optimistic Update
             setOrders(prev => prev.filter(order => order.id !== orderId));
-
             const { error } = await supabase.rpc('delete_production_order_secure', { p_order_id: orderId, p_user_id: currentUserId });
 
             if (error) {
                 toast({ variant: 'destructive', title: "Erro ao excluir", description: error.message });
-                // If error, re-fetch to restore the item
                 await fetchOrders();
             } else {
                 toast({ title: "Ordem excluída com sucesso" });
-                // Sync with server ensuring data is fresh
                 await fetchOrders();
             }
         } else if (action === 'reopen') {
-            if (!confirm("Reabrir esta ordem? O estoque consumido será devolvido e a ordem ficará 'Aberta' para edição.")) return;
             const { error } = await supabase.rpc('reopen_production_order', { p_order_id: orderId });
             if (error) toast({ variant: 'destructive', title: "Erro ao reabrir", description: error.message });
             else {
@@ -324,9 +476,21 @@ export default function Production() {
         }
     }
 
-    async function handleCloseOrder() {
+    function handleCloseOrder() {
         if (!selectedOrder) return;
-        if (!confirm("Isso irá baixar o estoque dos insumos (com conversões seguras) e dar entrada no produto final. Confirmar?")) return;
+        setConfirmationDialog({
+            open: true,
+            title: "Finalizar Produção",
+            description: "Isso irá baixar o estoque dos insumos (com conversões seguras) e dar entrada no produto final. Confirmar?",
+            confirmText: 'Sim, Finalizar',
+            variant: 'default', // Confirm is Green usually, handled by button variant map later or default
+            onConfirm: () => executeCloseOrder()
+        });
+    }
+
+    async function executeCloseOrder() {
+        setConfirmationDialog(prev => ({ ...prev, open: false }));
+        if (!selectedOrder) return;
 
         setIsSaving(true);
         try {
@@ -370,9 +534,17 @@ export default function Production() {
                     <h2 className="text-3xl font-bold tracking-tight">Ordens de Produção</h2>
                     <p className="text-zinc-500">Planejamento e controle de fábrica.</p>
                 </div>
-                <Button onClick={() => setIsCreateDialogOpen(true)} className="bg-zinc-900 text-white hover:bg-zinc-800">
-                    <Plus className="mr-2 h-4 w-4" /> Nova OP
-                </Button>
+                <div className="flex gap-2">
+                    <Button onClick={() => {
+                        setPlanningOrder(null);
+                        setIsPlanningDialogOpen(true);
+                    }} variant="outline" className="border-blue-200 text-blue-700 hover:bg-blue-50">
+                        <ClipboardList className="mr-2 h-4 w-4" /> Planejamento
+                    </Button>
+                    <Button onClick={() => setIsCreateDialogOpen(true)} className="bg-zinc-900 text-white hover:bg-zinc-800">
+                        <Plus className="mr-2 h-4 w-4" /> Nova OP
+                    </Button>
+                </div>
             </div>
 
             <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="space-y-4">
@@ -401,57 +573,87 @@ export default function Production() {
                                                 <span className="text-zinc-600">Qtd: <strong>{order.quantity}</strong></span>
                                                 <span className="text-zinc-500 text-xs">Por: {order.profiles?.full_name?.split(' ')[0] || '-'}</span>
                                             </div>
-                                            {(order.user_id === currentUserId || isAdmin) && (
-                                                <div className="flex justify-end gap-2 pt-2 border-t mt-1">
-                                                    <Button size="sm" onClick={() => openExecution(order)} className="bg-blue-600 hover:bg-blue-700 h-8 text-xs">
-                                                        <PlayCircle className="mr-2 h-3 w-3" /> Executar
-                                                    </Button>
-                                                    <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
-                                            )}
+                                            <div className="flex justify-end gap-2 pt-2 border-t mt-1">
+                                                <Button size="sm" onClick={() => openExecution(order)} className="bg-blue-600 hover:bg-blue-700 h-8 text-xs">
+                                                    <PlayCircle className="mr-2 h-3 w-3" /> Executar
+                                                </Button>
+                                                <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
                                         </div>
                                     ))
                                 )}
                             </div>
 
-                            <div className="hidden md:block bg-white rounded-lg border shadow-sm">
+                            <div className="hidden md:block bg-white rounded-lg border shadow-sm items-center">
                                 <Table>
                                     <TableHeader>
-                                        <TableRow>
+                                        <TableRow className="bg-zinc-50/50">
+                                            <TableHead className="w-[80px]">Imagem</TableHead>
                                             <TableHead>Data Criação</TableHead>
                                             <TableHead>Produto</TableHead>
                                             <TableHead>Criado Por</TableHead>
-                                            <TableHead>Qtd Planejada</TableHead>
-                                            <TableHead>Status</TableHead>
+                                            <TableHead className="text-center">Qtd</TableHead>
+                                            <TableHead className="text-center">Status</TableHead>
                                             <TableHead className="text-right">Ações</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                         {orders.length === 0 ? (
-                                            <TableRow><TableCell colSpan={6} className="text-center py-8 text-zinc-500">Nenhuma produção em andamento.</TableCell></TableRow>
+                                            <TableRow><TableCell colSpan={7} className="text-center py-12 text-zinc-500">Nenhuma produção em andamento.</TableCell></TableRow>
                                         ) : (
                                             orders.map(order => (
-                                                <TableRow key={order.id}>
-                                                    <TableCell>{new Date(order.created_at).toLocaleString()}</TableCell>
-                                                    <TableCell className="font-medium text-lg">{order.products?.name}</TableCell>
-                                                    <TableCell className="text-zinc-500">
+                                                <TableRow key={order.id} className="hover:bg-zinc-50 transition-colors">
+                                                    <TableCell>
+                                                        <div className="h-12 w-12 rounded-md bg-zinc-100 border overflow-hidden flex items-center justify-center">
+                                                            {order.products?.image_url ? (
+                                                                <img src={order.products.image_url} alt={order.products.name} className="h-full w-full object-cover" />
+                                                            ) : (
+                                                                <Layers className="h-6 w-6 text-zinc-300" />
+                                                            )}
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell className="whitespace-nowrap">
+                                                        <div className="flex flex-col">
+                                                            <span className="font-medium text-zinc-700">{new Date(order.created_at).toLocaleDateString()}</span>
+                                                            <span className="text-xs text-zinc-400">{new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <span className="font-semibold text-zinc-900 block max-w-[300px] truncate" title={order.products?.name}>
+                                                            {order.products?.name}
+                                                        </span>
+                                                        {order.products?.unit && <span className="text-xs text-zinc-500 uppercase">{order.products.unit}</span>}
+                                                    </TableCell>
+                                                    <TableCell className="text-zinc-500 text-sm">
                                                         {order.profiles?.full_name?.split(' ')[0] || order.profiles?.email?.split('@')[0] || '-'}
                                                     </TableCell>
-                                                    <TableCell><Badge variant="outline" className="text-base">{order.quantity}</Badge></TableCell>
-                                                    <TableCell><Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200">Em Aberto</Badge></TableCell>
-                                                    <TableCell className="text-right space-x-2">
-                                                        {(order.user_id === currentUserId || isAdmin) && (
-                                                            <>
-                                                                <Button size="sm" onClick={() => openExecution(order)} className="bg-blue-600 hover:bg-blue-700">
-                                                                    <PlayCircle className="mr-2 h-4 w-4" /> Executar
-                                                                </Button>
-                                                                <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-9 w-9 p-0" title="Cancelar Ordem">
-                                                                    <Trash2 className="h-4 w-4" />
-                                                                </Button>
-                                                            </>
-                                                        )}
+                                                    <TableCell className="text-center">
+                                                        <Badge variant="secondary" className="text-base font-mono px-3 py-1">
+                                                            {order.quantity}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell className="text-center">
+                                                        <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200 shadow-none font-medium">
+                                                            Em Aberto
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell className="text-right">
+                                                        <div className="flex items-center justify-end gap-2">
+                                                            <Button size="sm" variant="ghost" className="h-9 w-9 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 p-0 rounded-full" onClick={() => {
+                                                                setPlanningOrder(order);
+                                                                setIsPlanningDialogOpen(true);
+                                                            }} title="Analisar Disponibilidade">
+                                                                <ClipboardList className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button size="sm" onClick={() => openExecution(order)} className="bg-blue-600 hover:bg-blue-700 shadow-sm transition-all active:scale-95">
+                                                                <PlayCircle className="mr-2 h-4 w-4" /> Executar
+                                                            </Button>
+                                                            <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-zinc-400 hover:text-red-600 hover:bg-red-50 h-9 w-9 p-0 rounded-full" title="Cancelar Ordem">
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </Button>
+                                                        </div>
                                                     </TableCell>
                                                 </TableRow>
                                             ))
@@ -466,99 +668,107 @@ export default function Production() {
                 <TabsContent value="history">
                     {activeTab === 'history' && (
                         <>
-                            <div className="md:hidden space-y-3 p-1">
-                                {orders.length === 0 ? (
-                                    <div className="text-center py-8 text-zinc-500">Histórico vazio.</div>
-                                ) : (
-                                    orders.map(order => (
-                                        <div key={order.id} className="bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3">
-                                            <div className="flex justify-between items-start">
-                                                <div>
-                                                    <div className="font-bold text-lg text-zinc-900">{order.products?.name}</div>
-                                                    <div className="text-xs text-zinc-500">Fechado em: {order.closed_at ? new Date(order.closed_at).toLocaleDateString() : '-'}</div>
-                                                </div>
-                                                <Badge variant={order.status === 'closed' ? 'default' : 'secondary'} className={order.status === 'closed' ? 'bg-green-600' : ''}>
-                                                    {order.status === 'closed' ? 'Concluído' : order.status}
-                                                </Badge>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-2 text-sm bg-zinc-50 p-2 rounded">
-                                                <div>
-                                                    <span className="text-xs text-zinc-500">Qtd Produzida</span>
-                                                    <div className="font-medium">{order.quantity} {order.products?.unit || 'un'}</div>
-                                                </div>
-                                                <div className="text-right">
-                                                    <span className="text-xs text-zinc-500">Custo Total</span>
-                                                    <div className="font-bold text-green-700">R$ {order.quantity > 0 && order.cost_at_production ? (order.cost_at_production * order.quantity).toFixed(2) : '0.00'}</div>
-                                                </div>
-                                            </div>
-                                            <div className="flex justify-end gap-2 pt-2 border-t mt-1">
-                                                <Button variant="outline" size="sm" onClick={() => handleAdminAction('reopen', order.id)} className="h-8 text-xs">
-                                                    <Edit className="h-3 w-3 mr-1" /> Corrigir
-                                                </Button>
-                                                {isAdmin && (
-                                                    <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-
-                            <div className="hidden md:block bg-white rounded-lg border shadow-sm">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Data Fechamento</TableHead>
-                                            <TableHead>Produto</TableHead>
-                                            <TableHead>Criado Por</TableHead>
-                                            <TableHead>Qtd Produzida</TableHead>
-                                            <TableHead>Custo Total</TableHead>
-                                            <TableHead>Custo Unitário</TableHead>
-                                            <TableHead>Status</TableHead>
-                                            <TableHead className="text-right">Ações</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
+                            {loading ? (
+                                <div className="flex justify-center p-8">
+                                    <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="md:hidden space-y-3 p-1">
                                         {orders.length === 0 ? (
-                                            <TableRow><TableCell colSpan={8} className="text-center py-8 text-zinc-500">Histórico vazio.</TableCell></TableRow>
+                                            <div className="text-center py-8 text-zinc-500">Histórico vazio.</div>
                                         ) : (
                                             orders.map(order => (
-                                                <TableRow key={order.id}>
-                                                    <TableCell>{order.closed_at ? new Date(order.closed_at).toLocaleString() : '-'}</TableCell>
-                                                    <TableCell className="font-medium">{order.products?.name}</TableCell>
-                                                    <TableCell className="text-zinc-500">
-                                                        {order.profiles?.full_name?.split(' ')[0] || order.profiles?.email?.split('@')[0] || '-'}
-                                                    </TableCell>
-                                                    <TableCell>{order.quantity} {order.products?.unit || 'un'}</TableCell>
-                                                    <TableCell>R$ {order.quantity > 0 && order.cost_at_production ? (order.cost_at_production * order.quantity).toFixed(2) : '0.00'}</TableCell>
-                                                    <TableCell className="text-zinc-500 font-mono">
-                                                        R$ {order.cost_at_production?.toFixed(2) || '0.00'}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Badge variant={order.status === 'closed' ? 'default' : 'secondary'} className={order.status === 'closed' ? 'bg-green-600 hover:bg-green-700' : 'bg-zinc-500'}>
-                                                            {order.status === 'closed' ? 'Concluído' : order.status === 'canceled' ? 'Cancelado' : order.status === 'open' ? 'Em Aberto' : order.status}
-                                                        </Badge>
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        <div className="flex justify-end gap-1">
-                                                            <Button variant="outline" size="sm" onClick={() => handleAdminAction('reopen', order.id)} title="Corrigir / Reabrir">
-                                                                <Edit className="h-3 w-3 mr-1" /> Corrigir
-                                                            </Button>
-                                                            {isAdmin && (
-                                                                <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0" title="Excluir (Reverter Estoque)">
-                                                                    <Trash2 className="h-4 w-4" />
-                                                                </Button>
-                                                            )}
+                                                <div key={order.id} className="bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3">
+                                                    <div className="flex justify-between items-start">
+                                                        <div>
+                                                            <div className="font-bold text-lg text-zinc-900">{order.products?.name}</div>
+                                                            <div className="text-xs text-zinc-500">Fechado em: {order.closed_at ? new Date(order.closed_at).toLocaleDateString() : '-'}</div>
                                                         </div>
-                                                    </TableCell>
-                                                </TableRow>
+                                                        <Badge variant={order.status === 'closed' ? 'default' : 'secondary'} className={order.status === 'closed' ? 'bg-green-600' : ''}>
+                                                            {order.status === 'closed' ? 'Concluído' : order.status}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-2 text-sm bg-zinc-50 p-2 rounded">
+                                                        <div>
+                                                            <span className="text-xs text-zinc-500">Qtd Produzida</span>
+                                                            <div className="font-medium">{order.quantity} {order.products?.unit || 'un'}</div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <span className="text-xs text-zinc-500">Custo Total</span>
+                                                            <div className="font-bold text-green-700">R$ {order.quantity > 0 && order.cost_at_production ? (order.cost_at_production * order.quantity).toFixed(2) : '0.00'}</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-end gap-2 pt-2 border-t mt-1">
+                                                        <Button variant="outline" size="sm" onClick={() => handleAdminAction('reopen', order.id)} className="h-8 text-xs">
+                                                            <Edit className="h-3 w-3 mr-1" /> Corrigir
+                                                        </Button>
+                                                        {isAdmin && (
+                                                            <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </div>
                                             ))
                                         )}
-                                    </TableBody>
-                                </Table>
-                            </div>
+                                    </div>
+
+                                    <div className="hidden md:block bg-white rounded-lg border shadow-sm">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Data Fechamento</TableHead>
+                                                    <TableHead>Produto</TableHead>
+                                                    <TableHead>Criado Por</TableHead>
+                                                    <TableHead>Qtd Produzida</TableHead>
+                                                    <TableHead>Custo Total</TableHead>
+                                                    <TableHead>Custo Unitário</TableHead>
+                                                    <TableHead>Status</TableHead>
+                                                    <TableHead className="text-right">Ações</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {orders.length === 0 ? (
+                                                    <TableRow><TableCell colSpan={8} className="text-center py-8 text-zinc-500">Histórico vazio.</TableCell></TableRow>
+                                                ) : (
+                                                    orders.map(order => (
+                                                        <TableRow key={order.id}>
+                                                            <TableCell>{order.closed_at ? new Date(order.closed_at).toLocaleString() : '-'}</TableCell>
+                                                            <TableCell className="font-medium">{order.products?.name}</TableCell>
+                                                            <TableCell className="text-zinc-500">
+                                                                {order.profiles?.full_name?.split(' ')[0] || order.profiles?.email?.split('@')[0] || '-'}
+                                                            </TableCell>
+                                                            <TableCell>{order.quantity} {order.products?.unit || 'un'}</TableCell>
+                                                            <TableCell>R$ {order.quantity > 0 && order.cost_at_production ? (order.cost_at_production * order.quantity).toFixed(2) : '0.00'}</TableCell>
+                                                            <TableCell className="text-zinc-500 font-mono">
+                                                                R$ {order.cost_at_production?.toFixed(2) || '0.00'}
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                <Badge variant={order.status === 'closed' ? 'default' : 'secondary'} className={order.status === 'closed' ? 'bg-green-600 hover:bg-green-700' : 'bg-zinc-500'}>
+                                                                    {order.status === 'closed' ? 'Concluído' : order.status === 'canceled' ? 'Cancelado' : order.status === 'open' ? 'Em Aberto' : order.status}
+                                                                </Badge>
+                                                            </TableCell>
+                                                            <TableCell className="text-right">
+                                                                <div className="flex justify-end gap-1">
+                                                                    <Button variant="outline" size="sm" onClick={() => handleAdminAction('reopen', order.id)} title="Corrigir / Reabrir">
+                                                                        <Edit className="h-3 w-3 mr-1" /> Corrigir
+                                                                    </Button>
+                                                                    {isAdmin && (
+                                                                        <Button variant="ghost" size="sm" onClick={() => handleAdminAction('delete', order.id)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0" title="Excluir (Reverter Estoque)">
+                                                                            <Trash2 className="h-4 w-4" />
+                                                                        </Button>
+                                                                    )}
+                                                                </div>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))
+                                                )}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                </>
+                            )}
                         </>
                     )}
                 </TabsContent>
@@ -992,6 +1202,42 @@ export default function Production() {
                                 Finalizar e Baixar Estoque
                             </Button>
                         )}
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+            {/* Planning Dialog */}
+            <ProductionPlanningDialog
+                isOpen={isPlanningDialogOpen}
+                onClose={() => {
+                    setIsPlanningDialogOpen(false);
+                    setPlanningOrder(null);
+                }}
+                existingOrder={planningOrder}
+                openOrders={orders.filter(o => o.status === 'open')}
+                onOrderCreated={() => {
+                    fetchOrders();
+                    setActiveTab('open');
+                }}
+            />
+            {/* Confirmation Dialog */}
+            <Dialog open={confirmationDialog.open} onOpenChange={(open) => {
+                if (!open) setConfirmationDialog(prev => ({ ...prev, open: false }));
+            }}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>{confirmationDialog.title}</DialogTitle>
+                        <DialogDescription>{confirmationDialog.description}</DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setConfirmationDialog(prev => ({ ...prev, open: false }))}>
+                            Cancelar
+                        </Button>
+                        <Button
+                            variant={confirmationDialog.variant || 'default'}
+                            onClick={() => confirmationDialog.onConfirm()}
+                        >
+                            {confirmationDialog.confirmText || 'Confirmar'}
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

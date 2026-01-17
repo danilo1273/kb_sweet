@@ -184,7 +184,10 @@ export default function POS() {
                             Novo Pedido
                         </div>
                         <div className="flex gap-2">
-                            <StockConsultationDialog />
+                            <StockConsultationDialog
+                                onAddProduct={handleProductSelect}
+                                stockSource={stockSource}
+                            />
                             <Select value={stockSource} onValueChange={(v: any) => setStockSource(v)}>
                                 <SelectTrigger className="w-[140px] h-8 text-xs bg-zinc-100 border-zinc-200">
                                     <SelectValue />
@@ -322,7 +325,7 @@ export default function POS() {
                                 <SelectValue placeholder="Selecione o Cliente..." />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="anonymous">Consumidor Final</SelectItem>
+                                {/* Removed Consumers Final option as requested */}
                                 {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                             </SelectContent>
                         </Select>
