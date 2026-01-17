@@ -23,7 +23,6 @@ import { Badge } from "@/components/ui/badge";
 
 export default function Dashboard() {
     const navigate = useNavigate();
-    const [userName, setUserName] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState({
         totalStockValue: 0,
@@ -37,7 +36,6 @@ export default function Dashboard() {
     });
 
     const [financialData, setFinancialData] = useState<any[]>([]);
-    const [topProducts, setTopProducts] = useState<any[]>([]);
     const [salesTrend, setSalesTrend] = useState<any[]>([]);
     const [lowStockItems, setLowStockItems] = useState<any[]>([]);
     const [notifications, setNotifications] = useState<any[]>([]);
@@ -48,8 +46,7 @@ export default function Dashboard() {
             const { data: { user } } = await supabase.auth.getUser();
 
             if (user) {
-                const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
-                setUserName(profile?.full_name || user.email);
+                // Remove userName setting
 
                 // --- 1. Fetch Raw Data ---
                 const sixMonthsAgo = new Date();
@@ -64,18 +61,24 @@ export default function Dashboard() {
                     productsRes,
                     financialRes,
                     productionRes,
-                    salesRes,
-                    saleItemsRes
+                    salesRes
                 ] = await Promise.all([
                     supabase.from('ingredients').select('*'),
                     supabase.from('products').select('*'),
                     supabase.from('financial_movements').select('*').gte('due_date', sixMonthsAgo.toISOString()),
                     supabase.from('production_orders').select('id, status').eq('status', 'open'),
-                    supabase.from('sales').select('id, total, created_at').gte('created_at', thirtyDaysAgo.toISOString()),
-                    supabase.from('sale_items').select('product_id, quantity, unit_price, products(name)').gte('created_at', thirtyDaysAgo.toISOString()) // Approximate join
+                    // Fetch Sales with Items and Product Cost for Margin Calculation
+                    supabase.from('sales').select(`
+                        id, total, created_at, user_id, 
+                        profiles:user_id (full_name),
+                        sale_items (
+                            quantity, 
+                            unit_price, 
+                            product_id,
+                            products (name, cost)
+                        )
+                    `).gte('created_at', thirtyDaysAgo.toISOString())
                 ]);
-
-                // --- 2. Calculate KPI Metrics ---
 
                 // --- 2. Calculate KPI Metrics ---
 
@@ -84,11 +87,10 @@ export default function Dashboard() {
                     return acc + ((Number(ing.stock_danilo) || 0) * (Number(ing.cost_danilo) || 0)) +
                         ((Number(ing.stock_adriel) || 0) * (Number(ing.cost_adriel) || 0));
                 }, 0) || 0) + (productsRes.data?.reduce((acc, prod) => {
-                    // Assuming products separate stock if schema supports, or simplified
                     return acc + ((Number(prod.stock_quantity) || 0) * (Number(prod.cost) || 0));
                 }, 0) || 0);
 
-                // Pending Financials (All time pending)
+                // Pending Financials
                 const { data: allPending } = await supabase.from('financial_movements').select('amount, type, status').eq('status', 'pending');
                 const pendingPayments = allPending?.filter(m => m.type === 'expense').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
                 const pendingReceivables = allPending?.filter(m => m.type === 'income').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
@@ -96,96 +98,116 @@ export default function Dashboard() {
                 // Current Month Stats
                 const now = new Date();
                 const currentMonthMovements = financialRes.data?.filter(m => {
-                    const d = new Date(m.due_date || m.payment_date); // Use effective date
+                    const d = new Date(m.due_date || m.payment_date);
                     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
                 }) || [];
 
                 const monthlyPurchases = currentMonthMovements.filter(m => m.type === 'expense' && m.status === 'paid').reduce((acc, m) => acc + Number(m.amount), 0);
                 const monthlySalesIncome = currentMonthMovements.filter(m => m.type === 'income' && m.status === 'paid').reduce((acc, m) => acc + Number(m.amount), 0);
 
-                // Sales Volume (Total sold invoices)
-                const currentMonthSales = salesRes.data?.filter(s => {
+                // Sales Data Processing
+                const salesData = salesRes.data || [];
+
+                // Volume
+                const currentMonthSales = salesData.filter(s => {
                     const d = new Date(s.created_at);
                     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-                }) || [];
+                });
                 const monthlySalesTotal = currentMonthSales.reduce((acc, s) => acc + Number(s.total), 0);
 
-                // Net Profit (Estimated simplistically: Paid Income - Paid Expense)
+                // Net Profit (Sales Margin Estimate) - More accurate than just cash flow if desired, but let's stick to Cash Flow for the "Net Profit" card for now
                 const netProfit = monthlySalesIncome - monthlyPurchases;
 
-                // Avg Ticket (Current Month)
+                // Avg Ticket
                 const avgTicket = currentMonthSales.length > 0 ? (monthlySalesTotal / currentMonthSales.length) : 0;
 
 
-                // --- 3. Chart Data Preparation ---
+                // --- 3. Chart & Widget Data Preparation ---
 
-                // A. Financial Trend (Last 6 Months)
+                // A. Financial Trend
                 const months = [];
                 for (let i = 0; i < 6; i++) {
                     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
                     months.unshift(d);
                 }
-
                 const chartData = months.map(date => {
                     const monthKey = date.toLocaleString('pt-BR', { month: 'short' });
                     const mData = financialRes.data?.filter(m => {
                         const d = new Date(m.due_date || m.payment_date);
                         return d.getMonth() === date.getMonth() && d.getFullYear() === date.getFullYear() && m.status === 'paid';
                     });
-
                     const expense = mData?.filter(m => m.type === 'expense').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
                     const income = mData?.filter(m => m.type === 'income').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
-
                     return { name: monthKey, Receita: income, Despesa: expense };
                 });
 
-                // B. Top Products (by Revenue in last 30 days)
-                // sale_items doesn't always have date directly, usually linked to sales.
-                // For simplicity, we fetched sale_items created_at if available or join manually.
-                // Let's assume fetching valid recent sale items succeeded.
-                const productPerf: Record<string, number> = {};
-                saleItemsRes.data?.forEach((item: any) => {
-                    const name = item.products?.name || 'Item';
-                    const rev = (item.quantity || 0) * (item.unit_price || 0);
-                    productPerf[name] = (productPerf[name] || 0) + rev;
+                // B. Sales by Seller (Margin)
+                const sellerStats: Record<string, { revenue: number, cost: number, count: number }> = {};
+
+                salesData.forEach((sale: any) => {
+                    // Extract Seller Name safely
+                    const sellerName = sale.profiles?.full_name?.split(' ')[0] || 'Desconhecido';
+
+                    if (!sellerStats[sellerName]) {
+                        sellerStats[sellerName] = { revenue: 0, cost: 0, count: 0 };
+                    }
+
+                    sellerStats[sellerName].count += 1;
+                    sellerStats[sellerName].revenue += Number(sale.total);
+
+                    // Calculate Cost for this Sale
+                    let saleCost = 0;
+                    if (sale.sale_items && Array.isArray(sale.sale_items)) {
+                        sale.sale_items.forEach((item: any) => {
+                            const productCost = Number(item.products?.cost) || 0;
+                            const quantity = Number(item.quantity) || 0;
+                            saleCost += (productCost * quantity);
+                        });
+                    }
+                    sellerStats[sellerName].cost += saleCost;
                 });
 
-                const topProdData = Object.entries(productPerf)
-                    .map(([name, value]) => ({ name, value }))
-                    .sort((a, b) => b.value - a.value)
-                    .slice(0, 5);
+                const sellerPerformanceData = Object.entries(sellerStats).map(([name, stats]) => ({
+                    name,
+                    revenue: stats.revenue,
+                    cost: stats.cost,
+                    margin: stats.revenue - stats.cost,
+                    marginPercent: stats.revenue > 0 ? ((stats.revenue - stats.cost) / stats.revenue) * 100 : 0,
+                    count: stats.count
+                })).sort((a, b) => b.revenue - a.revenue);
 
-                // C. Sales Volume Trend (Last 30 Days)
+
+                // D. Sales Volume Trend
                 const dailySales: Record<string, number> = {};
-                salesRes.data?.forEach(s => {
+                salesData.forEach((s: any) => {
                     const day = new Date(s.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
                     dailySales[day] = (dailySales[day] || 0) + 1;
                 });
-
                 const salesTrendData = Object.entries(dailySales)
                     .map(([date, count]) => ({ date, count }))
-                    .sort((a, b) => { // Proper Date Sort
+                    .sort((a, b) => {
                         const [da, ma] = a.date.split('/');
                         const [db, mb] = b.date.split('/');
                         return new Date(2025, Number(ma) - 1, Number(da)).getTime() - new Date(2025, Number(mb) - 1, Number(db)).getTime();
                     })
-                    .slice(-14); // Last 14 active days
+                    .slice(-14);
 
 
-                // --- 4. Alerts & Notifications ---
-
-                // Low Stock
+                // E. Low Stock (Fixing NaN)
                 const lowStock = [
-                    ...(ingredientsRes.data || []).map(i => ({ ...i, isProduct: false })),
-                    ...(productsRes.data || []).map(p => ({ ...p, isProduct: true }))
+                    ...(ingredientsRes.data || []).map(i => ({
+                        ...i,
+                        isProduct: false,
+                        currentStock: Number(i.stock_danilo) // Explicitly cast
+                    })),
+                    ...(productsRes.data || []).map(p => ({
+                        ...p,
+                        isProduct: true,
+                        currentStock: Number(p.stock_quantity)
+                    }))
                 ].filter(item => {
-                    const qty = Number(item.stock_danilo || item.stock_quantity || 0);
-                    // Let's grab those with 0 or very low
-                    return qty <= 0; // Simple "Out of stock" check for now
-                }).slice(0, 5); // Metrics
-
-                // Upcoming Bills (Next 3 days)
-                const upcomingBills = allPending?.filter(m => m.type === 'expense' && m.status === 'pending') || [];
+                    return !isNaN(item.currentStock) && item.currentStock <= 0;
+                }).slice(0, 5);
 
                 setStats({
                     totalStockValue,
@@ -193,15 +215,17 @@ export default function Dashboard() {
                     pendingReceivables,
                     activeOrders: productionRes.data?.length || 0,
                     monthlyPurchases,
-                    monthlySales: monthlySalesTotal, // Now strictly Sales Volume
-                    netProfit: monthlySalesIncome,   // Using netProfit slot for 'Received' temporarily or adding new field logic
+                    monthlySales: monthlySalesTotal,
+                    netProfit: monthlySalesIncome,
                     avgTicket
                 });
 
                 setFinancialData(chartData);
-                setTopProducts(topProdData);
                 setSalesTrend(salesTrendData);
                 setLowStockItems(lowStock);
+
+                // Store Seller Performance in 'notifications' state temporarily
+                setNotifications(sellerPerformanceData);
 
             }
             setLoading(false);
@@ -322,7 +346,7 @@ export default function Dashboard() {
                                         <Tooltip
                                             cursor={{ fill: '#F3F4F6' }}
                                             contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                            formatter={(value: number) => [`R$ ${value.toFixed(2)}`, '']}
+                                            formatter={(value: any) => [`R$ ${Number(value).toFixed(2)}`, '']}
                                         />
                                         <Bar dataKey="Receita" fill="#22c55e" radius={[4, 4, 0, 0]} maxBarSize={50} />
                                         <Bar dataKey="Despesa" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={50} />
@@ -332,29 +356,43 @@ export default function Dashboard() {
                         </CardContent>
                     </Card>
 
-                    {/* Top Products (Side) */}
-                    <Card className="col-span-3 shadow-sm">
+                    {/* NEW: Seller Performance Widget (Replaces Top Products placement for better visibility, or Stacked?) */}
+                    {/* Let's put Seller Performance here instead of Top Products, or split this column */}
+                    <Card className="col-span-3 shadow-sm flex flex-col">
                         <CardHeader>
-                            <CardTitle>Top 5 Produtos</CardTitle>
-                            <CardDescription>Por faturamento (30 dias)</CardDescription>
+                            <CardTitle>Performance por Vendedor</CardTitle>
+                            <CardDescription>Vendas e Margem (30 dias)</CardDescription>
                         </CardHeader>
-                        <CardContent>
+                        <CardContent className="flex-1 overflow-auto">
                             <div className="space-y-4">
-                                {topProducts.length === 0 ? (
-                                    <div className="text-center text-zinc-400 py-10">Sem dados de vendas recentes</div>
+                                {(notifications as any[]).length === 0 ? (
+                                    <div className="text-center text-zinc-400 py-10">Sem vendas recentes</div>
                                 ) : (
-                                    topProducts.map((prod, i) => (
-                                        <div key={i} className="flex items-center">
-                                            <div className="w-full space-y-1">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-sm font-medium text-zinc-700 truncate max-w-[180px]">{prod.name}</span>
-                                                    <span className="text-sm font-bold text-zinc-900">R$ {prod.value.toFixed(0)}</span>
-                                                </div>
-                                                <div className="h-2 w-full bg-zinc-100 rounded-full overflow-hidden">
-                                                    <div
-                                                        className="h-full bg-blue-500 rounded-full"
-                                                        style={{ width: `${(prod.value / topProducts[0].value) * 100}%` }}
-                                                    />
+                                    (notifications as any[]).map((seller, i) => (
+                                        <div key={i} className="flex flex-col gap-1 p-3 bg-zinc-50 rounded-lg border border-zinc-100">
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-zinc-800">{seller.name}</span>
+                                                <Badge variant="outline" className="text-blue-600 bg-blue-50 border-blue-100">
+                                                    {seller.count} vendas
+                                                </Badge>
+                                            </div>
+                                            <div className="flex justify-between items-center mt-1 text-sm">
+                                                <span className="text-zinc-500">Vendido:</span>
+                                                <span className="font-medium">R$ {seller.revenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center text-sm">
+                                                <span className="text-zinc-500">Custo:</span>
+                                                <span className="text-red-400">R$ {seller.cost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                            </div>
+                                            <div className="mt-2 pt-2 border-t flex justify-between items-center">
+                                                <span className="text-xs font-bold text-green-700 uppercase">Margem</span>
+                                                <div className="text-right">
+                                                    <span className="font-bold text-green-600 text-lg">
+                                                        {seller.marginPercent.toFixed(1)}%
+                                                    </span>
+                                                    <span className="ml-2 text-xs text-green-500">
+                                                        (R$ {seller.margin.toLocaleString('pt-BR', { maximumFractionDigits: 0 })})
+                                                    </span>
                                                 </div>
                                             </div>
                                         </div>
@@ -386,7 +424,7 @@ export default function Dashboard() {
                                         <div key={i} className="flex items-center justify-between text-sm p-2 bg-red-50 rounded-md">
                                             <span className="font-medium text-red-900 truncate max-w-[150px]">{item.name}</span>
                                             <Badge variant="destructive" className="h-5 text-[10px]">
-                                                {Number(item.stock_danilo || item.stock_quantity).toFixed(1)} {item.unit || 'un'}
+                                                {Number(item.currentStock).toFixed(1)} {item.unit || 'un'}
                                             </Badge>
                                         </div>
                                     ))
