@@ -298,11 +298,20 @@ export default function Production() {
     async function handleAdminAction(action: 'delete' | 'reopen', orderId: string) {
         if (action === 'delete') {
             if (!confirm("Tem certeza? Esta ação é irreversível e se a ordem estiver FECHADA, o estoque será revertido.")) return;
+
+            // Optimistic Update: Immediately remove from UI
+            setOrders(prev => prev.filter(order => order.id !== orderId));
+
             const { error } = await supabase.rpc('delete_production_order_secure', { p_order_id: orderId, p_user_id: currentUserId });
-            if (error) toast({ variant: 'destructive', title: "Erro ao excluir", description: error.message });
-            else {
+
+            if (error) {
+                toast({ variant: 'destructive', title: "Erro ao excluir", description: error.message });
+                // If error, re-fetch to restore the item
+                await fetchOrders();
+            } else {
                 toast({ title: "Ordem excluída com sucesso" });
-                fetchOrders();
+                // Sync with server ensuring data is fresh
+                await fetchOrders();
             }
         } else if (action === 'reopen') {
             if (!confirm("Reabrir esta ordem? O estoque consumido será devolvido e a ordem ficará 'Aberta' para edição.")) return;
