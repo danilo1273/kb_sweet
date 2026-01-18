@@ -27,12 +27,13 @@ export default function Sales() {
         // Fetch sales with client info
         const { data, error } = await supabase
             .from('sales')
-
-            .select('*, clients(name), stock_locations(name, slug), financial_movements(status), sale_items(*, products(name))')
+            .select('*, clients(name), stock_locations(name, slug), financial_movements!financial_movements_related_sale_id_fkey(status), sale_items(*, products(name))')
             .order('created_at', { ascending: false });
 
         if (!error) {
             setSales(data || []);
+        } else {
+            console.error("Sales Fetch Error:", error);
         }
         setLoading(false);
     }
