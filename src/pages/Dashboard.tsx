@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Activity, Package, DollarSign, TrendingDown, AlertTriangle, ArrowRight, ShoppingBag, Zap, ShoppingCart, Landmark } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
@@ -21,6 +21,7 @@ import {
 } from "recharts";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export default function Dashboard() {
     const navigate = useNavigate();
@@ -32,7 +33,7 @@ export default function Dashboard() {
         activeOrders: 0,
         monthlyPurchases: 0,
         monthlySales: 0,
-        netProfit: 0,
+        monthlyIncome: 0,
         avgTicket: 0,
         projectedSalesValue: 0,
         totalFinishedStock: 0
@@ -47,6 +48,8 @@ export default function Dashboard() {
     const [bankAccounts, setBankAccounts] = useState<any[]>([]);
     const [isFinancialUser, setIsFinancialUser] = useState(false);
     const [selectedUserProd, setSelectedUserProd] = useState<any>(null);
+    const [products, setProducts] = useState<any[]>([]);
+    const [isFinishedGoodsModalOpen, setIsFinishedGoodsModalOpen] = useState(false);
     const { toast } = useToast();
 
     useEffect(() => {
@@ -84,7 +87,7 @@ export default function Dashboard() {
                 ] = await Promise.all([
                     supabase.from('ingredients').select('*'),
                     supabase.from('products').select('*, product_stocks(quantity, location_id)'),
-                    supabase.from('financial_movements').select('*').gte('due_date', sixMonthsAgo.toISOString()),
+                    supabase.from('financial_movements').select('*').or(`due_date.gte.${sixMonthsAgo.toISOString()},payment_date.gte.${sixMonthsAgo.toISOString()}`),
                     supabase.from('production_orders').select('id, status').eq('status', 'open'),
                     // Fetch Sales with Items and Product Cost for Margin Calculation
                     supabase.from('sales').select(`
@@ -93,6 +96,7 @@ export default function Dashboard() {
                             quantity, 
                             unit_price, 
                             product_id,
+                            cost_price_snapshot,
                             products (name, cost)
                         )
                     `),
@@ -107,6 +111,8 @@ export default function Dashboard() {
                         products (cost, name, unit, type)
                     `).eq('status', 'closed').gte('closed_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString())
                 ]);
+
+                if (productsRes.data) setProducts(productsRes.data);
 
                 // --- 1b. Manual Join for Profiles (Sales + Purchases) ---
                 const rawSales = salesRes.data || [];
@@ -242,8 +248,13 @@ export default function Dashboard() {
                     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
                 }) || [];
 
-                const monthlyPurchases = currentMonthMovements.filter(m => m.type === 'expense' && m.status === 'paid').reduce((acc, m) => acc + Number(m.amount), 0);
-                const monthlySalesIncome = currentMonthMovements.filter(m => m.type === 'income' && m.status === 'paid').reduce((acc, m) => acc + Number(m.amount), 0);
+                const monthlyPurchases = currentMonthMovements
+                    .filter(m => m.type === 'expense' && m.status === 'paid')
+                    .reduce((acc, m) => acc + (Math.abs(Number(m.amount)) || 0), 0);
+
+                const monthlySalesIncome = currentMonthMovements
+                    .filter(m => m.type === 'income' && m.status === 'paid')
+                    .reduce((acc, m) => acc + (Number(m.amount) || 0), 0);
 
                 // Sales Data Processing
                 // Volume
@@ -297,7 +308,7 @@ export default function Dashboard() {
                     let saleCost = 0;
                     if (sale.sale_items && Array.isArray(sale.sale_items)) {
                         sale.sale_items.forEach((item: any) => {
-                            const productCost = Number(item.products?.cost) || 0;
+                            const productCost = Number(item.cost_price_snapshot || item.products?.cost || 0);
                             const quantity = Number(item.quantity) || 0;
                             saleCost += (productCost * quantity);
                         });
@@ -333,19 +344,29 @@ export default function Dashboard() {
 
                 // E. Low Stock (Fixing NaN)
                 const lowStock = [
-                    ...(ingredientsRes.data || []).map(i => ({
-                        ...i,
-                        isProduct: false,
-                        currentStock: Number(i.stock_danilo) // Explicitly cast
-                    })),
-                    ...(productsRes.data || []).map(p => ({
-                        ...p,
-                        isProduct: true,
-                        currentStock: Number(p.stock_quantity)
-                    }))
+                    ...(ingredientsRes.data || []).map(i => {
+                        const stockEntries = i.product_stocks || [];
+                        let qty = 0;
+                        if (stockEntries.length > 0) {
+                            qty = stockEntries.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0);
+                        } else {
+                            qty = (Number(i.stock_danilo) || 0) + (Number(i.stock_adriel) || 0);
+                        }
+                        return { ...i, isProduct: false, currentStock: qty };
+                    }),
+                    ...(productsRes.data || []).map(p => {
+                        const stockEntries = p.product_stocks || [];
+                        let qty = 0;
+                        if (stockEntries.length > 0) {
+                            qty = stockEntries.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0);
+                        } else {
+                            qty = Number(p.stock_quantity) || 0;
+                        }
+                        return { ...p, isProduct: true, currentStock: qty };
+                    })
                 ].filter(item => {
-                    return !isNaN(item.currentStock) && item.currentStock <= 0;
-                }).slice(0, 5);
+                    return !isNaN(item.currentStock) && item.currentStock <= 1; // Show items with 1 or less
+                }).sort((a, b) => a.currentStock - b.currentStock).slice(0, 5);
 
                 setStats({
                     totalStockValue,
@@ -354,7 +375,7 @@ export default function Dashboard() {
                     activeOrders: productionRes.data?.length || 0,
                     monthlyPurchases,
                     monthlySales: monthlySalesTotal,
-                    netProfit: monthlySalesIncome,
+                    monthlyIncome: monthlySalesIncome,
                     avgTicket,
                     projectedSalesValue: stockAssetValue,
                     totalFinishedStock: totalFinishedStockUnits
@@ -419,7 +440,10 @@ export default function Dashboard() {
                                 <div className="text-2xl font-bold tracking-tight">
                                     R$ {stats.projectedSalesValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
-                                <p className="text-xs text-purple-100 opacity-80 mt-1 font-medium">{stats.totalFinishedStock} un. em estoque (Custo)</p>
+                                <div className="flex items-center gap-1 mt-1 cursor-pointer hover:bg-white/10 p-0.5 rounded px-1 -ml-1 transition-colors w-fit" onClick={() => setIsFinishedGoodsModalOpen(true)}>
+                                    <p className="text-xs text-purple-100 opacity-80 font-medium">{stats.totalFinishedStock} un. em estoque (Custo)</p>
+                                    <ArrowRight className="h-3 w-3 text-purple-100" />
+                                </div>
                             </CardContent>
                         </Card>
                     </motion.div>
@@ -449,7 +473,7 @@ export default function Dashboard() {
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold tracking-tight">
-                                    R$ {stats.netProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {stats.monthlyIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
                                 <p className="text-xs text-emerald-100 opacity-80 mt-1 font-medium">Entradas confirmadas</p>
                             </CardContent>
@@ -508,7 +532,7 @@ export default function Dashboard() {
                             </CardHeader>
                             <CardContent className="relative z-10">
                                 <div className="text-2xl font-bold tracking-tight text-zinc-900">
-                                    R$ {Math.abs(stats.pendingPayments).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {stats.pendingPayments.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
                                 <div
                                     className="flex items-center gap-1 mt-1 cursor-pointer hover:underline decoration-red-300 w-fit"
@@ -751,23 +775,15 @@ export default function Dashboard() {
                                                     <div className="text-[9px] text-zinc-400 uppercase tracking-tighter font-bold">Valor Produzido</div>
                                                 </div>
                                             </div>
-                                            {/* Product Detailed List */}
+                                            {/* Product Detailed List - Removed preview as requested */}
                                             {user.itemsList && user.itemsList.length > 0 && (
-                                                <div className="ml-10 pl-3 text-[11px] space-y-1 mt-2 border-l-2 border-amber-100/50">
-                                                    {user.itemsList.slice(0, 3).map((item: any, idx: number) => (
-                                                        <div key={idx} className="flex items-start justify-between text-zinc-600 py-0.5 group transition-all">
-                                                            <span className="group-hover:text-amber-800 transition-colors leading-tight pr-4">{item.name}</span>
-                                                            <span className="font-bold text-zinc-800 shrink-0 whitespace-nowrap">{item.qty} {item.unit}</span>
-                                                        </div>
-                                                    ))}
-                                                    {user.itemsList.length > 3 && (
-                                                        <div
-                                                            className="text-[10px] text-amber-600 hover:text-amber-700 cursor-pointer italic pt-1 font-semibold flex items-center gap-1 transition-colors underline-offset-2 hover:underline"
-                                                            onClick={() => setSelectedUserProd(user)}
-                                                        >
-                                                            + Ver mais {user.itemsList.length - 3} itens cadastrados
-                                                        </div>
-                                                    )}
+                                                <div className="ml-10 pl-3 mt-2 border-l-2 border-amber-100/50">
+                                                    <div
+                                                        className="text-[10px] text-amber-600 hover:text-amber-700 cursor-pointer italic pt-1 font-extrabold flex items-center gap-1 transition-colors underline-offset-2 hover:underline"
+                                                        onClick={() => setSelectedUserProd(user)}
+                                                    >
+                                                        + Ver detalhes dos {user.itemsList.length} itens produzidos
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
@@ -776,9 +792,66 @@ export default function Dashboard() {
                             </div>
                         </CardContent>
                     </Card>
-
                 </div>
             </motion.div>
+
+            {/* Modal de Detalhes de Estoque Acabado */}
+            <Dialog open={isFinishedGoodsModalOpen} onOpenChange={setIsFinishedGoodsModalOpen}>
+                <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col p-0 overflow-hidden bg-white">
+                    <DialogHeader className="p-6 pb-2">
+                        <DialogTitle className="text-xl font-bold text-zinc-800 flex items-center gap-2">
+                            <Package className="h-5 w-5 text-purple-600" />
+                            Produtos Acabados em Estoque
+                        </DialogTitle>
+                        <p className="text-sm text-zinc-500">Lista de produtos finais disponíveis para venda.</p>
+                    </DialogHeader>
+
+                    <div className="flex-1 overflow-y-auto p-6 pt-2">
+                        <Table>
+                            <TableHeader>
+                                <TableRow className="hover:bg-transparent border-zinc-100">
+                                    <TableHead className="text-zinc-500 font-bold uppercase text-[10px] tracking-wider">Produto</TableHead>
+                                    <TableHead className="text-zinc-500 font-bold uppercase text-[10px] tracking-wider text-right">Qtd Total</TableHead>
+                                    <TableHead className="text-zinc-500 font-bold uppercase text-[10px] tracking-wider text-right">Custo Médio</TableHead>
+                                    <TableHead className="text-zinc-500 font-bold uppercase text-[10px] tracking-wider text-right">Valor Total</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {products
+                                    .filter(p => p.type === 'finished' && (p.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) > 0))
+                                    .map(product => {
+                                        const qty = product.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) || 0;
+                                        const totalVal = qty * (product.cost || 0);
+                                        return (
+                                            <TableRow key={product.id} className="border-zinc-50 hover:bg-zinc-50/50 transition-colors">
+                                                <TableCell className="font-medium text-zinc-700">{product.name}</TableCell>
+                                                <TableCell className="text-right font-bold text-zinc-900">{qty} {product.unit}</TableCell>
+                                                <TableCell className="text-right text-zinc-500 text-xs">R$ {(product.cost || 0).toFixed(2)}</TableCell>
+                                                <TableCell className="text-right font-bold text-purple-700">R$ {totalVal.toFixed(2)}</TableCell>
+                                            </TableRow>
+                                        );
+                                    })}
+                                {products.filter(p => p.type === 'finished' && (p.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) > 0)).length === 0 && (
+                                    <TableRow>
+                                        <TableCell colSpan={4} className="text-center py-12 text-zinc-400 italic">
+                                            Nenhum produto acabado com estoque positivo.
+                                        </TableCell>
+                                    </TableRow>
+                                )}
+                            </TableBody>
+                        </Table>
+                    </div>
+
+                    <DialogFooter className="p-4 bg-zinc-50 border-t items-center justify-between sm:justify-between">
+                        <div className="text-xs text-zinc-500 font-medium">
+                            Total: {products.filter(p => p.type === 'finished' && (p.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) > 0)).length} itens
+                        </div>
+                        <Button variant="outline" onClick={() => setIsFinishedGoodsModalOpen(false)} className="bg-white border-zinc-200">
+                            Fechar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Production Detail Dialog */}
             <Dialog open={!!selectedUserProd} onOpenChange={(open) => !open && setSelectedUserProd(null)}>

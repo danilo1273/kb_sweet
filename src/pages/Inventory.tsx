@@ -20,6 +20,11 @@ import { Ingredient, Category } from "@/types";
 interface InventoryItem extends Ingredient {
     isProduct: boolean;
     productType?: 'intermediate' | 'finished';
+    stock_quantity?: number | null;
+    stock_danilo?: number | null;
+    stock_adriel?: number | null;
+    cost_danilo?: number | null;
+    cost_adriel?: number | null;
 }
 
 interface UnifiedHistoryItem {
@@ -388,7 +393,7 @@ export default function Inventory() {
             const productionOutputPromise = supabase
                 .from('production_orders')
                 .select(`
-                   id, quantity, actual_quantity, unit, closed_at, status,
+                   id, quantity, actual_quantity, closed_at, status,
                     profiles: user_id(full_name)
                     `)
                 .eq('product_id', ingredient.id)
@@ -508,7 +513,7 @@ export default function Inventory() {
                     type: 'purchase', // Incoming stock
                     description: 'Produção Finalizada',
                     quantity: Number(order.actual_quantity || order.quantity || 0),
-                    unit: order.unit || 'un',
+                    unit: ingredient.unit || 'un',
                     total_value: 0, // Could calculate if we had cost info here
                     user_name: userName,
                     link_id: order.id
@@ -717,7 +722,10 @@ export default function Inventory() {
                                             return (
                                                 <div key={loc.id} className="bg-zinc-50 p-2 rounded border border-zinc-100">
                                                     <div className="text-[10px] text-zinc-500 font-bold uppercase truncate" title={loc.name}>{loc.name}</div>
-                                                    <div className={cn("font-medium", qty <= (item.min_stock || 0) ? "text-red-600" : "text-zinc-700")}>
+                                                    <div className={cn("font-medium",
+                                                        qty <= 0 ? "text-red-600 font-bold" :
+                                                            qty <= (item.min_stock || 0) ? "text-amber-600" : "text-zinc-700"
+                                                    )}>
                                                         {qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-[10px]">{item.unit}</span>
                                                     </div>
                                                 </div>
@@ -845,7 +853,10 @@ export default function Inventory() {
 
                                                 return (
                                                     <Fragment key={loc.id}>
-                                                        <TableCell className={cn("text-right bg-zinc-50/30 border-l border-zinc-100", qty <= (item.min_stock || 0) && item.type !== 'expense' ? "text-red-600 font-bold" : "")}>
+                                                        <TableCell className={cn("text-right bg-zinc-50/30 border-l border-zinc-100",
+                                                            qty <= 0 && item.type !== 'expense' ? "text-red-600 font-bold" :
+                                                                qty <= (item.min_stock || 0) && item.type !== 'expense' ? "text-amber-600 font-bold" : ""
+                                                        )}>
                                                             {item.type === 'expense' ? '-' : (
                                                                 <div className="flex flex-col items-end">
                                                                     <span>{`${qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>

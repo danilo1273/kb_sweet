@@ -41,6 +41,7 @@ export default function Sales() {
     // View Items State
     const [isViewOpen, setIsViewOpen] = useState(false);
     const [viewSaleItems, setViewSaleItems] = useState<any[]>([]);
+    const [selectedViewSale, setSelectedViewSale] = useState<any>(null);
 
     // User State for Permissions
     const [currentUser, setCurrentUser] = useState<any>(null);
@@ -211,6 +212,7 @@ export default function Sales() {
                                     size="icon"
                                     className="h-8 w-8 text-zinc-500 hover:text-blue-500"
                                     onClick={() => {
+                                        setSelectedViewSale(sale);
                                         setViewSaleItems(sale.sale_items || []);
                                         setIsViewOpen(true);
                                     }}
@@ -329,6 +331,7 @@ export default function Sales() {
                                                 size="icon"
                                                 className="h-8 w-8 text-zinc-500 hover:text-blue-500"
                                                 onClick={() => {
+                                                    setSelectedViewSale(sale);
                                                     setViewSaleItems(sale.sale_items || []);
                                                     setIsViewOpen(true);
                                                 }}
@@ -471,7 +474,7 @@ export default function Sales() {
                         {/* Summary Cards */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             {(() => {
-                                const totalSale = viewSaleItems.reduce((acc, item) => acc + (item.quantity * item.unit_price), 0);
+                                const totalSale = Number(selectedViewSale?.total || 0);
                                 const totalCost = viewSaleItems.reduce((acc, item) => acc + (item.quantity * (item.cost_price_snapshot || 0)), 0);
                                 const profit = totalSale - totalCost;
                                 const margin = totalSale > 0 ? (profit / totalSale) * 100 : 0;
