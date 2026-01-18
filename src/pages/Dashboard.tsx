@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Activity, Package, DollarSign, TrendingDown, AlertTriangle, ArrowRight, ShoppingBag, Zap, ShoppingCart } from "lucide-react";
+import { Activity, Package, DollarSign, TrendingDown, AlertTriangle, ArrowRight, ShoppingBag, Zap, ShoppingCart, Landmark } from "lucide-react";
+import { useToast } from "@/components/ui/use-toast";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +43,9 @@ export default function Dashboard() {
     const [notifications, setNotifications] = useState<any[]>([]);
     const [buyerPerformance, setBuyerPerformance] = useState<any[]>([]);
     const [productionPerformance, setProductionPerformance] = useState<any[]>([]); // New State
+    const [bankAccounts, setBankAccounts] = useState<any[]>([]);
+    const [isFinancialUser, setIsFinancialUser] = useState(false);
+    const { toast } = useToast();
 
     useEffect(() => {
         async function loadDashboardData() {
@@ -49,7 +53,17 @@ export default function Dashboard() {
             const { data: { user } } = await supabase.auth.getUser();
 
             if (user) {
-                // Remove userName setting
+                // Fetch logged-in user roles
+                const { data: myProfile } = await supabase.from('profiles').select('roles, role').eq('id', user.id).single();
+                const myRoles = myProfile?.roles || (myProfile?.role ? [myProfile.role] : []) || [];
+                const isFin = myRoles.some((r: string) => ['admin', 'super_admin', 'financial'].includes(r));
+                setIsFinancialUser(isFin);
+
+                // Fetch Bank Accounts (Only for authorized users)
+                if (isFin) {
+                    const { data: banks } = await supabase.from('bank_accounts').select('id, name, balance').order('name');
+                    if (banks) setBankAccounts(banks);
+                }
 
                 // --- 1. Fetch Raw Data ---
                 const sixMonthsAgo = new Date();
@@ -469,7 +483,14 @@ export default function Dashboard() {
                                 <div className="text-2xl font-bold tracking-tight">
                                     R$ {stats.pendingReceivables.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
-                                <div className="flex items-center gap-1 mt-1 cursor-pointer hover:bg-white/10 p-0.5 rounded px-1 -ml-1 transition-colors w-fit" onClick={() => navigate('/financial')}>
+                                <div
+                                    className="flex items-center gap-1 mt-1 cursor-pointer hover:bg-white/10 p-0.5 rounded px-1 -ml-1 transition-colors w-fit"
+                                    onClick={() => isFinancialUser ? navigate('/financial') : toast({
+                                        variant: "destructive",
+                                        title: "Acesso Negado",
+                                        description: "Você não tem permissão para acessar a rotina financeira."
+                                    })}
+                                >
                                     <p className="text-xs text-amber-100 opacity-90 font-medium">Ver pendentes</p>
                                     <ArrowRight className="h-3 w-3 text-amber-100" />
                                 </div>
@@ -489,7 +510,14 @@ export default function Dashboard() {
                                 <div className="text-2xl font-bold tracking-tight text-zinc-900">
                                     R$ {Math.abs(stats.pendingPayments).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
-                                <div className="flex items-center gap-1 mt-1 cursor-pointer hover:underline decoration-red-300 w-fit" onClick={() => navigate('/financial')}>
+                                <div
+                                    className="flex items-center gap-1 mt-1 cursor-pointer hover:underline decoration-red-300 w-fit"
+                                    onClick={() => isFinancialUser ? navigate('/financial') : toast({
+                                        variant: "destructive",
+                                        title: "Acesso Negado",
+                                        description: "Você não tem permissão para acessar a rotina financeira."
+                                    })}
+                                >
                                     <p className="text-xs text-red-500 font-medium">Ver contas</p>
                                     <ArrowRight className="h-3 w-3 text-red-500" />
                                 </div>
@@ -497,6 +525,27 @@ export default function Dashboard() {
                         </Card>
                     </motion.div>
                 </div>
+
+                {/* 1.5 BANK ACCOUNTS SECTION */}
+                {isFinancialUser && bankAccounts.length > 0 && (
+                    <motion.div variants={itemVariant} className="flex flex-wrap gap-4">
+                        {bankAccounts.map(acc => (
+                            <Card key={acc.id} className="min-w-[200px] flex-1 hover:shadow-md transition-all border-l-4 border-l-blue-500 bg-white shadow-sm">
+                                <CardContent className="p-4 py-3 flex items-center justify-between">
+                                    <div className="flex flex-col">
+                                        <p className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">{acc.name}</p>
+                                        <p className="text-xl font-black text-zinc-800">
+                                            R$ {Number(acc.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </p>
+                                    </div>
+                                    <div className="bg-blue-50 p-2 rounded-full">
+                                        <Landmark className="h-5 w-5 text-blue-500" />
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </motion.div>
+                )}
 
                 {/* 2. CHARTS ROW */}
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
