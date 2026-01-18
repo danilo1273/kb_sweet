@@ -25,6 +25,9 @@ interface AuditItem {
     systemStock: number;
     systemCost: number;
     newCost: string;
+    physicalStock: string;
+    diff: number;
+    reason: string;
 }
 
 export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, categories }: InventoryAuditDialogProps) {
@@ -56,7 +59,9 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
     const startAudit = (owner: 'danilo' | 'adriel') => {
         setStockOwner(owner);
         // Initialize audit items based on current stock
-        const validIngredients = ingredients.filter(i => i.type !== 'expense' && !i.is_product_entity);
+        // Allow BOTH ingredients (type 'stock' or undefined) and products (is_product_entity=true)
+        // Only exclude 'expense' type if it exists
+        const validIngredients = ingredients.filter(i => i.type !== 'expense');
         const items = validIngredients.map(ing => {
             // Determine correct cost field based on owner
             // Assuming ingredients have cost_danilo/cost_adriel, fallback to 'cost'
@@ -121,14 +126,32 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
                 // 1. Update Stock Quantity if changed
                 if (item.physicalStock !== "" && Number(item.physicalStock) !== item.systemStock) {
                     const newStock = Number(item.physicalStock);
-                    const { error } = await supabase.rpc('apply_stock_adjustment', {
-                        p_ingredient_id: item.id,
-                        p_new_stock: newStock,
-                        p_stock_owner: stockOwner,
-                        p_reason: item.reason || 'Inventário',
-                        p_type: newStock > item.systemStock ? 'found' : 'loss'
-                    });
-                    if (error) throw error;
+
+                    // Check if it's a product or ingredient
+                    // We need to know this. The 'ingredients' array has this info.
+                    const originalItem = ingredients.find(ing => ing.id === item.id);
+                    // @ts-ignore
+                    const isProduct = originalItem?.isProduct || originalItem?.is_product_entity;
+
+                    if (isProduct) {
+                        const { error } = await supabase.rpc('apply_product_stock_adjustment', {
+                            p_product_id: item.id,
+                            p_new_stock: newStock,
+                            p_stock_owner: stockOwner,
+                            p_reason: item.reason || 'Inventário',
+                            p_type: newStock > item.systemStock ? 'found' : 'loss'
+                        });
+                        if (error) throw error;
+                    } else {
+                        const { error } = await supabase.rpc('apply_stock_adjustment', {
+                            p_ingredient_id: item.id,
+                            p_new_stock: newStock,
+                            p_stock_owner: stockOwner,
+                            p_reason: item.reason || 'Inventário',
+                            p_type: newStock > item.systemStock ? 'found' : 'loss'
+                        });
+                        if (error) throw error;
+                    }
                 }
 
                 // 2. Update Cost if changed
@@ -148,7 +171,27 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
                     // Let's update the specific cost column.
 
                     const { error } = await supabase.from('ingredients').update(updatePayload).eq('id', item.id);
-                    if (error) throw error;
+                    if (error) {
+                        // Fallback: if it fails, maybe it's a product?
+                        // Ideally we check type first like above
+                        const originalItem = ingredients.find(ing => ing.id === item.id);
+                        // @ts-ignore
+                        const isProduct = originalItem?.isProduct || originalItem?.is_product_entity;
+
+                        if (isProduct) {
+                            const productPayload: any = {};
+                            if (stockOwner === 'danilo') productPayload['stock_danilo'] = Number(item.physicalStock); // Ensure stock sync/cost sync?
+                            // Product cost update logic might be different as cost is usually calculated from recipe.
+                            // But if user wants to override cost manualy for finished product (e.g. market price correction?), we can.
+                            // For now, let's just log that Products usually don't have manual cost update here unless specified.
+                            // Let's assume we update the 'cost' column of products if meaningful.
+                            // Since products table has 'cost', we can update it.
+                            const { error: prodError } = await supabase.from('products').update({ cost: newCostVal }).eq('id', item.id);
+                            if (prodError) throw prodError;
+                        } else {
+                            throw error; // Re-throw if it was indeed an ingredient error
+                        }
+                    }
                 }
             }
             toast({ title: "Inventário processado com sucesso!" });

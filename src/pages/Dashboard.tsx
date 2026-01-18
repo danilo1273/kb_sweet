@@ -33,6 +33,8 @@ export default function Dashboard() {
         monthlySales: 0,
         netProfit: 0,
         avgTicket: 0,
+        projectedSalesValue: 0,
+        totalFinishedStock: 0
     });
 
     const [financialData, setFinancialData] = useState<any[]>([]);
@@ -89,6 +91,11 @@ export default function Dashboard() {
                 }, 0) || 0) + (productsRes.data?.reduce((acc, prod) => {
                     return acc + ((Number(prod.stock_quantity) || 0) * (Number(prod.cost) || 0));
                 }, 0) || 0);
+
+                // Finished Products Stats
+                const finishedProducts = productsRes.data || [];
+                const totalFinishedStock = finishedProducts.reduce((acc, p) => acc + (Number(p.stock_quantity) || 0), 0);
+                const projectedSalesValue = finishedProducts.reduce((acc, p) => acc + ((Number(p.stock_quantity) || 0) * (Number(p.price) || 0)), 0);
 
                 // Pending Financials
                 const { data: allPending } = await supabase.from('financial_movements').select('amount, type, status').eq('status', 'pending');
@@ -217,7 +224,9 @@ export default function Dashboard() {
                     monthlyPurchases,
                     monthlySales: monthlySalesTotal,
                     netProfit: monthlySalesIncome,
-                    avgTicket
+                    avgTicket,
+                    projectedSalesValue,
+                    totalFinishedStock
                 });
 
                 setFinancialData(chartData);
@@ -261,7 +270,21 @@ export default function Dashboard() {
             <motion.div variants={container} initial="hidden" animate="show" className="space-y-8">
 
                 {/* 1. KEY METRICS ROW */}
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+                    <motion.div variants={itemVariant}>
+                        <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-purple-500">
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium text-zinc-500">Estoque Acabado</CardTitle>
+                                <Package className="h-4 w-4 text-purple-500" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold text-purple-600">
+                                    R$ {stats.projectedSalesValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </div>
+                                <p className="text-xs text-zinc-500">{stats.totalFinishedStock} un. prontas para venda</p>
+                            </CardContent>
+                        </Card>
+                    </motion.div>
                     <motion.div variants={itemVariant}>
                         <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-blue-500">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

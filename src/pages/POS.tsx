@@ -340,7 +340,14 @@ export default function POS() {
 
                     <div className="flex items-end justify-between">
                         <div className="text-zinc-500 text-sm">{orderItems.length} Itens</div>
-                        <div className="text-right">
+                        <div className="flex flex-col items-end mr-4">
+                            <div className="text-xs text-zinc-400 uppercase font-bold">Lucro Est.</div>
+                            <div className={cn("text-lg font-bold", estimatedProfit >= 0 ? "text-green-600" : "text-red-500")}>
+                                R$ {estimatedProfit.toFixed(2)}
+                                <span className="text-xs ml-1 opacity-70">({marginPercent.toFixed(1)}%)</span>
+                            </div>
+                        </div>
+                        <div className="text-right border-l pl-4">
                             <div className="text-xs text-zinc-400 uppercase font-bold">Total Final</div>
                             <div className="text-2xl font-black text-zinc-900 tracking-tight">R$ {total.toFixed(2)}</div>
                         </div>

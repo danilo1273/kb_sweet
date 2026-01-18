@@ -16,6 +16,12 @@ import { InventoryAuditDialog } from "@/components/inventory/InventoryAuditDialo
 // import { useIngredients } from "@/hooks/useIngredients";
 import { Ingredient, Category } from "@/types";
 
+// Extended interface to support both Ingredients and Products in the list
+interface InventoryItem extends Ingredient {
+    isProduct: boolean;
+    productType?: 'intermediate' | 'finished';
+}
+
 interface UnifiedHistoryItem {
     id: string;
     date: string;
@@ -32,14 +38,14 @@ import { motion, AnimatePresence } from "framer-motion";
 
 export default function Inventory() {
     const navigate = useNavigate();
-    const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+    const [ingredients, setIngredients] = useState<InventoryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
     const { toast } = useToast();
 
     // Modal State
     const [isDialogOpen, setIsDialogOpen] = useState(false);
-    const [currentIngredient, setCurrentIngredient] = useState<Partial<Ingredient>>({});
+    const [currentIngredient, setCurrentIngredient] = useState<Partial<InventoryItem>>({});
     const [isSaving, setIsSaving] = useState(false);
 
     // History Modal State
@@ -191,12 +197,13 @@ export default function Inventory() {
             console.error(prodError);
         }
 
-        const mappedIngredients: Ingredient[] = (ingData || []).map((i: any) => ({
+        const mappedIngredients: InventoryItem[] = (ingData || []).map((i: any) => ({
             ...i,
-            type: i.type || 'stock'
+            type: i.type || 'stock',
+            isProduct: false
         }));
 
-        const mappedProducts: Ingredient[] = (prodData || []).map((p: any) => ({
+        const mappedProducts: InventoryItem[] = (prodData || []).map((p: any) => ({
             id: p.id,
             name: p.name,
             category: p.category || 'Produtos',
@@ -208,7 +215,7 @@ export default function Inventory() {
             cost_adriel: p.cost || 0,
             min_stock: 0,
             type: 'product',
-            // @ts-ignore
+            isProduct: true,
             is_product_entity: true
         }));
 
@@ -337,7 +344,7 @@ export default function Inventory() {
                     )
                 `)
                 .eq('item_id', ingredient.id)
-                .eq('type', 'ingredient')
+                // .eq('type', 'ingredient') // Removed to allow 'product' type (intermediates)
                 .eq('production_orders.status', 'closed') // Only closed orders deduct stock
                 .order('id', { ascending: false }) // Approximate time sort
                 .eq('production_orders.status', 'closed') // Only closed orders deduct stock
