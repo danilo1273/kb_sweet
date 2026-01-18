@@ -198,7 +198,9 @@ export default function Dashboard() {
                 // Current Month Stats
                 const now = new Date();
                 const currentMonthMovements = financialRes.data?.filter(m => {
-                    const d = new Date(m.due_date || m.payment_date);
+                    // Start of Fix: Prioritize payment_date for Cash Flow view
+                    const refDate = m.status === 'paid' ? m.payment_date : m.due_date;
+                    const d = new Date(refDate || m.created_at);
                     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
                 }) || [];
 
@@ -365,7 +367,7 @@ export default function Dashboard() {
             <motion.div variants={container} initial="hidden" animate="show" className="space-y-8">
 
                 {/* 1. KEY METRICS ROW */}
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+                <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
                     <motion.div variants={itemVariant}>
                         <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-purple-500">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -410,6 +412,22 @@ export default function Dashboard() {
                         </Card>
                     </motion.div>
 
+                    {/* NEW: Total Expense Paid (Month) */}
+                    <motion.div variants={itemVariant}>
+                        <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-rose-500">
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium text-zinc-500">Pago (Mês)</CardTitle>
+                                <TrendingDown className="h-4 w-4 text-rose-500" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold text-rose-600">
+                                    R$ {stats.monthlyPurchases.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </div>
+                                <p className="text-xs text-zinc-500">Saídas confirmadas</p>
+                            </CardContent>
+                        </Card>
+                    </motion.div>
+
                     <motion.div variants={itemVariant}>
                         <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-orange-500">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -431,7 +449,7 @@ export default function Dashboard() {
                         <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-red-500">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                 <CardTitle className="text-sm font-medium text-zinc-500">A Pagar (Total)</CardTitle>
-                                <TrendingDown className="h-4 w-4 text-red-500" />
+                                <AlertTriangle className="h-4 w-4 text-red-500" />
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold text-red-600">

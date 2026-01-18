@@ -13,7 +13,14 @@ export function useIngredients() {
         try {
             const { data: ingData, error: ingError } = await supabase
                 .from('ingredients')
-                .select('*, type')
+                .select(`
+                    *,
+                    product_stocks (
+                        quantity,
+                        average_cost,
+                        location:stock_locations (id, name, slug)
+                    )
+                `)
                 .eq('is_active', true)
                 .neq('type', 'expense')
                 .order('name');
@@ -22,26 +29,50 @@ export function useIngredients() {
 
             const { data: prodData, error: prodError } = await supabase
                 .from('products')
-                .select('*')
+                .select(`
+                    *,
+                    product_stocks (
+                        quantity,
+                        average_cost,
+                        location:stock_locations (id, name, slug)
+                    )
+                `)
                 .order('name');
 
-            if (prodError) console.error(prodError); // Non-critical?
+            if (prodError) console.error(prodError);
 
-            const mappedIngredients: Ingredient[] = (ingData || []).map((i: any) => ({
-                ...i,
-                type: i.type || 'stock'
-            }));
+            const mapStocks = (item: any) => {
+                const stocks = item.product_stocks || [];
+                // Backward compatibility mapping (optional, but good for safety)
+                const stockDanilo = stocks.find((s: any) => s.location?.slug === 'stock-danilo');
+                const stockAdriel = stocks.find((s: any) => s.location?.slug === 'stock-adriel');
+
+                return {
+                    ...item,
+                    type: item.type || 'stock',
+                    stocks: stocks.map((s: any) => ({
+                        location_id: s.location?.id,
+                        location_name: s.location?.name,
+                        location_slug: s.location?.slug,
+                        quantity: s.quantity,
+                        average_cost: s.average_cost
+                    })),
+                    // Maintain legacy fields for parts of app not yet refactored
+                    stock_danilo: stockDanilo ? stockDanilo.quantity : (item.stock_danilo || 0),
+                    stock_adriel: stockAdriel ? stockAdriel.quantity : (item.stock_adriel || 0),
+                    cost_danilo: stockDanilo ? stockDanilo.average_cost : (item.cost_danilo || 0),
+                    cost_adriel: stockAdriel ? stockAdriel.average_cost : (item.cost_adriel || 0),
+                };
+            };
+
+            const mappedIngredients: Ingredient[] = (ingData || []).map(mapStocks);
 
             const mappedProducts: Ingredient[] = (prodData || []).map((p: any) => ({
+                ...mapStocks(p),
                 id: p.id,
                 name: p.name,
                 category: p.category || 'Produtos',
                 unit: p.unit || 'un',
-                stock_danilo: p.stock_danilo || 0,
-                stock_adriel: p.stock_adriel || 0,
-                cost: p.cost || 0,
-                cost_danilo: p.cost || 0,
-                cost_adriel: p.cost || 0,
                 min_stock: 0,
                 type: 'product',
                 is_product_entity: true

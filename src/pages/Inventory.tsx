@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
@@ -173,12 +173,26 @@ export default function Inventory() {
         }
     }
 
+    const [stockLocations, setStockLocations] = useState<{ id: string, name: string, slug: string }[]>([]);
+
     async function fetchIngredients() {
         setLoading(true);
 
+        // Fetch Locations
+        const { data: locData } = await supabase.from('stock_locations').select('id, name, slug').order('created_at');
+        if (locData) setStockLocations(locData);
+
         const { data: ingData, error: ingError } = await supabase
             .from('ingredients')
-            .select('*, type')
+            .select(`
+                *,
+                type,
+                product_stocks (
+                    quantity,
+                    average_cost,
+                    location:stock_locations (id, name, slug)
+                )
+            `)
             .eq('is_active', true)
             .neq('type', 'expense')
             .order('name');
@@ -197,22 +211,38 @@ export default function Inventory() {
             console.error(prodError);
         }
 
-        const mappedIngredients: InventoryItem[] = (ingData || []).map((i: any) => ({
-            ...i,
-            type: i.type || 'stock',
-            isProduct: false
-        }));
+        const mapStocks = (item: any) => {
+            const stocks = item.product_stocks || [];
+            // Backward compatibility
+            const stockDanilo = stocks.find((s: any) => s.location?.slug === 'stock-danilo');
+            const stockAdriel = stocks.find((s: any) => s.location?.slug === 'stock-adriel');
+
+            return {
+                ...item,
+                type: item.type || 'stock',
+                isProduct: false,
+                stocks: stocks.map((s: any) => ({
+                    location_id: s.location?.id,
+                    location_name: s.location?.name,
+                    location_slug: s.location?.slug,
+                    quantity: s.quantity,
+                    average_cost: s.average_cost
+                })),
+                stock_danilo: stockDanilo ? stockDanilo.quantity : (item.stock_danilo || 0),
+                stock_adriel: stockAdriel ? stockAdriel.quantity : (item.stock_adriel || 0),
+                cost_danilo: stockDanilo ? stockDanilo.average_cost : (item.cost_danilo || 0),
+                cost_adriel: stockAdriel ? stockAdriel.average_cost : (item.cost_adriel || 0),
+            };
+        };
+
+        const mappedIngredients: InventoryItem[] = (ingData || []).map(mapStocks);
 
         const mappedProducts: InventoryItem[] = (prodData || []).map((p: any) => ({
+            ...mapStocks(p),
             id: p.id,
             name: p.name,
             category: p.category || 'Produtos',
             unit: p.unit || 'un',
-            stock_danilo: p.stock_danilo || 0,
-            stock_adriel: p.stock_adriel || 0,
-            cost: p.cost || 0,
-            cost_danilo: p.cost || 0,
-            cost_adriel: p.cost || 0,
             min_stock: 0,
             type: 'product',
             isProduct: true,
@@ -603,8 +633,9 @@ export default function Inventory() {
                         className="py-8"
                     />
                 ) : (
+
                     filteredIngredients.map((item) => {
-                        const totalQtd = (item.stock_danilo || 0) + (item.stock_adriel || 0);
+                        const totalQtd = item.stocks?.reduce((acc, s) => acc + (s.quantity || 0), 0) || 0;
                         return (
                             <div key={item.id} className={cn("bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3", item.type === 'expense' ? 'bg-purple-50/30' : '')}>
                                 <div className="flex justify-between items-start">
@@ -623,18 +654,25 @@ export default function Inventory() {
                                 </div>
                                 {item.type !== 'expense' && (
                                     <div className="grid grid-cols-2 gap-2 text-sm border-t pt-2">
-                                        <div className="bg-blue-50 p-2 rounded">
-                                            <div className="text-[10px] text-blue-700 font-bold uppercase">Danilo</div>
-                                            <div className={cn("font-medium", item.stock_danilo <= item.min_stock ? "text-red-600" : "text-zinc-700")}>
-                                                {(item.stock_danilo || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-[10px]">{item.unit}</span>
-                                            </div>
-                                        </div>
-                                        <div className="bg-amber-50 p-2 rounded">
-                                            <div className="text-[10px] text-amber-700 font-bold uppercase">Adriel</div>
-                                            <div className="font-medium text-zinc-700">
-                                                {(item.stock_adriel || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-[10px]">{item.unit}</span>
-                                            </div>
-                                        </div>
+                                        {stockLocations.map(loc => {
+                                            const stock = item.stocks?.find(s => s.location_id === loc.id);
+                                            let qty = stock?.quantity;
+
+                                            if (qty === undefined) {
+                                                if (loc.slug === 'stock-danilo') qty = item.stock_danilo || 0;
+                                                else if (loc.slug === 'stock-adriel') qty = item.stock_adriel || 0;
+                                                else qty = 0;
+                                            }
+
+                                            return (
+                                                <div key={loc.id} className="bg-zinc-50 p-2 rounded border border-zinc-100">
+                                                    <div className="text-[10px] text-zinc-500 font-bold uppercase truncate" title={loc.name}>{loc.name}</div>
+                                                    <div className={cn("font-medium", qty <= (item.min_stock || 0) ? "text-red-600" : "text-zinc-700")}>
+                                                        {qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-[10px]">{item.unit}</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 )}
                                 <div className="flex justify-between items-center text-xs text-zinc-400 pt-1">
@@ -655,20 +693,23 @@ export default function Inventory() {
                         <TableRow>
                             <TableHead rowSpan={2} className="align-bottom w-[200px] max-w-[200px]">Nome</TableHead>
                             <TableHead rowSpan={2} className="w-[60px] align-bottom">Un.</TableHead>
-                            <TableHead colSpan={3} className="text-center bg-blue-50/80 text-blue-700 border-b border-blue-100 font-semibold h-8 py-1">Estoque Danilo</TableHead>
-                            <TableHead colSpan={3} className="text-center bg-amber-50/80 text-amber-700 border-b border-amber-100 font-semibold h-8 py-1">Estoque Adriel</TableHead>
+                            {stockLocations.map(loc => (
+                                <TableHead key={loc.id} colSpan={3} className="text-center bg-zinc-50/80 text-zinc-700 border-b border-zinc-200 font-semibold h-8 py-1 truncate max-w-[150px]" title={loc.name}>
+                                    {loc.name}
+                                </TableHead>
+                            ))}
                             <TableHead colSpan={2} className="text-center bg-zinc-100 text-zinc-700 border-b border-zinc-200 font-semibold h-8 py-1">Total Geral</TableHead>
                             <TableHead rowSpan={2} className="text-right w-[80px] align-bottom">Ações</TableHead>
                         </TableRow>
                         <TableRow>
-                            {/* Danilo Sub-headers */}
-                            <TableHead className="text-right bg-blue-50/30 h-8 py-1 text-xs">Qtd</TableHead>
-                            <TableHead className="text-right bg-blue-50/30 h-8 py-1 text-xs">Médio</TableHead>
-                            <TableHead className="text-right bg-blue-50/30 h-8 py-1 text-xs font-bold">Total</TableHead>
-                            {/* Adriel Sub-headers */}
-                            <TableHead className="text-right bg-amber-50/30 h-8 py-1 text-xs">Qtd</TableHead>
-                            <TableHead className="text-right bg-amber-50/30 h-8 py-1 text-xs">Médio</TableHead>
-                            <TableHead className="text-right bg-amber-50/30 h-8 py-1 text-xs font-bold">Total</TableHead>
+                            {/* Dynamic Sub-headers */}
+                            {stockLocations.map(loc => (
+                                <Fragment key={loc.id}>
+                                    <TableHead className="text-right bg-zinc-50/30 h-8 py-1 text-xs">Qtd</TableHead>
+                                    <TableHead className="text-right bg-zinc-50/30 h-8 py-1 text-xs">Médio</TableHead>
+                                    <TableHead className="text-right bg-zinc-50/30 h-8 py-1 text-xs font-bold">Total</TableHead>
+                                </Fragment>
+                            ))}
                             {/* Total Geral Sub-headers */}
                             <TableHead className="text-right bg-zinc-50 h-8 py-1 text-xs font-bold">Qtd</TableHead>
                             <TableHead className="text-right bg-zinc-50 h-8 py-1 text-xs font-bold">Total</TableHead>
@@ -695,8 +736,8 @@ export default function Inventory() {
                         ) : (
                             <AnimatePresence>
                                 {filteredIngredients.map((item) => {
-                                    const totalQtd = (item.stock_danilo || 0) + (item.stock_adriel || 0);
-                                    const totalVal = ((item.stock_danilo || 0) * (item.cost_danilo || 0)) + ((item.stock_adriel || 0) * (item.cost_adriel || 0));
+                                    const totalQtd = item.stocks?.reduce((acc, s) => acc + (s.quantity || 0), 0) || 0;
+                                    const totalVal = item.stocks?.reduce((acc, s) => acc + ((s.quantity || 0) * (s.average_cost || 0)), 0) || 0;
 
                                     return (
                                         <motion.tr
@@ -719,59 +760,57 @@ export default function Inventory() {
                                             </TableCell>
                                             <TableCell>{item.unit}</TableCell>
 
-                                            {/* Danilo Columns */}
-                                            <TableCell className={cn("text-right bg-blue-50/30", item.stock_danilo <= item.min_stock && item.type !== 'expense' ? "text-red-600 font-bold" : "")}>
-                                                {item.type === 'expense' ? '-' : (
-                                                    <div className="flex flex-col items-end">
-                                                        <span>{`${(item.stock_danilo || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
-                                                        {item.unit_type && item.unit_weight && item.unit_weight > 0 && (
-                                                            <span className="text-[10px] text-zinc-500 font-normal opacity-80">
-                                                                = {((item.stock_danilo || 0) * item.unit_weight).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {item.unit_type}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </TableCell>
-                                            <TableCell className="text-right text-xs bg-blue-50/30">
-                                                {item.type === 'expense' ? '-' : (
-                                                    (item.stock_danilo || 0) <= 0 ? <div className="text-zinc-300">-</div> : (
-                                                        <>
-                                                            <div>R$ {item.cost_danilo?.toFixed(2) || '0.00'}</div>
-                                                            <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
-                                                        </>
-                                                    )
-                                                )}
-                                            </TableCell>
-                                            <TableCell className="text-right text-xs font-bold text-blue-700 bg-blue-50/30">
-                                                {item.type === 'expense' ? '-' : `R$ ${((item.stock_danilo || 0) * (item.cost_danilo || 0)).toFixed(2)}`}
-                                            </TableCell>
+                                            {/* Dynamic Location Columns */}
+                                            {stockLocations.map(loc => {
+                                                let stock = item.stocks?.find(s => s.location_id === loc.id);
+                                                let qty = stock?.quantity;
+                                                let cost = stock?.average_cost || 0;
 
-                                            {/* Adriel Columns */}
-                                            <TableCell className="text-right bg-amber-50/30">
-                                                {item.type === 'expense' ? '-' : (
-                                                    <div className="flex flex-col items-end">
-                                                        <span>{`${(item.stock_adriel || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
-                                                        {item.unit_type && item.unit_weight && item.unit_weight > 0 && (
-                                                            <span className="text-[10px] text-zinc-500 font-normal opacity-80">
-                                                                = {((item.stock_adriel || 0) * item.unit_weight).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {item.unit_type}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </TableCell>
-                                            <TableCell className="text-right text-xs bg-amber-50/30">
-                                                {item.type === 'expense' ? '-' : (
-                                                    (item.stock_adriel || 0) <= 0 ? <div className="text-zinc-300">-</div> : (
-                                                        <>
-                                                            <div>R$ {item.cost_adriel?.toFixed(2) || '0.00'}</div>
-                                                            <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
-                                                        </>
-                                                    )
-                                                )}
-                                            </TableCell>
-                                            <TableCell className="text-right text-xs font-bold text-amber-700 bg-amber-50/30">
-                                                {item.type === 'expense' ? '-' : `R$ ${((item.stock_adriel || 0) * (item.cost_adriel || 0)).toFixed(2)}`}
-                                            </TableCell>
+                                                // Fallback for legacy data if migration hasn't covered this product yet
+                                                if (qty === undefined) {
+                                                    if (loc.slug === 'stock-danilo') {
+                                                        qty = item.stock_danilo || 0;
+                                                        cost = item.cost_danilo || item.cost || 0;
+                                                    } else if (loc.slug === 'stock-adriel') {
+                                                        qty = item.stock_adriel || 0;
+                                                        cost = item.cost_adriel || item.cost || 0;
+                                                    } else {
+                                                        qty = 0;
+                                                    }
+                                                }
+
+                                                const totalLocVal = qty * cost;
+
+                                                return (
+                                                    <Fragment key={loc.id}>
+                                                        <TableCell className={cn("text-right bg-zinc-50/30 border-l border-zinc-100", qty <= (item.min_stock || 0) && item.type !== 'expense' ? "text-red-600 font-bold" : "")}>
+                                                            {item.type === 'expense' ? '-' : (
+                                                                <div className="flex flex-col items-end">
+                                                                    <span>{`${qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
+                                                                    {item.unit_type && item.unit_weight && item.unit_weight > 0 && (
+                                                                        <span className="text-[10px] text-zinc-500 font-normal opacity-80">
+                                                                            = {(qty * item.unit_weight).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {item.unit_type}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </TableCell>
+                                                        <TableCell className="text-right text-xs bg-zinc-50/30">
+                                                            {item.type === 'expense' ? '-' : (
+                                                                qty <= 0 ? <div className="text-zinc-300">-</div> : (
+                                                                    <>
+                                                                        <div>R$ {cost.toFixed(2)}</div>
+                                                                        <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                                                    </>
+                                                                )
+                                                            )}
+                                                        </TableCell>
+                                                        <TableCell className="text-right text-xs font-bold text-zinc-700 bg-zinc-50/30 border-r border-zinc-100">
+                                                            {item.type === 'expense' ? '-' : `R$ ${totalLocVal.toFixed(2)}`}
+                                                        </TableCell>
+                                                    </Fragment>
+                                                );
+                                            })}
 
                                             {/* Total Geral Columns */}
                                             <TableCell className="text-right font-bold bg-zinc-50">

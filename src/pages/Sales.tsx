@@ -27,7 +27,8 @@ export default function Sales() {
         // Fetch sales with client info
         const { data, error } = await supabase
             .from('sales')
-            .select('*, clients(name)')
+
+            .select('*, clients(name), stock_locations(name, slug)')
             .order('created_at', { ascending: false });
 
         if (!error) {
@@ -175,8 +176,8 @@ export default function Sales() {
 
                             <div className="flex gap-2 flex-wrap">
                                 <Badge variant="outline" className="text-xs capitalize">{sale.payment_method === 'money' ? 'Dinheiro' : sale.payment_method}</Badge>
-                                <Badge variant="secondary" className={`text-xs ${sale.stock_source === 'danilo' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
-                                    Estoque {sale.stock_source === 'danilo' ? 'DANILO' : 'ADRIEL'}
+                                <Badge variant="secondary" className={`text-xs ${sale.stock_locations?.slug === 'stock-danilo' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                                    {sale.stock_locations?.name || `Estoque ${sale.stock_source}`}
                                 </Badge>
                             </div>
 
@@ -265,9 +266,9 @@ export default function Sales() {
                                     <TableCell>{sale.clients?.name || 'Consumidor Final'}</TableCell>
                                     <TableCell className="capitalize">{sale.payment_method === 'money' ? 'Dinheiro' : sale.payment_method}</TableCell>
                                     <TableCell>
-                                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${sale.stock_source === 'danilo' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'
+                                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${sale.stock_locations?.slug === 'stock-danilo' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'
                                             }`}>
-                                            Estoque {sale.stock_source === 'danilo' ? 'DANILO' : 'ADRIEL'}
+                                            {sale.stock_locations?.name || `Estoque ${sale.stock_source}`}
                                         </span>
                                     </TableCell>
                                     <TableCell>

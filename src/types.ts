@@ -71,6 +71,13 @@ export interface Ingredient {
     purchase_unit_factor?: number;
     type?: 'stock' | 'expense' | 'product';
     is_product_entity?: boolean;
+    stocks?: {
+        location_id: string;
+        location_name: string;
+        location_slug: string;
+        quantity: number;
+        average_cost: number;
+    }[];
 }
 
 export interface PurchaseRequest {
@@ -135,9 +142,11 @@ export interface Sale {
     discount: number;
     payment_method: string;
     status: 'completed' | 'pending' | 'cancelled';
-    stock_source: 'danilo' | 'adriel';
+    stock_source: 'danilo' | 'adriel' | string; // Updated to allow legacy string or generic
+    location_id?: string;
     created_at: string;
     clients?: { name: string };
+    stock_locations?: { name: string; slug: string };
     sale_items?: SaleItem[];
 }
 
@@ -160,6 +169,7 @@ export interface POSProduct {
     stock_danilo: number;
     stock_adriel: number;
     unit?: string;
+    product_stocks?: ProductStock[];
 }
 
 export interface POSOrderItem {
@@ -168,4 +178,23 @@ export interface POSOrderItem {
     quantity: number;
     unit_price: number;
     total: number;
+}
+
+export interface StockLocation {
+    id: string;
+    company_id: string;
+    name: string;
+    slug: string;
+    is_default: boolean;
+    type: string;
+    created_at: string;
+}
+
+export interface ProductStock {
+    id: string;
+    product_id: string;
+    location_id: string;
+    quantity: number;
+    average_cost: number;
+    last_updated: string;
 }

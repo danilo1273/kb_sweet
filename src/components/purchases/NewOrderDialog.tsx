@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +39,18 @@ export function NewOrderDialog({
     const [editIndex, setEditIndex] = useState<number>(-1);
 
     const [unitCost, setUnitCost] = useState<number>(0);
+
+    // Reset state when dialog opens
+    useEffect(() => {
+        if (isOpen) {
+            setNickname("");
+            setSupplierId("default");
+            setOrderItems([]);
+            setDraftItem({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo', ingredient_id: undefined });
+            setEditIndex(-1);
+            setUnitCost(0);
+        }
+    }, [isOpen]);
 
     const handleAddItem = () => {
         if (!draftItem.item_name && !draftItem.ingredient_id) return;

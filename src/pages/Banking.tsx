@@ -155,6 +155,32 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
 
     const periodLabel = new Date(year, month, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
+    const groupedMovements = (() => {
+        const grouped: any[] = [];
+        const orderGroups: Record<string, any> = {};
+
+        movements.forEach((m: any) => {
+            if (m.order_id) {
+                if (!orderGroups[m.order_id]) {
+                    const group = {
+                        ...m,
+                        isGroup: true,
+                        items: [m],
+                        totalAmount: Number(m.amount)
+                    };
+                    orderGroups[m.order_id] = group;
+                    grouped.push(group);
+                } else {
+                    orderGroups[m.order_id].items.push(m);
+                    orderGroups[m.order_id].totalAmount += Number(m.amount);
+                }
+            } else {
+                grouped.push(m);
+            }
+        });
+        return grouped;
+    })();
+
     return (
         <div className="space-y-6">
             <div className="flex items-center gap-4">
@@ -200,90 +226,55 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
                                     </tr>
                                 </thead>
                                 <tbody className="[&_tr:last-child]:border-0">
-                                    {movements.length === 0 ? (
+                                    {groupedMovements.length === 0 ? (
                                         <tr><td colSpan={4} className="p-8 text-center text-zinc-500">Nenhum lançamento neste período.</td></tr>
                                     ) : (
-                                        (() => {
-                                            const grouped: any[] = [];
-                                            const orderGroups: Record<string, any> = {};
+                                        groupedMovements.map((m: any) => {
+                                            const isGroup = m.isGroup;
+                                            const dateStr = new Date(m.payment_date || m.created_at).toLocaleDateString('pt-BR');
+                                            const amountVal = isGroup ? m.totalAmount : Number(m.amount);
+                                            const key = isGroup ? 'group-' + m.order_id : m.id;
 
-                                            movements.forEach((m: any) => {
-                                                if (m.order_id) {
-                                                    if (!orderGroups[m.order_id]) {
-                                                        const group = {
-                                                            ...m,
-                                                            isGroup: true,
-                                                            items: [m],
-                                                            totalAmount: Number(m.amount)
-                                                        };
-                                                        orderGroups[m.order_id] = group;
-                                                        grouped.push(group);
-                                                    } else {
-                                                        orderGroups[m.order_id].items.push(m);
-                                                        orderGroups[m.order_id].totalAmount += Number(m.amount);
-                                                    }
-                                                } else {
-                                                    grouped.push(m);
-                                                }
-                                            });
-
-                                            // Make sure we have navigation
-                                            // navigate is not passed? We need it.
-                                            // We will assume window.location or add useNavigate in next step.
-                                            // For now using window.location.href as fallback or simple anchor.
-                                            // Better: Use `navigate` from parent or hook.
-                                            // Since I can't easily add hook in this replace block without re-rendering whole file,
-                                            // I'll use a simple callback concept or pass `onOpenOrder`.
-                                            // But wait, I can add `useNavigate` to the top of component in a separate edit.
-                                            // For this block, I'll assume `navigate` is available or use window.
-                                            // I'll construct the rows.
-
-                                            return grouped.map((m: any) => {
-                                                const isGroup = m.isGroup;
-                                                const dateStr = new Date(m.payment_date || m.created_at).toLocaleDateString('pt-BR');
-                                                const amountVal = isGroup ? m.totalAmount : Number(m.amount);
-
-                                                return isGroup ? (
-                                                    <tr key={'group-' + m.order_id} className="border-b transition-colors hover:bg-muted/50 bg-slate-50/50">
-                                                        <td className="p-4 align-middle font-medium">{dateStr}</td>
-                                                        <td className="p-4 align-middle">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="font-semibold text-slate-700">Lote: {m.order_nickname || 'Sem Nome'}</span>
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    className="h-6 text-xs text-blue-600 hover:text-blue-800"
-                                                                    onClick={() => navigate(`/purchases?openOrder=${m.order_id}`)}
-                                                                >
-                                                                    (Abrir Visualização)
-                                                                </Button>
-                                                            </div>
-                                                            <div className="text-xs text-slate-500 pl-1">
-                                                                {m.items.length} itens agrupados
-                                                            </div>
-                                                        </td>
-                                                        <td className={`p-4 align-middle text-right font-bold text-red-600`}>
-                                                            - {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amountVal)}
-                                                        </td>
-                                                        <td className="p-4 align-middle">
-                                                            <ArrowDownCircle className="h-4 w-4 text-red-500" />
-                                                        </td>
-                                                    </tr>
-                                                ) : (
-                                                    <tr key={m.id} className="border-b transition-colors hover:bg-muted/50">
-                                                        <td className="p-4 align-middle">{dateStr}</td>
-                                                        <td className="p-4 align-middle">{m.description}</td>
-                                                        <td className={`p-4 align-middle text-right font-medium ${m.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                                                            {m.type === 'expense' ? '- ' : '+ '}
-                                                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(m.amount))}
-                                                        </td>
-                                                        <td className="p-4 align-middle">
-                                                            {m.type === 'income' ? <ArrowUpCircle className="h-4 w-4 text-green-500" /> : <ArrowDownCircle className="h-4 w-4 text-red-500" />}
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            });
-                                        })()
+                                            return isGroup ? (
+                                                <tr key={key} className="border-b transition-colors hover:bg-muted/50 bg-slate-50/50">
+                                                    <td className="p-4 align-middle font-medium">{dateStr}</td>
+                                                    <td className="p-4 align-middle">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-semibold text-slate-700">Lote: {m.order_nickname || 'Sem Nome'}</span>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="h-6 text-xs text-blue-600 hover:text-blue-800"
+                                                                onClick={() => navigate(`/purchases?openOrder=${m.order_id}`)}
+                                                            >
+                                                                (Abrir Visualização)
+                                                            </Button>
+                                                        </div>
+                                                        <div className="text-xs text-slate-500 pl-1">
+                                                            {m.items.length} itens agrupados
+                                                        </div>
+                                                    </td>
+                                                    <td className="p-4 align-middle text-right font-bold text-red-600">
+                                                        - {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amountVal)}
+                                                    </td>
+                                                    <td className="p-4 align-middle">
+                                                        <ArrowDownCircle className="h-4 w-4 text-red-500" />
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                <tr key={key} className="border-b transition-colors hover:bg-muted/50">
+                                                    <td className="p-4 align-middle">{dateStr}</td>
+                                                    <td className="p-4 align-middle">{m.description}</td>
+                                                    <td className={`p-4 align-middle text-right font-medium ${m.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {m.type === 'expense' ? '- ' : '+ '}
+                                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(m.amount))}
+                                                    </td>
+                                                    <td className="p-4 align-middle">
+                                                        {m.type === 'income' ? <ArrowUpCircle className="h-4 w-4 text-green-500" /> : <ArrowDownCircle className="h-4 w-4 text-red-500" />}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
                                     )}
                                 </tbody>
                             </table>
@@ -291,26 +282,40 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
 
                         {/* Mobile Card View */}
                         <div className="md:hidden space-y-0 divide-y">
-                            {movements.length === 0 ? (
+                            {groupedMovements.length === 0 ? (
                                 <div className="p-8 text-center text-zinc-500 text-sm">Nenhum lançamento neste período.</div>
                             ) : (
-                                movements.map((m) => (
-                                    <div key={m.id} className="p-4 bg-white flex justify-between items-center">
-                                        <div className="flex flex-col gap-1">
-                                            <div className="font-medium text-zinc-900 line-clamp-1">{m.description}</div>
-                                            <div className="text-xs text-zinc-500 flex items-center gap-1">
-                                                <span className="capitalize">{new Date(m.payment_date || m.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</span>
+                                groupedMovements.map((m: any) => {
+                                    const isGroup = m.isGroup;
+                                    const key = isGroup ? 'group-m-' + m.order_id : m.id;
+                                    const amountVal = isGroup ? m.totalAmount : Number(m.amount);
+
+                                    return (
+                                        <div key={key} className={`p-4 flex justify-between items-center ${isGroup ? 'bg-slate-50' : 'bg-white'}`}>
+                                            <div className="flex flex-col gap-1">
+                                                <div className="font-medium text-zinc-900 line-clamp-1">
+                                                    {isGroup ? `Lote: ${m.order_nickname || 'Sem Nome'}` : m.description}
+                                                </div>
+                                                <div className="text-xs text-zinc-500 flex flex-col gap-0.5">
+                                                    <span className="capitalize">{new Date(m.payment_date || m.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</span>
+                                                    {isGroup && (
+                                                        <div className="flex items-center gap-1">
+                                                            <span>{m.items.length} itens</span>
+                                                            <span className="text-blue-600 font-bold" onClick={() => navigate(`/purchases?openOrder=${m.order_id}`)}>(Ver)</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-col items-end gap-1">
+                                                <div className={`font-bold flex items-center gap-1 ${m.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {(m.type === 'expense' || isGroup) ? '- ' : '+ '}
+                                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amountVal)}
+                                                </div>
+                                                {m.type === 'income' && !isGroup ? <ArrowUpCircle className="h-3 w-3 text-green-500" /> : <ArrowDownCircle className="h-3 w-3 text-red-500" />}
                                             </div>
                                         </div>
-                                        <div className="flex flex-col items-end gap-1">
-                                            <div className={`font-bold flex items-center gap-1 ${m.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                                                {m.type === 'expense' ? '- ' : '+ '}
-                                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(m.amount))}
-                                            </div>
-                                            {m.type === 'income' ? <ArrowUpCircle className="h-3 w-3 text-green-500" /> : <ArrowDownCircle className="h-3 w-3 text-red-500" />}
-                                        </div>
-                                    </div>
-                                ))
+                                    );
+                                })
                             )}
                         </div>
                     </div>

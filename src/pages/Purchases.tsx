@@ -181,6 +181,7 @@ const Purchases = () => {
             setIsOrderDialogOpen(false);
             fetchOrders();
         }
+        return success;
     }
 
     function openEditItem(item: PurchaseRequest) {
@@ -274,12 +275,7 @@ const Purchases = () => {
 
     const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
-    const normalizeString = (str: string) =>
-        str.toLowerCase()
-            .trim()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/\s+/g, ' ');
+
 
     const formatStatus = (status: string) => {
         const map: Record<string, string> = {
@@ -468,7 +464,8 @@ const Purchases = () => {
                 currentUserRoles={currentUserRoles}
                 currentUserId={currentUserId || ''}
                 onDeleteOrder={async (id) => {
-                    const success = await deleteOrder(id);
+                    if (!currentUserId) return;
+                    const success = await deleteOrder(id, "Cancelado via Módulo de Compras", currentUserId);
                     if (success) setIsManageOrderOpen(false);
                 }}
                 onOrderUpdated={fetchOrders}

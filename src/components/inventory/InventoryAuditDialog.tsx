@@ -155,42 +155,28 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
                 }
 
                 // 2. Update Cost if changed
+                // 2. Update Cost if changed
                 if (item.newCost !== "" && Number(item.newCost) !== item.systemCost) {
                     const newCostVal = Number(item.newCost);
 
-                    // Determine which field to update
-                    const updatePayload: any = {};
+                    const originalItem = ingredients.find(ing => ing.id === item.id);
+                    // @ts-ignore
+                    const isProduct = originalItem?.isProduct || originalItem?.is_product_entity;
+
+                    const updatePayload: any = {
+                        cost: newCostVal // Always update master cost
+                    };
+
+                    // Update specific legacy column
                     if (stockOwner === 'danilo') updatePayload['cost_danilo'] = newCostVal;
                     else if (stockOwner === 'adriel') updatePayload['cost_adriel'] = newCostVal;
 
-                    // Also update base 'cost' if it's considered the master or if we want to sync
-                    // For now, let's just update the specific one. If you want global sync, logic needed.
-                    // Given the previous edit dialog updated 'cost', maybe we should update 'cost' too?
-                    // Let's safe bet: update specific AND 'cost' if it's the primary inventory (e.g. Danilo?)
-                    // Or just strict specific. Let's stick to strict specific first, but maybe user expects global 'cost' update.
-                    // Let's update the specific cost column.
-
-                    const { error } = await supabase.from('ingredients').update(updatePayload).eq('id', item.id);
-                    if (error) {
-                        // Fallback: if it fails, maybe it's a product?
-                        // Ideally we check type first like above
-                        const originalItem = ingredients.find(ing => ing.id === item.id);
-                        // @ts-ignore
-                        const isProduct = originalItem?.isProduct || originalItem?.is_product_entity;
-
-                        if (isProduct) {
-                            const productPayload: any = {};
-                            if (stockOwner === 'danilo') productPayload['stock_danilo'] = Number(item.physicalStock); // Ensure stock sync/cost sync?
-                            // Product cost update logic might be different as cost is usually calculated from recipe.
-                            // But if user wants to override cost manualy for finished product (e.g. market price correction?), we can.
-                            // For now, let's just log that Products usually don't have manual cost update here unless specified.
-                            // Let's assume we update the 'cost' column of products if meaningful.
-                            // Since products table has 'cost', we can update it.
-                            const { error: prodError } = await supabase.from('products').update({ cost: newCostVal }).eq('id', item.id);
-                            if (prodError) throw prodError;
-                        } else {
-                            throw error; // Re-throw if it was indeed an ingredient error
-                        }
+                    if (isProduct) {
+                        const { error } = await supabase.from('products').update(updatePayload).eq('id', item.id);
+                        if (error) throw error;
+                    } else {
+                        const { error } = await supabase.from('ingredients').update(updatePayload).eq('id', item.id);
+                        if (error) throw error;
                     }
                 }
             }
@@ -278,26 +264,186 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
                                                     <TableCell className="text-right text-zinc-500">
                                                         {item.systemStock.toLocaleString('pt-BR')}
                                                     </TableCell>
-                                                    <TableCell className="bg-blue-50/30 p-2">
-                                                        <Input
-                                                            type="number"
-                                                            className="text-center font-bold h-8"
-                                                            value={item.physicalStock}
-                                                            onChange={(e) => handleStockChange(item.id, e.target.value)}
-                                                            placeholder={String(item.systemStock)}
-                                                        />
+                                                    <TableCell className="bg-blue-50/30 p-2 align-top">
+                                                        <div className="flex flex-col gap-1">
+                                                            {/* Primary Stock */}
+                                                            <div className="relative">
+                                                                <Input
+                                                                    type="number"
+                                                                    className="text-center font-bold h-7 text-xs pr-8"
+                                                                    value={item.physicalStock}
+                                                                    onChange={(e) => handleStockChange(item.id, e.target.value)}
+                                                                    placeholder={String(item.systemStock)}
+                                                                />
+                                                                <span className="absolute right-2 top-1.5 text-[10px] text-zinc-400 pointer-events-none">
+                                                                    {item.unit}
+                                                                </span>
+                                                            </div>
+
+                                                            {/* Secondary Stock (if applicable) */}
+                                                            {(() => {
+                                                                const original = ingredients.find(i => i.id === item.id);
+
+                                                                let factor = 1;
+                                                                let secUnit = null;
+                                                                let isRecipeUnit = false;
+
+                                                                // Priority 1: Purchase Unit (Base / Factor = Sec)
+                                                                if (original?.purchase_unit && original.purchase_unit.toLowerCase() !== item.unit.toLowerCase()) {
+                                                                    secUnit = original.purchase_unit;
+                                                                    factor = original.purchase_unit_factor || 1;
+                                                                    isRecipeUnit = false;
+                                                                }
+                                                                // Priority 2: Recipe/Secondary Unit (Base * Factor = Sec)
+                                                                else if (original?.unit_type && original.unit_type.toLowerCase() !== item.unit.toLowerCase()) {
+                                                                    secUnit = original.unit_type;
+                                                                    factor = original.unit_weight || 1;
+                                                                    isRecipeUnit = true;
+                                                                }
+
+                                                                const showSecondary = !!secUnit && factor !== 1;
+
+                                                                if (showSecondary) {
+                                                                    const valNum = Number(item.physicalStock);
+                                                                    const secVal = item.physicalStock === "" ? "" : (isRecipeUnit ? valNum * factor : valNum / factor);
+                                                                    // Format to max 3 decimals for display to avoid ugly floats, but keep precision in calculation
+                                                                    const displaySecVal = secVal === "" ? "" : Number(secVal).toLocaleString('en-US', { maximumFractionDigits: 3, useGrouping: false });
+
+                                                                    return (
+                                                                        <div className="relative">
+                                                                            <Input
+                                                                                type="number"
+                                                                                className="text-center h-7 text-xs bg-blue-100/50 pr-8 text-blue-700"
+                                                                                // We use text type or handle number specially to avoid floating point inputs locking up?
+                                                                                // Let's rely on standard type="number" but realize it might fight with rounding.
+                                                                                // Better: Controlled input.
+                                                                                defaultValue={displaySecVal}
+                                                                                onBlur={(e) => {
+                                                                                    const val = parseFloat(e.target.value);
+                                                                                    if (!isNaN(val)) {
+                                                                                        // Reverse Logic
+                                                                                        const baseVal = isRecipeUnit ? val / factor : val * factor;
+                                                                                        handleStockChange(item.id, baseVal.toString());
+                                                                                    } else if (e.target.value === "") {
+                                                                                        handleStockChange(item.id, "");
+                                                                                    }
+                                                                                }}
+                                                                                key={`${item.id}-sec-stock-${item.physicalStock}`} // Force re-render on base change to update defaultValue?
+                                                                            // Actually, controlled value is better.
+                                                                            />
+                                                                            <span className="absolute right-2 top-1.5 text-[10px] text-blue-400 pointer-events-none">
+                                                                                {secUnit}
+                                                                            </span>
+                                                                        </div>
+                                                                    );
+                                                                }
+                                                                return null;
+                                                            })()}
+                                                        </div>
                                                     </TableCell>
-                                                    <TableCell className={`text-right font-bold ${item.diff > 0 ? "text-green-600" : item.diff < 0 ? "text-red-600" : "text-zinc-300"}`}>
+                                                    <TableCell className={`text-right font-bold align-middle ${item.diff > 0 ? "text-green-600" : item.diff < 0 ? "text-red-600" : "text-zinc-300"}`}>
                                                         {item.diff > 0 ? `+${item.diff.toLocaleString('pt-BR')}` : item.diff.toLocaleString('pt-BR')}
                                                     </TableCell>
-                                                    <TableCell className="bg-amber-50/30 p-2">
-                                                        <Input
-                                                            type="number"
-                                                            step="0.01"
-                                                            className="text-center h-8 text-xs"
-                                                            value={item.newCost}
-                                                            onChange={(e) => handleCostChange(item.id, e.target.value)}
-                                                        />
+                                                    <TableCell className="bg-amber-50/30 p-2 align-top">
+                                                        <div className="flex flex-col gap-1">
+                                                            {/* Primary Cost */}
+                                                            <div className="relative">
+                                                                <Input
+                                                                    type="number"
+                                                                    step="0.0001"
+                                                                    className="text-center h-7 text-xs pr-8"
+                                                                    value={item.newCost}
+                                                                    onChange={(e) => handleCostChange(item.id, e.target.value)}
+                                                                />
+                                                                <span className="absolute right-2 top-1.5 text-[10px] text-zinc-400 pointer-events-none">
+                                                                    /{item.unit}
+                                                                </span>
+                                                            </div>
+
+                                                            {/* Secondary Cost (if applicable) OR Total Value */}
+                                                            {(() => {
+                                                                const original = ingredients.find(i => i.id === item.id);
+
+                                                                let factor = 1;
+                                                                let secUnit = null;
+                                                                let isRecipeUnit = false;
+
+                                                                if (original?.purchase_unit && original.purchase_unit.toLowerCase() !== item.unit.toLowerCase()) {
+                                                                    secUnit = original.purchase_unit;
+                                                                    factor = original.purchase_unit_factor || 1;
+                                                                    isRecipeUnit = false;
+                                                                }
+                                                                else if (original?.unit_type && original.unit_type.toLowerCase() !== item.unit.toLowerCase()) {
+                                                                    secUnit = original.unit_type;
+                                                                    factor = original.unit_weight || 1;
+                                                                    isRecipeUnit = true;
+                                                                }
+
+                                                                const showSecondary = !!secUnit && factor !== 1;
+
+                                                                if (showSecondary) {
+                                                                    // COST Logic (Inverse of Stock)
+                                                                    const baseCost = Number(item.newCost) || 0;
+                                                                    const secCost = isRecipeUnit ? baseCost / factor : baseCost * factor;
+
+                                                                    const displaySecCost = secCost === 0 && item.newCost === "" ? "" : secCost.toLocaleString('en-US', { maximumFractionDigits: 4, useGrouping: false });
+
+                                                                    return (
+                                                                        <div className="relative">
+                                                                            <Input
+                                                                                type="number"
+                                                                                step="0.01"
+                                                                                className="text-center h-7 text-xs bg-amber-100/50 pr-8 text-amber-700"
+                                                                                defaultValue={displaySecCost}
+                                                                                onBlur={(e) => {
+                                                                                    const val = parseFloat(e.target.value);
+                                                                                    if (!isNaN(val)) {
+                                                                                        // Reverse Logic
+                                                                                        const baseVal = isRecipeUnit ? val * factor : val / factor;
+                                                                                        handleCostChange(item.id, baseVal.toString());
+                                                                                    }
+                                                                                }}
+                                                                                key={`${item.id}-sec-cost-${item.newCost}`}
+                                                                            />
+                                                                            <span className="absolute right-2 top-1.5 text-[10px] text-amber-600 pointer-events-none">
+                                                                                /{secUnit}
+                                                                            </span>
+                                                                        </div>
+                                                                    );
+                                                                } else {
+                                                                    // Show Total Value Option if no secondary unit
+                                                                    // logic: Total = Qty * Cost.
+                                                                    // If Qty is 0, we can't really set Unit Cost via Total.
+                                                                    const qty = Number(item.physicalStock) || 0;
+                                                                    const baseCost = Number(item.newCost) || 0;
+                                                                    const totalVal = qty * baseCost;
+                                                                    const displayTotal = totalVal === 0 && item.newCost === "" ? "" : totalVal.toLocaleString('en-US', { maximumFractionDigits: 2, useGrouping: false });
+
+                                                                    return (
+                                                                        <div className="relative" title="Valor Total (Estoque)">
+                                                                            <Input
+                                                                                type="number"
+                                                                                step="0.01"
+                                                                                className="text-center h-7 text-xs bg-emerald-50 pr-8 text-emerald-700 border-emerald-200"
+                                                                                placeholder="Total"
+                                                                                disabled={qty === 0}
+                                                                                defaultValue={displayTotal}
+                                                                                onBlur={(e) => {
+                                                                                    const val = parseFloat(e.target.value);
+                                                                                    if (!isNaN(val) && qty > 0) {
+                                                                                        handleCostChange(item.id, (val / qty).toString());
+                                                                                    }
+                                                                                }}
+                                                                                key={`${item.id}-total-cost-${item.newCost}-${item.physicalStock}`}
+                                                                            />
+                                                                            <span className="absolute right-2 top-1.5 text-[10px] text-emerald-600 pointer-events-none">
+                                                                                Total
+                                                                            </span>
+                                                                        </div>
+                                                                    );
+                                                                }
+                                                            })()}
+                                                        </div>
                                                     </TableCell>
                                                     <TableCell>
                                                         {(Number(item.physicalStock) !== item.systemStock && item.physicalStock !== "") || (Number(item.newCost) !== item.systemCost) ? (

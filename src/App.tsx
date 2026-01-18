@@ -20,6 +20,7 @@ import AdminCompanies from '@/pages/admin/Companies';
 import AdminLogin from '@/pages/admin/AdminLogin';
 import ErrorBoundary from '@/components/ErrorBoundary';
 
+const CompanySettings = lazy(() => import('@/pages/admin/CompanySettings'));
 const AdminRegisters = lazy(() => import('@/pages/AdminRegisters'));
 const Clients = lazy(() => import('@/pages/Clients'));
 const Sales = lazy(() => import('@/pages/Sales'));
@@ -87,6 +88,11 @@ function App() {
                     <Route path="/admin/registers" element={
                         <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
                             <AdminRegisters />
+                        </Suspense>
+                    } />
+                    <Route path="/admin/settings" element={
+                        <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
+                            <CompanySettings />
                         </Suspense>
                     } />
                     <Route path="/audit" element={

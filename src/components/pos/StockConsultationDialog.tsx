@@ -18,11 +18,12 @@ interface StockConsultationDialogProps {
     isOpen?: boolean;
     onOpenChange?: (open: boolean) => void;
     onAddProduct?: (product: Product) => void;
-    stockSource?: 'danilo' | 'adriel';
+
+    stockSource?: string; // Location ID
     cartItems?: OrderItem[];
 }
 
-export function StockConsultationDialog({ isOpen, onOpenChange, onAddProduct, stockSource = 'danilo', cartItems = [] }: StockConsultationDialogProps) {
+export function StockConsultationDialog({ isOpen, onOpenChange, onAddProduct, stockSource = '', cartItems = [] }: StockConsultationDialogProps) {
     const [internalOpen, setInternalOpen] = useState(false);
 
     const isControlled = isOpen !== undefined && onOpenChange !== undefined;
@@ -61,15 +62,22 @@ export function StockConsultationDialog({ isOpen, onOpenChange, onAddProduct, st
         }
     }, [search, products]);
 
+    const [locations, setLocations] = useState<any[]>([]);
+
     async function loadStock() {
         setLoading(true);
-        // Filter out intermediates in query or client side. 
-        // Client side is safer if we want to be sure about types not being set on some legacy items.
-        // But query is better. Let's assume 'type' column exists.
+
+        // 1. Fetch Locations to map IDs to Slugs (for legacy fallback)
+        const { data: locs } = await supabase.from('stock_locations').select('id, slug');
+        setLocations(locs || []);
+
+        // 2. Fetch Products
+        // Removed broken join with product_stocks
         const { data } = await supabase.from('products')
             .select('*')
-            .neq('type', 'intermediate') // Filter out bases
+            .neq('type', 'intermediate')
             .order('name');
+
         setProducts(data || []);
         setFilteredProducts(data || []);
         setLoading(false);
@@ -115,7 +123,24 @@ export function StockConsultationDialog({ isOpen, onOpenChange, onAddProduct, st
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                             {filteredProducts.map(p => {
-                                const currentStock = stockSource === 'danilo' ? p.stock_danilo : p.stock_adriel;
+                                // Resolve Stock Logic
+                                let currentStock = 0;
+
+                                // 1. Try Legacy Fallback first (since we know migration is pending/broken for products)
+                                const locationSlug = locations.find(l => l.id === stockSource)?.slug;
+
+                                if (locationSlug === 'stock-danilo') {
+                                    currentStock = (p as any).stock_danilo || 0;
+                                } else if (locationSlug === 'stock-adriel') {
+                                    currentStock = (p as any).stock_adriel || 0;
+                                } else {
+                                    // Fallback to 0 if unknown location or try legacy property if just one stock
+                                    // If stockSource is empty, maybe sum both?
+                                    if (!stockSource) {
+                                        currentStock = ((p as any).stock_danilo || 0) + ((p as any).stock_adriel || 0);
+                                    }
+                                }
+
                                 // Calculate qty in cart
                                 const qtyInCart = cartItems
                                     .filter(item => item.product.id === p.id)
@@ -148,7 +173,7 @@ export function StockConsultationDialog({ isOpen, onOpenChange, onAddProduct, st
 
                                         {/* Stock Info */}
                                         <div className="flex gap-2 mb-3 mt-auto">
-                                            <div className={`flex-1 flex flex-col items-center p-1.5 rounded-md border ${stockSource === 'danilo' ? 'bg-blue-50 border-blue-100' : 'bg-zinc-50 border-zinc-100 opacity-60'}`}>
+                                            <div className={`flex-1 flex flex-col items-center p-1.5 rounded-md border bg-zinc-50 border-zinc-100`}>
                                                 <span className="text-[10px] uppercase font-bold text-zinc-500 mb-0.5">Estoque</span>
                                                 <Badge
                                                     variant={availableStock > 0 ? "outline" : "destructive"}

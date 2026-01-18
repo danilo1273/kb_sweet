@@ -71,6 +71,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         { name: "Financeiro", href: "/financial", icon: DollarSign, roles: ['admin', 'financial'] },
         { name: "Bancos", href: "/banking", icon: Building2, roles: ['admin', 'financial'] },
         { name: "Cadastros", href: "/admin/registers", icon: Database, roles: ['admin'] },
+        { name: "Configurações", href: "/admin/settings", icon: Building2, roles: ['admin'] },
         { name: "Usuários", href: "/admin", icon: User, roles: ['admin'] },
         { name: "Auditoria", href: "/audit", icon: ShieldCheck, roles: ['admin'] },
         { name: "Perfis", href: "/profile", icon: User, roles: [] }, // Todos

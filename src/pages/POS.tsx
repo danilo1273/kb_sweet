@@ -53,10 +53,11 @@ export default function POS() {
     // Order State
     const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
     const [selectedClient, setSelectedClient] = useState<string | null>(null);
-    const [stockSource, setStockSource] = useState<'danilo' | 'adriel'>('danilo');
+    const [stockSource, setStockSource] = useState<string>('');
 
     // Checkout State
     const [globalDiscount, setGlobalDiscount] = useState<number>(0);
+    const [stockLocations, setStockLocations] = useState<{ id: string, name: string, slug: string }[]>([]);
 
 
     useEffect(() => {
@@ -64,7 +65,28 @@ export default function POS() {
     }, []);
 
     async function loadData() {
-        const { data: prodData } = await supabase.from('products').select('*').order('name');
+        // Fetch Locations
+        const { data: locData } = await supabase.from('stock_locations').select('id, name, slug').order('created_at');
+        if (locData) {
+            setStockLocations(locData);
+            // Default to Danilo or first one
+            const def = locData.find(l => l.slug === 'stock-danilo') || locData[0];
+            if (def && !stockSource) setStockSource(def.id);
+            // If stockSource is already set (legacy 'danilo' string?), we should map it if possible, 
+            // but for now let's reset to valid ID if current value is definitely invalid UUID.
+            // Actually, we'll handle the type change of stockSource below.
+        }
+
+        const { data: prodData } = await supabase.from('products')
+            .select(`
+                *, 
+                product_stocks (
+                    quantity,
+                    location_id
+                )
+            `)
+            .order('name');
+
         const { data: clientData } = await supabase.from('clients').select('id, name').order('name');
         setProducts(prodData || []);
         setClients(clientData || []);
@@ -189,13 +211,14 @@ export default function POS() {
                                 stockSource={stockSource}
                                 cartItems={orderItems}
                             />
-                            <Select value={stockSource} onValueChange={(v: any) => setStockSource(v)}>
+                            <Select value={stockSource} onValueChange={(v) => setStockSource(v)}>
                                 <SelectTrigger className="w-[140px] h-8 text-xs bg-zinc-100 border-zinc-200">
-                                    <SelectValue />
+                                    <SelectValue placeholder="Local de Estoque" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="danilo">Estoque DANILO</SelectItem>
-                                    <SelectItem value="adriel">Estoque ADRIEL</SelectItem>
+                                    {stockLocations.map(loc => (
+                                        <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>
@@ -220,7 +243,10 @@ export default function POS() {
                                     <div className="p-4 text-center text-sm text-muted-foreground">Nenhum produto encontrado</div>
                                 ) : (
                                     filteredProducts.map(p => {
-                                        const stock = stockSource === 'danilo' ? p.stock_danilo : p.stock_adriel;
+                                        // Find stock for selected source
+                                        const stockEntry = p.product_stocks?.find((s: any) => s.location_id === stockSource);
+                                        const stock = stockEntry ? stockEntry.quantity : 0;
+
                                         return (
                                             <button
                                                 key={p.id}

@@ -13,7 +13,7 @@ export function usePOS() {
         discount: number,
         paymentMethod: string,
         clientId: string | null,
-        stockSource: 'danilo' | 'adriel'
+        stockSource: string
     ) {
         setLoading(true);
         try {
@@ -35,7 +35,7 @@ export function usePOS() {
                 p_discount: discount,
                 p_payment_method: paymentMethod,
                 p_client_id: clientId === 'anonymous' ? null : clientId,
-                p_stock_source: stockSource
+                p_location_id: stockSource
             });
 
             if (error) throw error;

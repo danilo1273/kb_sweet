@@ -26,19 +26,36 @@ interface Product {
     batch_size?: number;
     unit?: string;
     image_url?: string;
+    product_stocks?: {
+        location_id: string;
+        quantity: number;
+        average_cost: number;
+    }[];
 }
 
 interface Ingredient {
     id: string;
     name: string;
     unit: string;
-    stock_danilo: number;
-    stock_adriel: number;
     cost: number;
-    cost_danilo?: number;
-    cost_adriel?: number;
     unit_weight: number;
     unit_type: string;
+    product_stocks?: {
+        location_id: string;
+        quantity: number;
+        average_cost: number;
+    }[];
+    // Legacy support
+    stock_danilo?: number;
+    stock_adriel?: number;
+    cost_danilo?: number;
+    cost_adriel?: number;
+}
+
+interface StockLocation {
+    id: string;
+    name: string;
+    slug: string;
 }
 
 interface ProductionOrder {
@@ -52,7 +69,8 @@ interface ProductionOrder {
     products?: Product;
     cost_at_production?: number;
     profiles?: { email: string; full_name: string };
-    stock_source?: 'danilo' | 'adriel';
+    location_id?: string;
+    stock_location?: { name: string };
 }
 
 interface ProductionOrderItem {
@@ -93,7 +111,8 @@ export default function Production() {
     const [planningOrder, setPlanningOrder] = useState<ProductionOrder | null>(null);
     const [isExecutionDialogOpen, setIsExecutionDialogOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const [targetStock, setTargetStock] = useState<'danilo' | 'adriel'>('danilo');
+    const [stockLocations, setStockLocations] = useState<StockLocation[]>([]);
+    const [selectedLocation, setSelectedLocation] = useState<string>("");
 
     // Create Order State
     const [newOrderProduct, setNewOrderProduct] = useState("");
@@ -162,13 +181,44 @@ export default function Production() {
     // ... 
 
     async function fetchResources() {
-        const { data: prods } = await supabase.from('products').select('*').order('name');
-        const { data: ings } = await supabase.from('ingredients').select('*').eq('is_active', true).order('name');
-        const { data: bomData } = await supabase.from('product_bom').select('*'); // Fetch BOMs
+        const { data: prods } = await supabase.from('products')
+            .select(`
+                *,
+                product_stocks (
+                    quantity,
+                    average_cost,
+                    location_id
+                )
+            `)
+            .order('name');
+
+        const { data: ings } = await supabase
+            .from('ingredients')
+            .select(`
+                *,
+                product_stocks (
+                    quantity,
+                    average_cost,
+                    location_id
+                )
+            `)
+            .eq('is_active', true)
+            .order('name');
+
+        const { data: bomData } = await supabase.from('product_bom').select('*');
+        const { data: locs } = await supabase.from('stock_locations').select('*').order('created_at');
 
         if (prods) setProducts(prods);
         if (ings) setIngredients(ings);
         if (bomData) setBoms(bomData);
+        if (locs) {
+            setStockLocations(locs);
+            if (locs.length > 0 && !selectedLocation) {
+                // Default to first location or one with 'danilo' slug if exists for compatibility
+                const defaultLoc = locs.find(l => l.slug === 'stock-danilo') || locs[0];
+                setSelectedLocation(defaultLoc.id);
+            }
+        }
     }
 
     async function fetchInitialData() {
@@ -180,7 +230,7 @@ export default function Production() {
     async function fetchOrders() {
         let query = supabase
             .from('production_orders')
-            .select('*, products(name, stock_quantity, cost, unit, batch_size, image_url), profiles(email, full_name)')
+            .select('*, products(name, stock_quantity, cost, unit, batch_size, image_url), profiles(email, full_name), stock_location:stock_locations(name)')
             .order('created_at', { ascending: false });
 
         if (activeTab === 'open') {
@@ -295,8 +345,12 @@ export default function Production() {
                 const ing = ingredients.find(i => i.id === item.item_id);
                 if (ing) {
                     unitWeight = ing.unit_weight || 1;
-                    // Fix: Use fallback cost if standard cost is zero
-                    const baseCost = ing.cost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0);
+
+                    // Try dynamic cost first
+                    const stockEntry = ing.product_stocks?.find(s => s.location_id === selectedLocation);
+                    let baseCost = (stockEntry?.average_cost && stockEntry.average_cost > 0)
+                        ? stockEntry.average_cost
+                        : (ing.cost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0));
 
                     if (unitWeight > 0) cost = baseCost / unitWeight;
                     else cost = baseCost;
@@ -318,7 +372,7 @@ export default function Production() {
             unitProjectedCost: total / safeOutput
         };
 
-    }, [orderItems, actualOutputQuantity, ingredients, products, selectedOrder, boms]); // Added boms dependency
+    }, [orderItems, actualOutputQuantity, ingredients, products, selectedOrder, boms, selectedLocation]);
 
 
 
@@ -510,7 +564,7 @@ export default function Production() {
                 p_order_id: selectedOrder.id,
                 p_items_usage: itemsPayload,
                 p_actual_output_quantity: actualOutputQuantity,
-                p_target_stock: targetStock,
+                p_location_id: selectedLocation,
                 p_user_id: user.id
             });
 
@@ -683,7 +737,14 @@ export default function Production() {
                                                     <div className="flex justify-between items-start">
                                                         <div>
                                                             <div className="font-bold text-lg text-zinc-900">{order.products?.name}</div>
-                                                            <div className="text-xs text-zinc-500">Fechado em: {order.closed_at ? new Date(order.closed_at).toLocaleDateString() : '-'}</div>
+                                                            <div className="text-xs text-zinc-500 flex items-center gap-2">
+                                                                <span>Fechado em: {order.closed_at ? new Date(order.closed_at).toLocaleDateString() : '-'}</span>
+                                                                {order.stock_location?.name && (
+                                                                    <Badge variant="outline" className="text-[10px] h-4 px-1 bg-zinc-50">
+                                                                        {order.stock_location.name}
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                         <Badge variant={order.status === 'closed' ? 'default' : 'secondary'} className={order.status === 'closed' ? 'bg-green-600' : ''}>
                                                             {order.status === 'closed' ? 'Concluído' : order.status}
@@ -720,6 +781,7 @@ export default function Production() {
                                                 <TableRow>
                                                     <TableHead>Data Fechamento</TableHead>
                                                     <TableHead>Produto</TableHead>
+                                                    <TableHead>Local</TableHead>
                                                     <TableHead>Criado Por</TableHead>
                                                     <TableHead>Qtd Produzida</TableHead>
                                                     <TableHead>Custo Total</TableHead>
@@ -736,6 +798,11 @@ export default function Production() {
                                                         <TableRow key={order.id}>
                                                             <TableCell>{order.closed_at ? new Date(order.closed_at).toLocaleString() : '-'}</TableCell>
                                                             <TableCell className="font-medium">{order.products?.name}</TableCell>
+                                                            <TableCell>
+                                                                {order.stock_location?.name ? (
+                                                                    <Badge variant="outline" className="bg-zinc-50 font-normal">{order.stock_location.name}</Badge>
+                                                                ) : '-'}
+                                                            </TableCell>
                                                             <TableCell className="text-zinc-500">
                                                                 {order.profiles?.full_name?.split(' ')[0] || order.profiles?.email?.split('@')[0] || '-'}
                                                             </TableCell>
@@ -871,14 +938,19 @@ export default function Production() {
                                             const isClosed = selectedOrder?.status === 'closed';
 
                                             if (stockInfo) {
-                                                if ('stock_danilo' in stockInfo) {
-                                                    currentStock = stockInfo.stock_danilo;
-                                                    stockUnit = stockInfo.unit;
-                                                    unitWeight = stockInfo.unit_weight || 1;
-                                                    unitType = stockInfo.unit_type || '';
-                                                } else {
-                                                    currentStock = stockInfo.stock_quantity;
+                                                // Dynamic Stock Logic
+                                                const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === selectedLocation);
+
+                                                if (stockEntry) {
+                                                    currentStock = stockEntry.quantity;
                                                     stockUnit = stockInfo.unit || 'un';
+                                                    if ('unit_weight' in stockInfo) {
+                                                        unitWeight = stockInfo.unit_weight || 1;
+                                                        unitType = stockInfo.unit_type || '';
+                                                    }
+                                                } else {
+                                                    // Fallback or 0
+                                                    currentStock = 0;
                                                 }
                                             }
 
@@ -984,14 +1056,18 @@ export default function Production() {
                                     let unitType = '';
 
                                     if (stockInfo) {
-                                        if ('stock_danilo' in stockInfo) {
-                                            currentStock = stockInfo.stock_danilo;
-                                            stockUnit = stockInfo.unit;
-                                            unitWeight = stockInfo.unit_weight || 1;
-                                            unitType = stockInfo.unit_type || '';
-                                        } else {
-                                            currentStock = stockInfo.stock_quantity;
+                                        // Dynamic Stock Logic
+                                        const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === selectedLocation);
+
+                                        if (stockEntry) {
+                                            currentStock = stockEntry.quantity;
                                             stockUnit = stockInfo.unit || 'un';
+                                            if ('unit_weight' in stockInfo) {
+                                                unitWeight = stockInfo.unit_weight || 1;
+                                                unitType = stockInfo.unit_type || '';
+                                            }
+                                        } else {
+                                            currentStock = 0;
                                         }
                                     }
 
@@ -1073,14 +1149,14 @@ export default function Production() {
                         let unitType = '';
 
                         if (stockInfo) {
-                            if ('stock_danilo' in stockInfo) {
-                                currentStock = stockInfo.stock_danilo;
-                                stockUnit = stockInfo.unit;
-                                unitWeight = stockInfo.unit_weight || 1;
-                                unitType = stockInfo.unit_type || '';
-                            } else {
-                                currentStock = stockInfo.stock_quantity;
+                            const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === selectedLocation);
+                            if (stockEntry) {
+                                currentStock = stockEntry.quantity;
                                 stockUnit = stockInfo.unit || 'un';
+                                if ('unit_weight' in stockInfo) {
+                                    unitWeight = stockInfo.unit_weight || 1;
+                                    unitType = stockInfo.unit_type || '';
+                                }
                             }
                         }
 
@@ -1174,18 +1250,19 @@ export default function Production() {
 
                         <div className="w-[200px]">
                             <Label className="text-base font-semibold">Destino do Estoque</Label>
-                            <p className="text-xs text-muted-foreground mb-2">Onde o produto será armazenado?</p>
+                            <p className="text-xs text-muted-foreground mb-2">Local de armazenamento</p>
                             <Select
-                                value={targetStock}
-                                onValueChange={(v: 'danilo' | 'adriel') => setTargetStock(v)}
+                                value={selectedLocation}
+                                onValueChange={(v) => setSelectedLocation(v)}
                                 disabled={selectedOrder?.status === 'closed'}
                             >
                                 <SelectTrigger>
-                                    <SelectValue />
+                                    <SelectValue placeholder="Selecione..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="danilo">Estoque Danilo</SelectItem>
-                                    <SelectItem value="adriel">Estoque Adriel</SelectItem>
+                                    {stockLocations.map(loc => (
+                                        <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>
