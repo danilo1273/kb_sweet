@@ -188,17 +188,29 @@ export default function Dashboard() {
                 // Finished Products Stats
                 const finishedProducts = productsRes.data || [];
                 const totalFinishedStock = finishedProducts.reduce((acc, p) => {
-                    // Calculate total stock for this product across all locations
-                    const dbStock = p.product_stocks?.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0) || 0;
-                    // Fallback to legacy if dbStock is 0 (optional, but good for transition)
-                    const stock = dbStock > 0 ? dbStock : (Number(p.stock_quantity) || 0);
-                    return acc + stock;
+                    const stockEntries = p.product_stocks || [];
+
+                    // If the product has entries in the new system (even if 0), use it.
+                    // Only fall back to legacy if NO entries exist in product_stocks.
+                    if (stockEntries.length > 0) {
+                        const dbStock = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
+                        return acc + dbStock;
+                    }
+
+                    // Fallback to legacy
+                    return acc + (Number(p.stock_quantity) || 0);
                 }, 0);
 
                 const projectedSalesValue = finishedProducts.reduce((acc, p) => {
-                    // Calculate total stock for this product across all locations
-                    const dbStock = p.product_stocks?.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0) || 0;
-                    const stock = dbStock > 0 ? dbStock : (Number(p.stock_quantity) || 0);
+                    const stockEntries = p.product_stocks || [];
+                    let stock = 0;
+
+                    if (stockEntries.length > 0) {
+                        stock = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
+                    } else {
+                        stock = (Number(p.stock_quantity) || 0);
+                    }
+
                     return acc + (stock * (Number(p.price) || 0));
                 }, 0);
 

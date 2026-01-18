@@ -984,12 +984,17 @@ export default function Production() {
                                             let displayStock = currentStock;
 
                                             // Apply Conversion Factor
+                                            // Apply Conversion Factor
                                             if ((stockUnitLower === 'un' || stockUnitLower === 'saco') && (consumptionUnit === 'g' || consumptionUnit === 'ml')) {
                                                 displayStock = currentStock * unitWeight;
                                             } else if (stockUnitLower === 'kg' && consumptionUnit === 'g') displayStock = currentStock * 1000;
                                             else if (stockUnitLower === 'g' && consumptionUnit === 'kg') displayStock = currentStock / 1000;
                                             else if (stockUnitLower === 'l' && consumptionUnit === 'ml') displayStock = currentStock * 1000;
                                             else if (stockUnitLower === 'ml' && consumptionUnit === 'l') displayStock = currentStock / 1000;
+                                            // New: Generic Conversion for any unit (like 'pct') -> 'un'/'g'/'ml' if defined in inventory
+                                            else if (unitWeight > 1 && unitType && consumptionUnit === unitType.toLowerCase()) {
+                                                displayStock = currentStock * unitWeight;
+                                            }
 
                                             const realQty = item.quantity_used ?? item.quantity_planned;
                                             const totalNeeded = realQty + (item.waste_quantity || 0);
@@ -1116,6 +1121,10 @@ export default function Production() {
                                     else if (stockUnitLower === 'g' && consumptionUnit === 'kg') displayStock = currentStock / 1000;
                                     else if (stockUnitLower === 'l' && consumptionUnit === 'ml') displayStock = currentStock * 1000;
                                     else if (stockUnitLower === 'ml' && consumptionUnit === 'l') displayStock = currentStock / 1000;
+                                    // New: Generic Conversion
+                                    else if (unitWeight > 1 && unitType && consumptionUnit === unitType.toLowerCase()) {
+                                        displayStock = currentStock * unitWeight;
+                                    }
 
                                     const isClosed = selectedOrder?.status === 'closed';
                                     const realQty = item.quantity_used ?? item.quantity_planned;
@@ -1211,6 +1220,10 @@ export default function Production() {
                         else if (stockUnitLower === 'g' && consumptionUnit === 'kg') displayStock = currentStock / 1000;
                         else if (stockUnitLower === 'l' && consumptionUnit === 'ml') displayStock = currentStock * 1000;
                         else if (stockUnitLower === 'ml' && consumptionUnit === 'l') displayStock = currentStock / 1000;
+                        // New: Generic Conversion
+                        else if (unitWeight > 1 && unitType && consumptionUnit === unitType.toLowerCase()) {
+                            displayStock = currentStock * unitWeight;
+                        }
 
                         const realQty = i.quantity_used ?? i.quantity_planned;
                         const totalNeeded = realQty + (i.waste_quantity || 0);
