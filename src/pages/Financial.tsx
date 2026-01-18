@@ -149,9 +149,8 @@ export default function Financial() {
 
             // Fetch Sales Details for Income items that are likely Sales
             const saleIds = enrichedMovements
-                .filter(m => !m.related_purchase_id && m.detail_order_id)
-                .map(m => m.detail_order_id!)
-                .filter(Boolean);
+                .map(m => m.related_sale_id)
+                .filter(Boolean) as string[];
 
             if (saleIds.length > 0) {
                 const { data: sales, error: salesError } = await supabase
@@ -161,8 +160,8 @@ export default function Financial() {
 
                 if (sales) {
                     enrichedMovements = enrichedMovements.map(m => {
-                        if (!m.related_purchase_id && m.detail_order_id) {
-                            const sale = sales.find(s => s.id === m.detail_order_id);
+                        if (m.related_sale_id) {
+                            const sale = sales.find(s => s.id === m.related_sale_id);
                             if (sale) {
                                 // It's a sale
                                 const clientName = (sale.clients as any)?.name || 'Consumidor Final';

@@ -72,15 +72,32 @@ export default function Dashboard() {
                     // Fetch Sales with Items and Product Cost for Margin Calculation
                     supabase.from('sales').select(`
                         id, total, created_at, user_id, 
-                        profiles:user_id (full_name),
                         sale_items (
                             quantity, 
                             unit_price, 
                             product_id,
                             products (name, cost)
                         )
-                    `).gte('created_at', thirtyDaysAgo.toISOString())
+                    `)
                 ]);
+
+                // --- 1b. Manual Join for Profiles (to avoid Ambiguous Embedding 400 error) ---
+                const rawSales = salesRes.data || [];
+                const userIds = Array.from(new Set(rawSales.map((s: any) => s.user_id).filter(Boolean)));
+
+                let profilesMap: Record<string, any> = {};
+                if (userIds.length > 0) {
+                    const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', userIds);
+                    profiles?.forEach((p: any) => {
+                        profilesMap[p.id] = p;
+                    });
+                }
+
+                // Attach profiles to sales
+                const salesData = rawSales.map((s: any) => ({
+                    ...s,
+                    profiles: profilesMap[s.user_id] || { full_name: 'Desconhecido' }
+                }));
 
                 // --- 2. Calculate KPI Metrics ---
 
@@ -113,12 +130,14 @@ export default function Dashboard() {
                 const monthlySalesIncome = currentMonthMovements.filter(m => m.type === 'income' && m.status === 'paid').reduce((acc, m) => acc + Number(m.amount), 0);
 
                 // Sales Data Processing
-                const salesData = salesRes.data || [];
+                // Sales Data Processing
+
 
                 // Volume
                 const currentMonthSales = salesData.filter(s => {
                     const d = new Date(s.created_at);
-                    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                    const isSameMonth = d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                    return isSameMonth;
                 });
                 const monthlySalesTotal = currentMonthSales.reduce((acc, s) => acc + Number(s.total), 0);
 
@@ -195,7 +214,7 @@ export default function Dashboard() {
                     .sort((a, b) => {
                         const [da, ma] = a.date.split('/');
                         const [db, mb] = b.date.split('/');
-                        return new Date(2025, Number(ma) - 1, Number(da)).getTime() - new Date(2025, Number(mb) - 1, Number(db)).getTime();
+                        return new Date(now.getFullYear(), Number(ma) - 1, Number(da)).getTime() - new Date(now.getFullYear(), Number(mb) - 1, Number(db)).getTime();
                     })
                     .slice(-14);
 

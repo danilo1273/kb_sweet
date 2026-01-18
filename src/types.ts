@@ -27,6 +27,7 @@ export interface FinancialMovement {
     payment_date: string | null;
     created_at: string;
     related_purchase_id?: string;
+    related_sale_id?: string;
     // Enriched fields
     detail_supplier?: string;
     detail_buyer?: string;
