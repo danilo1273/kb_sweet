@@ -944,16 +944,18 @@ export default function Production() {
                                             const effectiveLocId = selectedLocation || stockLocations.find(l => l.slug === 'stock-danilo')?.id || stockLocations[0]?.id;
 
                                             if (stockInfo) {
+                                                // Always set unit info from the item definition first
+                                                stockUnit = stockInfo.unit || 'un';
+                                                if ('unit_weight' in stockInfo) {
+                                                    unitWeight = stockInfo.unit_weight || 1;
+                                                    unitType = stockInfo.unit_type || '';
+                                                }
+
                                                 // Dynamic Stock Logic
                                                 const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === effectiveLocId);
 
                                                 if (stockEntry) {
                                                     currentStock = stockEntry.quantity;
-                                                    stockUnit = stockInfo.unit || 'un';
-                                                    if ('unit_weight' in stockInfo) {
-                                                        unitWeight = stockInfo.unit_weight || 1;
-                                                        unitType = stockInfo.unit_type || '';
-                                                    }
                                                 } else {
                                                     // Fallback for Legacy Columns
                                                     const loc = stockLocations.find(l => l.id === effectiveLocId);
@@ -1073,16 +1075,18 @@ export default function Production() {
                                     const effectiveLocId = selectedLocation || stockLocations.find(l => l.slug === 'stock-danilo')?.id || stockLocations[0]?.id;
 
                                     if (stockInfo) {
+                                        // Always set unit info from the item definition first
+                                        stockUnit = stockInfo.unit || 'un';
+                                        if ('unit_weight' in stockInfo) {
+                                            unitWeight = stockInfo.unit_weight || 1;
+                                            unitType = stockInfo.unit_type || '';
+                                        }
+
                                         // Dynamic Stock Logic
                                         const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === effectiveLocId);
 
                                         if (stockEntry) {
                                             currentStock = stockEntry.quantity;
-                                            stockUnit = stockInfo.unit || 'un';
-                                            if ('unit_weight' in stockInfo) {
-                                                unitWeight = stockInfo.unit_weight || 1;
-                                                unitType = stockInfo.unit_type || '';
-                                            }
                                         } else {
                                             // Fallback for Legacy Columns
                                             const loc = stockLocations.find(l => l.id === effectiveLocId);
@@ -1176,14 +1180,16 @@ export default function Production() {
                         const effectiveLocId = selectedLocation || stockLocations.find(l => l.slug === 'stock-danilo')?.id || stockLocations[0]?.id;
 
                         if (stockInfo) {
+                            // Always set unit info from the item definition first
+                            stockUnit = stockInfo.unit || 'un';
+                            if ('unit_weight' in stockInfo) {
+                                unitWeight = stockInfo.unit_weight || 1;
+                                unitType = stockInfo.unit_type || '';
+                            }
+
                             const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === effectiveLocId);
                             if (stockEntry) {
                                 currentStock = stockEntry.quantity;
-                                stockUnit = stockInfo.unit || 'un';
-                                if ('unit_weight' in stockInfo) {
-                                    unitWeight = stockInfo.unit_weight || 1;
-                                    unitType = stockInfo.unit_type || '';
-                                }
                             } else {
                                 // Fallback Logic (Legacy)
                                 const loc = stockLocations.find(l => l.id === effectiveLocId);
