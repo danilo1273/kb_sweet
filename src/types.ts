@@ -192,9 +192,21 @@ export interface StockLocation {
 
 export interface ProductStock {
     id: string;
-    product_id: string;
+    product_id?: string; // Finished Good
+    ingredient_id?: string; // Raw Material
     location_id: string;
     quantity: number;
     average_cost: number;
     last_updated: string;
+    location?: StockLocation;
+}
+
+export interface Product {
+    id: string;
+    name: string;
+    unit: string;
+    category?: string;
+    batch_size?: number;
+    product_stocks?: ProductStock[];
+    // Add other product fields as needed from usage
 }

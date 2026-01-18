@@ -949,8 +949,16 @@ export default function Production() {
                                                         unitType = stockInfo.unit_type || '';
                                                     }
                                                 } else {
-                                                    // Fallback or 0
-                                                    currentStock = 0;
+                                                    // Fallback for Legacy Columns
+                                                    const loc = stockLocations.find(l => l.id === selectedLocation);
+                                                    if (loc?.slug === 'stock-danilo') {
+                                                        currentStock = (stockInfo as any).stock_danilo || 0;
+                                                        // Fallback cost if needed? not for quantity check
+                                                    } else if (loc?.slug === 'stock-adriel') {
+                                                        currentStock = (stockInfo as any).stock_adriel || 0;
+                                                    } else {
+                                                        currentStock = 0;
+                                                    }
                                                 }
                                             }
 
@@ -1067,7 +1075,15 @@ export default function Production() {
                                                 unitType = stockInfo.unit_type || '';
                                             }
                                         } else {
-                                            currentStock = 0;
+                                            // Fallback for Legacy Columns
+                                            const loc = stockLocations.find(l => l.id === selectedLocation);
+                                            if (loc?.slug === 'stock-danilo') {
+                                                currentStock = (stockInfo as any).stock_danilo || 0;
+                                            } else if (loc?.slug === 'stock-adriel') {
+                                                currentStock = (stockInfo as any).stock_adriel || 0;
+                                            } else {
+                                                currentStock = 0;
+                                            }
                                         }
                                     }
 
@@ -1157,6 +1173,12 @@ export default function Production() {
                                     unitWeight = stockInfo.unit_weight || 1;
                                     unitType = stockInfo.unit_type || '';
                                 }
+                            } else {
+                                // Fallback Logic (Legacy)
+                                const loc = stockLocations.find(l => l.id === selectedLocation);
+                                if (loc?.slug === 'stock-danilo') currentStock = (stockInfo as any).stock_danilo || 0;
+                                else if (loc?.slug === 'stock-adriel') currentStock = (stockInfo as any).stock_adriel || 0;
+                                else currentStock = 0;
                             }
                         }
 

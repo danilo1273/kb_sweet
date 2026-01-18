@@ -199,7 +199,14 @@ export default function Inventory() {
 
         const { data: prodData, error: prodError } = await supabase
             .from('products')
-            .select('*')
+            .select(`
+                *,
+                product_stocks (
+                    quantity,
+                    average_cost,
+                    location:stock_locations (id, name, slug)
+                )
+            `)
             .order('name');
 
         if (ingError) {
