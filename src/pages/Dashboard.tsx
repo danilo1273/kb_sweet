@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Activity, Package, DollarSign, TrendingDown, AlertTriangle, ArrowRight, ShoppingBag, Zap, ShoppingCart, Landmark } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
@@ -45,6 +46,7 @@ export default function Dashboard() {
     const [productionPerformance, setProductionPerformance] = useState<any[]>([]); // New State
     const [bankAccounts, setBankAccounts] = useState<any[]>([]);
     const [isFinancialUser, setIsFinancialUser] = useState(false);
+    const [selectedUserProd, setSelectedUserProd] = useState<any>(null);
     const { toast } = useToast();
 
     useEffect(() => {
@@ -59,11 +61,9 @@ export default function Dashboard() {
                 const isFin = myRoles.some((r: string) => ['admin', 'super_admin', 'financial'].includes(r));
                 setIsFinancialUser(isFin);
 
-                // Fetch Bank Accounts (Only for authorized users)
-                if (isFin) {
-                    const { data: banks } = await supabase.from('bank_accounts').select('id, name, balance').order('name');
-                    if (banks) setBankAccounts(banks);
-                }
+                // Fetch Bank Accounts (Visible for ALL users as requested)
+                const { data: banks } = await supabase.from('bank_accounts').select('id, name, balance').order('name');
+                if (banks) setBankAccounts(banks);
 
                 // --- 1. Fetch Raw Data ---
                 const sixMonthsAgo = new Date();
@@ -527,8 +527,8 @@ export default function Dashboard() {
                 </div>
 
                 {/* 1.5 BANK ACCOUNTS SECTION */}
-                {isFinancialUser && bankAccounts.length > 0 && (
-                    <motion.div variants={itemVariant} className="flex flex-wrap gap-4">
+                {bankAccounts.length > 0 && (
+                    <motion.div variants={itemVariant} className="flex flex-wrap gap-4 px-1">
                         {bankAccounts.map(acc => (
                             <Card key={acc.id} className="min-w-[200px] flex-1 hover:shadow-md transition-all border-l-4 border-l-blue-500 bg-white shadow-sm">
                                 <CardContent className="p-4 py-3 flex items-center justify-between">
@@ -753,15 +753,18 @@ export default function Dashboard() {
                                             </div>
                                             {/* Product Detailed List */}
                                             {user.itemsList && user.itemsList.length > 0 && (
-                                                <div className="ml-13 pl-1 text-[11px] space-y-1.5 mt-2 border-l-2 border-amber-100/50">
+                                                <div className="ml-10 pl-3 text-[11px] space-y-1 mt-2 border-l-2 border-amber-100/50">
                                                     {user.itemsList.slice(0, 3).map((item: any, idx: number) => (
-                                                        <div key={idx} className="flex justify-between text-zinc-600 px-2 py-0.5 rounded hover:bg-amber-50 group transition-all">
-                                                            <span className="group-hover:text-amber-800 transition-colors">{item.name}</span>
-                                                            <span className="font-bold text-zinc-800">{item.qty} {item.unit}</span>
+                                                        <div key={idx} className="flex items-start justify-between text-zinc-600 py-0.5 group transition-all">
+                                                            <span className="group-hover:text-amber-800 transition-colors leading-tight pr-4">{item.name}</span>
+                                                            <span className="font-bold text-zinc-800 shrink-0 whitespace-nowrap">{item.qty} {item.unit}</span>
                                                         </div>
                                                     ))}
                                                     {user.itemsList.length > 3 && (
-                                                        <div className="text-[10px] text-amber-600/70 italic px-2 pt-1 font-medium italic">
+                                                        <div
+                                                            className="text-[10px] text-amber-600 hover:text-amber-700 cursor-pointer italic pt-1 font-semibold flex items-center gap-1 transition-colors underline-offset-2 hover:underline"
+                                                            onClick={() => setSelectedUserProd(user)}
+                                                        >
                                                             + Ver mais {user.itemsList.length - 3} itens cadastrados
                                                         </div>
                                                     )}
@@ -776,6 +779,30 @@ export default function Dashboard() {
 
                 </div>
             </motion.div>
+
+            {/* Production Detail Dialog */}
+            <Dialog open={!!selectedUserProd} onOpenChange={(open) => !open && setSelectedUserProd(null)}>
+                <DialogContent className="max-w-md max-h-[80vh] overflow-hidden flex flex-col">
+                    <DialogHeader className="pb-4 border-b">
+                        <DialogTitle className="flex items-center gap-2">
+                            <Zap className="h-4 w-4 text-amber-500 fill-amber-500" />
+                            Produção Detalhada: {selectedUserProd?.name}
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="overflow-y-auto py-4 pr-2">
+                        <div className="space-y-2">
+                            {selectedUserProd?.itemsList?.map((item: any, idx: number) => (
+                                <div key={idx} className="flex justify-between items-center p-2 rounded-lg bg-zinc-50 border border-zinc-100 hover:bg-amber-50/50 transition-colors">
+                                    <span className="text-sm font-medium text-zinc-700">{item.name}</span>
+                                    <span className="text-sm font-bold text-zinc-900 bg-white px-2 py-1 rounded border shadow-sm shrink-0">
+                                        {item.qty} {item.unit}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
