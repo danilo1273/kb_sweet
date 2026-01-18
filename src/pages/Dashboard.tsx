@@ -70,7 +70,7 @@ export default function Dashboard() {
                     productionStatsRes
                 ] = await Promise.all([
                     supabase.from('ingredients').select('*'),
-                    supabase.from('products').select('*'),
+                    supabase.from('products').select('*, product_stocks(quantity, location_id)'),
                     supabase.from('financial_movements').select('*').gte('due_date', sixMonthsAgo.toISOString()),
                     supabase.from('production_orders').select('id, status').eq('status', 'open'),
                     // Fetch Sales with Items and Product Cost for Margin Calculation
@@ -187,8 +187,20 @@ export default function Dashboard() {
 
                 // Finished Products Stats
                 const finishedProducts = productsRes.data || [];
-                const totalFinishedStock = finishedProducts.reduce((acc, p) => acc + (Number(p.stock_quantity) || 0), 0);
-                const projectedSalesValue = finishedProducts.reduce((acc, p) => acc + ((Number(p.stock_quantity) || 0) * (Number(p.price) || 0)), 0);
+                const totalFinishedStock = finishedProducts.reduce((acc, p) => {
+                    // Calculate total stock for this product across all locations
+                    const dbStock = p.product_stocks?.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0) || 0;
+                    // Fallback to legacy if dbStock is 0 (optional, but good for transition)
+                    const stock = dbStock > 0 ? dbStock : (Number(p.stock_quantity) || 0);
+                    return acc + stock;
+                }, 0);
+
+                const projectedSalesValue = finishedProducts.reduce((acc, p) => {
+                    // Calculate total stock for this product across all locations
+                    const dbStock = p.product_stocks?.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0) || 0;
+                    const stock = dbStock > 0 ? dbStock : (Number(p.stock_quantity) || 0);
+                    return acc + (stock * (Number(p.price) || 0));
+                }, 0);
 
                 // Pending Financials
                 const { data: allPending } = await supabase.from('financial_movements').select('amount, type, status').eq('status', 'pending');
