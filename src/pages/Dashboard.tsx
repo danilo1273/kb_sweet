@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Activity, Package, DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowRight, ShoppingBag, Zap } from "lucide-react";
+import { Activity, Package, DollarSign, TrendingDown, AlertTriangle, ArrowRight, ShoppingBag, Zap, ShoppingCart } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,7 +14,6 @@ import {
     CartesianGrid,
     Tooltip,
     ResponsiveContainer,
-    Cell,
     LineChart,
     Line
 } from "recharts";
@@ -178,34 +177,43 @@ export default function Dashboard() {
                 // --- 2. Calculate KPI Metrics ---
 
                 // Stock Value
-                const totalStockValue = (ingredientsRes.data?.reduce((acc, ing) => {
-                    return acc + ((Number(ing.stock_danilo) || 0) * (Number(ing.cost_danilo) || 0)) +
-                        ((Number(ing.stock_adriel) || 0) * (Number(ing.cost_adriel) || 0));
-                }, 0) || 0) + (productsRes.data?.reduce((acc, prod) => {
-                    return acc + ((Number(prod.stock_quantity) || 0) * (Number(prod.cost) || 0));
-                }, 0) || 0);
-
-                // Stock Value (Finished Goods - Asset Value based on Cost)
-                const finishedProducts = productsRes.data || [];
-                const totalFinishedStock = finishedProducts.reduce((acc, p) => {
-                    const stockEntries = p.product_stocks || [];
+                // Stock Value (Ingredients)
+                const totalIngredientsValue = ingredientsRes.data?.reduce((acc, ing) => {
+                    const stockEntries = ing.product_stocks || [];
+                    let qty = 0;
+                    let cost = 0;
                     if (stockEntries.length > 0) {
-                        return acc + stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
+                        qty = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
+                        // Using weighted average cost or just first available for simplicity here
+                        cost = stockEntries[0]?.average_cost || Number(ing.cost) || 0;
+                    } else {
+                        qty = (Number(ing.stock_danilo) || 0) + (Number(ing.stock_adriel) || 0);
+                        cost = Number(ing.cost_danilo) || Number(ing.cost_adriel) || Number(ing.cost) || 0;
                     }
-                    return acc + (Number(p.stock_quantity) || 0);
-                }, 0);
+                    return acc + (qty * cost);
+                }, 0) || 0;
 
-                // FIX: Use Cost for Inventory Value, not Price
+                // Finished Goods - Asset Value (Custo)
+                const finishedProducts = productsRes.data || [];
+                let totalFinishedStockUnits = 0;
                 const stockAssetValue = finishedProducts.reduce((acc, p) => {
                     const stockEntries = p.product_stocks || [];
-                    let stock = 0;
+                    let qty = 0;
+                    let cost = Number(p.cost) || 0;
+
                     if (stockEntries.length > 0) {
-                        stock = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
+                        qty = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
+                        // If cost is 0 in product table, try average_cost in stocks
+                        if (cost === 0) cost = stockEntries[0]?.average_cost || 0;
                     } else {
-                        stock = (Number(p.stock_quantity) || 0);
+                        qty = (Number(p.stock_quantity) || 0);
                     }
-                    return acc + (stock * (Number(p.cost) || 0));
+
+                    totalFinishedStockUnits += qty;
+                    return acc + (qty * cost);
                 }, 0);
+
+                const totalStockValue = totalIngredientsValue + stockAssetValue;
 
                 // Pending Financials
                 const { data: allPending } = await supabase.from('financial_movements').select('amount, type, status').eq('status', 'pending');
@@ -233,7 +241,7 @@ export default function Dashboard() {
                 const monthlySalesTotal = currentMonthSales.reduce((acc, s) => acc + Number(s.total), 0);
 
                 // Net Profit
-                const netProfit = monthlySalesIncome - monthlyPurchases;
+                // const netProfit = monthlySalesIncome - monthlyPurchases; // Unused for now
 
                 // Avg Ticket
                 const avgTicket = currentMonthSales.length > 0 ? (monthlySalesTotal / currentMonthSales.length) : 0;
@@ -335,7 +343,7 @@ export default function Dashboard() {
                     netProfit: monthlySalesIncome,
                     avgTicket,
                     projectedSalesValue: stockAssetValue,
-                    totalFinishedStock
+                    totalFinishedStock: totalFinishedStockUnits
                 });
 
                 setFinancialData(chartData);
@@ -654,46 +662,58 @@ export default function Dashboard() {
                     </Card>
 
                     {/* Production Summary Widget */}
-                    <Card className="shadow-sm">
-                        <CardHeader className="pb-2">
+                    <Card className="shadow-sm overflow-hidden border-amber-100 bg-white">
+                        <CardHeader className="pb-2 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-100">
                             <div className="flex items-center justify-between">
-                                <CardTitle className="text-base font-semibold text-amber-900">Produção (Mês)</CardTitle>
-                                <Zap className="h-4 w-4 text-amber-500" />
+                                <CardTitle className="text-base font-bold text-amber-900 flex items-center gap-2">
+                                    <Zap className="h-4 w-4 text-amber-600 fill-amber-600" />
+                                    Produção do Mês
+                                </CardTitle>
+                                <Badge variant="outline" className="bg-white/80 text-amber-700 border-amber-200">
+                                    Ativo
+                                </Badge>
                             </div>
-                            <CardDescription>Valor Produzido</CardDescription>
+                            <CardDescription className="text-amber-700/70 font-medium">Performance de Fabricação</CardDescription>
                         </CardHeader>
-                        <CardContent>
-                            <div className="space-y-3 mt-2">
+                        <CardContent className="p-0">
+                            <div className="divide-y divide-amber-100/50">
                                 {productionPerformance.length === 0 ? (
-                                    <div className="text-sm text-zinc-400 text-center py-4">Sem produção no mês</div>
+                                    <div className="text-sm text-zinc-400 text-center py-8">Sem produção no mês</div>
                                 ) : (
                                     productionPerformance.map((user: any, i: number) => (
-                                        <div key={i} className="flex flex-col gap-2 p-2 bg-amber-50/50 rounded-md border border-amber-100">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="h-6 w-6 rounded-full bg-amber-100 flex items-center justify-center text-xs font-bold text-amber-700">
+                                        <div key={i} className="p-4 hover:bg-amber-50/30 transition-colors">
+                                            <div className="flex items-center justify-between mb-3">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="h-10 w-10 rounded-full bg-gradient-to-br from-amber-100 to-orange-200 flex items-center justify-center text-sm font-bold text-amber-800 border-2 border-white shadow-sm">
                                                         {user.name.charAt(0)}
                                                     </div>
                                                     <div className="flex flex-col">
-                                                        <span className="font-medium text-zinc-700 text-sm">{user.name}</span>
-                                                        <span className="text-[10px] text-zinc-500">{user.count} produções</span>
+                                                        <span className="font-bold text-zinc-800 text-sm leading-none">{user.name}</span>
+                                                        <span className="text-[11px] text-amber-600 mt-1 font-medium flex items-center gap-1">
+                                                            <ShoppingCart className="h-3 w-3" />
+                                                            {user.count} ordens finalizadas
+                                                        </span>
                                                     </div>
                                                 </div>
-                                                <span className="font-bold text-zinc-900 text-sm">
-                                                    R$ {user.val.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                </span>
+                                                <div className="text-right">
+                                                    <div className="text-sm font-black text-zinc-900">
+                                                        R$ {user.val.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </div>
+                                                    <div className="text-[9px] text-zinc-400 uppercase tracking-tighter font-bold">Valor Produzido</div>
+                                                </div>
                                             </div>
                                             {/* Product Detailed List */}
                                             {user.itemsList && user.itemsList.length > 0 && (
-                                                <div className="pl-8 text-xs text-zinc-500 space-y-1">
-                                                    {user.itemsList.slice(0, 5).map((item: any, idx: number) => (
-                                                        <div key={idx} className="flex justify-between border-b last:border-0 border-amber-100 pb-1 last:pb-0">
-                                                            <span>{item.qty} {item.unit} x {item.name}</span>
+                                                <div className="ml-13 pl-1 text-[11px] space-y-1.5 mt-2 border-l-2 border-amber-100/50">
+                                                    {user.itemsList.slice(0, 3).map((item: any, idx: number) => (
+                                                        <div key={idx} className="flex justify-between text-zinc-600 px-2 py-0.5 rounded hover:bg-amber-50 group transition-all">
+                                                            <span className="group-hover:text-amber-800 transition-colors">{item.name}</span>
+                                                            <span className="font-bold text-zinc-800">{item.qty} {item.unit}</span>
                                                         </div>
                                                     ))}
-                                                    {user.itemsList.length > 5 && (
-                                                        <div className="text-[10px] text-zinc-400 italic">
-                                                            + {user.itemsList.length - 5} outros itens...
+                                                    {user.itemsList.length > 3 && (
+                                                        <div className="text-[10px] text-amber-600/70 italic px-2 pt-1 font-medium italic">
+                                                            + Ver mais {user.itemsList.length - 3} itens cadastrados
                                                         </div>
                                                     )}
                                                 </div>

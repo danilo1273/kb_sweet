@@ -388,7 +388,7 @@ export default function Inventory() {
             const productionOutputPromise = supabase
                 .from('production_orders')
                 .select(`
-                   id, quantity_planned, quantity_produced, unit, closed_at, status,
+                   id, quantity, actual_quantity, unit, closed_at, status,
                     profiles: user_id(full_name)
                     `)
                 .eq('product_id', ingredient.id)
@@ -507,7 +507,7 @@ export default function Inventory() {
                     date: order.closed_at || new Date().toISOString(),
                     type: 'purchase', // Incoming stock
                     description: 'Produção Finalizada',
-                    quantity: Number(order.quantity_produced || order.quantity_planned || 0),
+                    quantity: Number(order.actual_quantity || order.quantity || 0),
                     unit: order.unit || 'un',
                     total_value: 0, // Could calculate if we had cost info here
                     user_name: userName,
@@ -786,8 +786,20 @@ export default function Inventory() {
                         ) : (
                             <AnimatePresence>
                                 {filteredIngredients.map((item) => {
-                                    const totalQtd = item.stocks?.reduce((acc, s) => acc + (s.quantity || 0), 0) || 0;
-                                    const totalVal = item.stocks?.reduce((acc, s) => acc + ((s.quantity || 0) * (s.average_cost || 0)), 0) || 0;
+                                    // Calculate Totals considering all locations and fallbacks
+                                    let totalQtd = 0;
+                                    let totalVal = 0;
+
+                                    if (item.stocks && item.stocks.length > 0) {
+                                        totalQtd = item.stocks.reduce((acc, s) => acc + (s.quantity || 0), 0);
+                                        totalVal = item.stocks.reduce((acc, s) => acc + ((s.quantity || 0) * (s.average_cost || 0)), 0);
+                                    } else {
+                                        // Fallback to legacy columns for Total Geral if product_stocks is empty
+                                        totalQtd = (Number(item.stock_danilo) || 0) + (Number(item.stock_adriel) || 0) + (Number(item.stock_quantity) || 0);
+                                        totalVal = ((Number(item.stock_danilo) || 0) * (Number(item.cost_danilo) || Number(item.cost) || 0)) +
+                                            ((Number(item.stock_adriel) || 0) * (Number(item.cost_adriel) || Number(item.cost) || 0)) +
+                                            ((Number(item.stock_quantity) || 0) * (Number(item.cost) || 0));
+                                    }
 
                                     return (
                                         <motion.tr

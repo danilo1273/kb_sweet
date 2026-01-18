@@ -431,40 +431,72 @@ export default function Sales() {
             </Dialog>
 
             <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
-                <DialogContent className="max-w-2xl">
+                <DialogContent className="max-w-3xl">
                     <DialogHeader>
-                        <DialogTitle>Itens da Venda</DialogTitle>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Eye className="h-5 w-5 text-blue-600" />
+                            Detalhamento da Venda
+                        </DialogTitle>
                     </DialogHeader>
-                    <div className="space-y-4 py-2">
-                        <div className="border rounded-md overflow-hidden">
+                    <div className="space-y-6 py-4">
+                        <div className="border rounded-xl overflow-hidden shadow-sm bg-white">
                             <Table>
-                                <TableHeader>
+                                <TableHeader className="bg-zinc-50">
                                     <TableRow>
-                                        <TableHead>Produto</TableHead>
-                                        <TableHead className="text-right">Qtd</TableHead>
-                                        <TableHead className="text-right">Unitário</TableHead>
-                                        <TableHead className="text-right">Total</TableHead>
+                                        <TableHead className="font-bold">Produto</TableHead>
+                                        <TableHead className="text-right font-bold">Qtd</TableHead>
+                                        <TableHead className="text-right font-bold">Preço Un.</TableHead>
+                                        <TableHead className="text-right font-bold">Custo Un.</TableHead>
+                                        <TableHead className="text-right font-bold">Total Venda</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {viewSaleItems.length === 0 ? (
-                                        <TableRow><TableCell colSpan={4} className="text-center">Nenhum item encontrado.</TableCell></TableRow>
+                                        <TableRow><TableCell colSpan={5} className="text-center py-8 text-zinc-400 italic">Nenhum item encontrado.</TableCell></TableRow>
                                     ) : (
                                         viewSaleItems.map((item: any) => (
-                                            <TableRow key={item.id}>
-                                                <TableCell>{item.products?.name || 'Item Desconhecido'}</TableCell>
-                                                <TableCell className="text-right">{item.quantity}</TableCell>
-                                                <TableCell className="text-right">R$ {item.unit_price?.toFixed(2)}</TableCell>
-                                                <TableCell className="text-right font-medium">R$ {(item.quantity * item.unit_price)?.toFixed(2)}</TableCell>
+                                            <TableRow key={item.id} className="hover:bg-zinc-50/50">
+                                                <TableCell className="font-medium">{item.products?.name || 'Item Desconhecido'}</TableCell>
+                                                <TableCell className="text-right font-semibold">{item.quantity}</TableCell>
+                                                <TableCell className="text-right text-zinc-600">R$ {Number(item.unit_price).toFixed(2)}</TableCell>
+                                                <TableCell className="text-right text-zinc-400 text-xs">R$ {Number(item.cost_price_snapshot || 0).toFixed(2)}</TableCell>
+                                                <TableCell className="text-right font-bold text-zinc-900">R$ {(item.quantity * item.unit_price).toFixed(2)}</TableCell>
                                             </TableRow>
                                         ))
                                     )}
                                 </TableBody>
                             </Table>
                         </div>
+
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {(() => {
+                                const totalSale = viewSaleItems.reduce((acc, item) => acc + (item.quantity * item.unit_price), 0);
+                                const totalCost = viewSaleItems.reduce((acc, item) => acc + (item.quantity * (item.cost_price_snapshot || 0)), 0);
+                                const profit = totalSale - totalCost;
+                                const margin = totalSale > 0 ? (profit / totalSale) * 100 : 0;
+
+                                return (
+                                    <>
+                                        <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-100 flex flex-col gap-1">
+                                            <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Custo de Mercadoria</span>
+                                            <span className="text-lg font-bold text-zinc-700">R$ {totalCost.toFixed(2)}</span>
+                                        </div>
+                                        <div className="bg-green-50/50 p-4 rounded-xl border border-green-100 flex flex-col gap-1">
+                                            <span className="text-[10px] uppercase font-bold text-green-600/70 tracking-wider">Lucro Bruto</span>
+                                            <span className="text-lg font-bold text-green-700">R$ {profit.toFixed(2)}</span>
+                                        </div>
+                                        <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex flex-col gap-1">
+                                            <span className="text-[10px] uppercase font-bold text-blue-600/70 tracking-wider">Margem de Contribuição</span>
+                                            <span className="text-lg font-bold text-blue-700">{margin.toFixed(1)}%</span>
+                                        </div>
+                                    </>
+                                );
+                            })()}
+                        </div>
                     </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsViewOpen(false)}>Fechar</Button>
+                    <DialogFooter className="bg-zinc-50/50 -mx-6 -mb-6 p-4 border-t mt-2">
+                        <Button variant="outline" onClick={() => setIsViewOpen(false)} className="bg-white">Fechar Detalhes</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
