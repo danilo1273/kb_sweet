@@ -16,8 +16,10 @@ BEGIN
 
     -- If we have a location, proceed
     IF v_location_id IS NOT NULL THEN
-        INSERT INTO product_stocks (product_id, location_id, quantity, min_stock, max_stock, updated_at)
-        SELECT id, v_location_id, 0, 0, 0, now()
+        -- Removed timestamps entirely to avoid column name guesswork (updated_at vs last_updated)
+        -- The DB should handle defaults or allow nulls.
+        INSERT INTO product_stocks (product_id, location_id, quantity)
+        SELECT id, v_location_id, 0
         FROM products p
         WHERE NOT EXISTS (
             SELECT 1 FROM product_stocks ps WHERE ps.product_id = p.id

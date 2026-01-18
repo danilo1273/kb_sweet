@@ -378,14 +378,31 @@ export default function Inventory() {
                         id, closed_at, quantity, status,
                         products (name),
                         profiles:user_id (full_name)
+            // 2. Fetch Production Usage (Ingredients Consumed)
+            const productionPromise = supabase
+                .from('production_order_items')
+                .select(`
+                    id, quantity_used, waste_quantity, unit_cost, unit,
+                    production_orders!inner(
+                        id, closed_at, status, products(name),
+                        profiles: user_id(full_name)
                     )
-                `)
+                    `)
                 .eq('item_id', ingredient.id)
-                // .eq('type', 'ingredient') // Removed to allow 'product' type (intermediates)
-                .eq('production_orders.status', 'closed') // Only closed orders deduct stock
-                .order('id', { ascending: false }) // Approximate time sort
-                .eq('production_orders.status', 'closed') // Only closed orders deduct stock
-                .order('id', { ascending: false }) // Approximate time sort
+                .eq('production_orders.status', 'closed')
+                .order('id', { ascending: false })
+                .limit(15);
+
+            // 2b. Fetch Production Output (Finished Goods Produced) - NEW
+            const productionOutputPromise = supabase
+                .from('production_orders')
+                .select(`
+                   id, quantity_planned, quantity_produced, unit, closed_at, status,
+                    profiles: user_id(full_name)
+                    `)
+                .eq('product_id', ingredient.id)
+                .eq('status', 'closed')
+                .order('closed_at', { ascending: false })
                 .limit(15);
 
             // 3. Fetch Sales
@@ -393,13 +410,13 @@ export default function Inventory() {
                 .from('sale_items')
                 .select(`
                     id, quantity, unit_price,
-                    sales!inner (
+                    sales!inner(
                         id, created_at, status, stock_source,
-                        profiles:user_id (full_name)
+                        profiles: user_id(full_name)
                     )
-                `)
+                    `)
                 .eq('product_id', ingredient.id)
-                .neq('sales.status', 'canceled')
+                .neq('sales.status', 'canceled') // Ensure canceled sales don't show as usage
                 .order('created_at', { foreignTable: 'sales', ascending: false })
                 .limit(20);
 
@@ -411,22 +428,32 @@ export default function Inventory() {
                 .order('created_at', { ascending: false })
                 .limit(10);
 
-            const [purchasesRes, productionRes, adjustmentsRes, salesRes] = await Promise.all([purchasesPromise, productionPromise, adjustmentsPromise, salesPromise]);
+            // 6. Fetch Product Adjustments (New Table?) - If using product_stocks, we might have adjustments on products too?
+            // Assuming stock_adjustments is currently only for ingredients or mixed? 
+            // In 20260119_product_adjustments.sql, we use the specific RPC but maybe not a table?
+            // Actually, stock_adjustments table usually had 'ingredient_id'.
+            // If we are tracking Product adjustments, we might need to check if that table handles it (nullable ingredient_id, plus product_id?)
+            // For now, let's stick to valid queries.
+
+            const [purchasesRes, productionRes, productionOutputRes, adjustmentsRes, salesRes] = await Promise.all([
+                purchasesPromise, 
+                productionPromise, 
+                productionOutputPromise,
+                adjustmentsPromise, 
+                salesPromise
+            ]);
 
             if (purchasesRes.error) throw purchasesRes.error;
             if (productionRes.error) throw productionRes.error;
-            if (salesRes.error) console.error("Error fetching sales history:", salesRes.error); // Log warning but continue
+            if (productionOutputRes.error) throw productionOutputRes.error;
+            // Sales error non-fatal
 
-            // 3. Process Purchases
+            // ... Process Purchases ...
             let purchaseItems: UnifiedHistoryItem[] = [];
-
-            // Collect user IDs for manual fetch if needed (though we tried to join profiles)
-            const userIds = new Set<string>();
+             const userIds = new Set<string>();
             purchasesRes.data?.forEach((r: any) => {
                 if (r.purchase_orders?.created_by) userIds.add(r.purchase_orders.created_by);
             });
-
-            // Fetch Profiles Map if needed (Purchase Orders join usually returns simplified or nothing if RLS blocks, but let's assume valid)
             let profileMap = new Map<string, string>();
             if (userIds.size > 0) {
                 const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', Array.from(userIds));
@@ -436,13 +463,13 @@ export default function Inventory() {
             purchaseItems = (purchasesRes.data || []).map((r: any) => {
                 const po = r.purchase_orders || {};
                 const supplierName = po.suppliers?.name || r.supplier || 'Fornecedor Externo';
-                const userName = profileMap.get(po.created_by) || 'Sistema'; // Fallback
+                const userName = profileMap.get(po.created_by) || 'Sistema'; 
 
                 return {
                     id: r.id,
                     date: r.created_at || new Date().toISOString(),
                     type: 'purchase',
-                    description: `Compra: ${supplierName}`,
+                    description: `Compra: ${ supplierName }`,
                     quantity: Number(r.quantity || 0),
                     unit: r.unit || 'un',
                     total_value: Number(r.cost || 0),
@@ -451,16 +478,14 @@ export default function Inventory() {
                 };
             });
 
-            // 4. Process Production
-            const productionItems: UnifiedHistoryItem[] = (productionRes.data || []).map((item: any) => {
+            // 4. Process Production Usage
+            const productionUsageItems: UnifiedHistoryItem[] = (productionRes.data || []).map((item: any) => {
                 const order = item.production_orders;
-                const prodName = order.products?.name || 'Produto Desconhecido';
+                const prodName = order.products?.name || 'Produto';
                 const qtdUsed = (item.quantity_used || 0) + (item.waste_quantity || 0);
                 const cost = qtdUsed * (item.unit_cost || 0);
-
-                // Safe access to profile name (array or object depending on join)
                 let userName = 'Produção';
-                if (order.profiles) {
+                 if (order.profiles) {
                     if (Array.isArray(order.profiles)) userName = order.profiles[0]?.full_name;
                     else userName = (order.profiles as any).full_name;
                 }
@@ -469,12 +494,33 @@ export default function Inventory() {
                     id: item.id,
                     date: order.closed_at || new Date().toISOString(),
                     type: 'usage',
-                    description: `Produção: ${prodName}`,
+                    description: `Usado em: ${ prodName }`,
                     quantity: qtdUsed,
                     unit: item.unit || 'un',
                     total_value: cost,
                     user_name: userName,
-                    link_id: order.id // Could link to production view
+                    link_id: order.id
+                };
+            });
+
+            // 4b. Process Production Output (NEW)
+             const productionOutputItems: UnifiedHistoryItem[] = (productionOutputRes.data || []).map((order: any) => {
+                 let userName = 'Produção';
+                 if (order.profiles) {
+                    if (Array.isArray(order.profiles)) userName = order.profiles[0]?.full_name;
+                    else userName = (order.profiles as any).full_name;
+                }
+                
+                return {
+                    id: order.id,
+                    date: order.closed_at || new Date().toISOString(),
+                    type: 'purchase', // Incoming stock
+                    description: 'Produção Finalizada',
+                    quantity: Number(order.quantity_produced || order.quantity_planned || 0),
+                    unit: order.unit || 'un',
+                    total_value: 0, // Could calculate if we had cost info here
+                    user_name: userName,
+                    link_id: order.id
                 };
             });
 
@@ -482,7 +528,7 @@ export default function Inventory() {
             const salesItems: UnifiedHistoryItem[] = (salesRes.data || []).map((item: any) => {
                 const sale = item.sales;
                 let userName = 'Vendedor';
-                if (sale.profiles) {
+                 if (sale.profiles) {
                     if (Array.isArray(sale.profiles)) userName = sale.profiles[0]?.full_name;
                     else userName = (sale.profiles as any).full_name;
                 }
@@ -490,7 +536,7 @@ export default function Inventory() {
                 return {
                     id: item.id,
                     date: sale.created_at,
-                    type: 'usage', // Sales are outgoing, so 'usage' color (red-ish) is appropriate
+                    type: 'usage',
                     description: `Venda PDV`,
                     quantity: Number(item.quantity),
                     unit: ingredient.unit || 'un',
@@ -519,7 +565,7 @@ export default function Inventory() {
                     // Let's stick to usage=red (out), purchase=green (in).
                     // Actually, if we use 'purchase' type it might show supplier fields which are missing.
                     // Let's patch the type definition or map to existing.
-                    description: `${descMap[adj.type] || 'Ajuste'}: ${adj.reason || '-'} (${adj.stock_owner})`,
+                    description: `${ descMap[adj.type] || 'Ajuste' }: ${ adj.reason || '-' }(${ adj.stock_owner })`,
                     quantity: Math.abs(adj.quantity_diff),
                     unit: ingredient.unit || 'un',
                     total_value: 0, // No monetary value stored usually, or we could estimate? Keep 0 for now.
@@ -529,7 +575,13 @@ export default function Inventory() {
 
 
             // 5. Merge & Sort
-            const allHistory = [...purchaseItems, ...productionItems, ...adjustmentItems, ...salesItems].sort((a, b) =>
+            const allHistory = [
+                ...purchaseItems, 
+                ...productionUsageItems, 
+                ...productionOutputItems, 
+                ...adjustmentItems, 
+                ...salesItems
+            ].sort((a, b) =>
                 new Date(b.date).getTime() - new Date(a.date).getTime()
             );
 
@@ -683,7 +735,7 @@ export default function Inventory() {
                                     </div>
                                 )}
                                 <div className="flex justify-between items-center text-xs text-zinc-400 pt-1">
-                                    <span>Total: {item.type === 'expense' ? '-' : `${totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
+                                    <span>Total: {item.type === 'expense' ? '-' : `${ totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) } ${ item.unit }`}</span>
                                     <Button variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => openHistory(item)}>
                                         <History className="h-3 w-3 mr-1" /> Histórico
                                     </Button>
@@ -793,7 +845,7 @@ export default function Inventory() {
                                                         <TableCell className={cn("text-right bg-zinc-50/30 border-l border-zinc-100", qty <= (item.min_stock || 0) && item.type !== 'expense' ? "text-red-600 font-bold" : "")}>
                                                             {item.type === 'expense' ? '-' : (
                                                                 <div className="flex flex-col items-end">
-                                                                    <span>{`${qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
+                                                                    <span>{`${ qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) } ${ item.unit }`}</span>
                                                                     {item.unit_type && item.unit_weight && item.unit_weight > 0 && (
                                                                         <span className="text-[10px] text-zinc-500 font-normal opacity-80">
                                                                             = {(qty * item.unit_weight).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {item.unit_type}
@@ -813,7 +865,7 @@ export default function Inventory() {
                                                             )}
                                                         </TableCell>
                                                         <TableCell className="text-right text-xs font-bold text-zinc-700 bg-zinc-50/30 border-r border-zinc-100">
-                                                            {item.type === 'expense' ? '-' : `R$ ${totalLocVal.toFixed(2)}`}
+                                                            {item.type === 'expense' ? '-' : `R$ ${ totalLocVal.toFixed(2) }`}
                                                         </TableCell>
                                                     </Fragment>
                                                 );
@@ -823,7 +875,7 @@ export default function Inventory() {
                                             <TableCell className="text-right font-bold bg-zinc-50">
                                                 {item.type === 'expense' ? '-' : (
                                                     <div className="flex flex-col items-end">
-                                                        <span>{`${totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
+                                                        <span>{`${ totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) } ${ item.unit }`}</span>
                                                         {item.unit_type && item.unit_weight && item.unit_weight > 0 && (
                                                             <span className="text-[10px] text-zinc-500 font-normal opacity-80 font-mono">
                                                                 = {(totalQtd * item.unit_weight).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {item.unit_type}
@@ -832,7 +884,7 @@ export default function Inventory() {
                                                     </div>
                                                 )}
                                             </TableCell>
-                                            <TableCell className="text-right font-bold text-green-700 bg-zinc-50">{item.type === 'expense' ? '-' : `R$ ${totalVal.toFixed(2)}`}</TableCell>
+                                            <TableCell className="text-right font-bold text-green-700 bg-zinc-50">{item.type === 'expense' ? '-' : `R$ ${ totalVal.toFixed(2) }`}</TableCell>
 
                                             <TableCell className="text-right space-x-1">
                                                 <Button variant="ghost" size="icon" onClick={() => openHistory(item)} title="Histórico de Compras">
@@ -1097,7 +1149,7 @@ export default function Inventory() {
                                     <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Nenhuma movimentação recente.</TableCell></TableRow>
                                 ) : (
                                     historyData.map(h => (
-                                        <TableRow key={`${h.type}-${h.id}`} className="hover:bg-zinc-50/50">
+                                        <TableRow key={`${ h.type } - ${ h.id }`} className="hover:bg-zinc-50/50">
                                             <TableCell className="text-xs whitespace-nowrap text-zinc-500">
                                                 {new Date(h.date).toLocaleDateString()} <span className="text-[10px]">{new Date(h.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                             </TableCell>
@@ -1117,8 +1169,8 @@ export default function Inventory() {
                                                         className="h-auto p-0 ml-2 text-[10px] text-blue-500 underline decoration-blue-200"
                                                         onClick={() => {
                                                             setIsHistoryOpen(false);
-                                                            if (h.type === 'purchase') navigate(`/purchases?openOrder=${h.link_id}`);
-                                                            if (h.type === 'usage') navigate(`/production?openOrder=${h.link_id}`);
+                                                            if (h.type === 'purchase') navigate(`/ purchases ? openOrder = ${ h.link_id }`);
+                                                            if (h.type === 'usage') navigate(`/ production ? openOrder = ${ h.link_id }`);
                                                         }}
                                                     >
                                                         #{h.link_id.slice(0, 6)}...
@@ -1203,7 +1255,7 @@ export default function Inventory() {
                                 <div key={c.name} className="flex justify-between items-center bg-white border p-2 rounded text-sm">
                                     <div className="flex flex-col">
                                         <span>{c.name}</span>
-                                        <span className={`text-[10px] ${c.type === 'expense' ? 'text-purple-600' : 'text-blue-600'}`}>
+                                        <span className={`text - [10px] ${ c.type === 'expense' ? 'text-purple-600' : 'text-blue-600' }`}>
                                             {c.type === 'expense' ? 'Despesa' : 'Estoque'}
                                         </span>
                                     </div>
