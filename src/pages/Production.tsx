@@ -216,7 +216,10 @@ export default function Production() {
             if (locs.length > 0 && !selectedLocation) {
                 // Default to first location or one with 'danilo' slug if exists for compatibility
                 const defaultLoc = locs.find(l => l.slug === 'stock-danilo') || locs[0];
-                setSelectedLocation(defaultLoc.id);
+                if (defaultLoc) {
+                    setSelectedLocation(defaultLoc.id);
+                    // Also set stockSource for consistency if needed, though mostly used in POS
+                }
             }
         }
     }
@@ -937,9 +940,12 @@ export default function Production() {
                                             // Determine Closure Status
                                             const isClosed = selectedOrder?.status === 'closed';
 
+                                            // Determine effective location (fallback to Danilo/First if not selected)
+                                            const effectiveLocId = selectedLocation || stockLocations.find(l => l.slug === 'stock-danilo')?.id || stockLocations[0]?.id;
+
                                             if (stockInfo) {
                                                 // Dynamic Stock Logic
-                                                const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === selectedLocation);
+                                                const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === effectiveLocId);
 
                                                 if (stockEntry) {
                                                     currentStock = stockEntry.quantity;
@@ -950,7 +956,7 @@ export default function Production() {
                                                     }
                                                 } else {
                                                     // Fallback for Legacy Columns
-                                                    const loc = stockLocations.find(l => l.id === selectedLocation);
+                                                    const loc = stockLocations.find(l => l.id === effectiveLocId);
                                                     if (loc?.slug === 'stock-danilo') {
                                                         currentStock = (stockInfo as any).stock_danilo || 0;
                                                         // Fallback cost if needed? not for quantity check
@@ -1063,9 +1069,12 @@ export default function Production() {
                                     let unitWeight = 1;
                                     let unitType = '';
 
+                                    // Determine effective location (fallback to Danilo/First if not selected)
+                                    const effectiveLocId = selectedLocation || stockLocations.find(l => l.slug === 'stock-danilo')?.id || stockLocations[0]?.id;
+
                                     if (stockInfo) {
                                         // Dynamic Stock Logic
-                                        const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === selectedLocation);
+                                        const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === effectiveLocId);
 
                                         if (stockEntry) {
                                             currentStock = stockEntry.quantity;
@@ -1076,7 +1085,7 @@ export default function Production() {
                                             }
                                         } else {
                                             // Fallback for Legacy Columns
-                                            const loc = stockLocations.find(l => l.id === selectedLocation);
+                                            const loc = stockLocations.find(l => l.id === effectiveLocId);
                                             if (loc?.slug === 'stock-danilo') {
                                                 currentStock = (stockInfo as any).stock_danilo || 0;
                                             } else if (loc?.slug === 'stock-adriel') {
@@ -1164,8 +1173,10 @@ export default function Production() {
                         let unitWeight = 1;
                         let unitType = '';
 
+                        const effectiveLocId = selectedLocation || stockLocations.find(l => l.slug === 'stock-danilo')?.id || stockLocations[0]?.id;
+
                         if (stockInfo) {
-                            const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === selectedLocation);
+                            const stockEntry = stockInfo.product_stocks?.find(s => s.location_id === effectiveLocId);
                             if (stockEntry) {
                                 currentStock = stockEntry.quantity;
                                 stockUnit = stockInfo.unit || 'un';
@@ -1175,7 +1186,7 @@ export default function Production() {
                                 }
                             } else {
                                 // Fallback Logic (Legacy)
-                                const loc = stockLocations.find(l => l.id === selectedLocation);
+                                const loc = stockLocations.find(l => l.id === effectiveLocId);
                                 if (loc?.slug === 'stock-danilo') currentStock = (stockInfo as any).stock_danilo || 0;
                                 else if (loc?.slug === 'stock-adriel') currentStock = (stockInfo as any).stock_adriel || 0;
                                 else currentStock = 0;
