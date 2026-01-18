@@ -64,7 +64,7 @@ export default function Inventory() {
     const [newUnitName, setNewUnitName] = useState("");
     const [categoryFilter, setCategoryFilter] = useState("all");
     const [stockFilter, setStockFilter] = useState("all");
-    const [typeFilter] = useState("all"); // 'all', 'stock' (insumo), 'product' (acabado)
+    const [typeFilter, setTypeFilter] = useState("all"); // 'all', 'stock' (insumo), 'product' (acabado)
 
     // Category State
     const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
@@ -531,37 +531,64 @@ export default function Inventory() {
                 categories={availableCategories}
             />
 
-            <div className="flex gap-2 mb-4 bg-zinc-50 p-2 rounded-lg border">
-                <div className="relative flex-1">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" />
-                    <Input
-                        placeholder="Buscar ingrediente..."
-                        className="pl-8 bg-white"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                </div>
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                    <SelectTrigger className="w-[180px] bg-white">
-                        <SelectValue placeholder="Filtrar Categoria" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">Todas as Categorias</SelectItem>
-                        {uniqueCategories.map(cat => (
-                            <SelectItem key={cat || 'unknown'} value={cat || 'unknown'}>{cat}</SelectItem>
+            <div className="flex flex-col gap-4 mb-4 bg-white p-3 rounded-lg border shadow-sm">
+
+                {/* Top Row: Search & Type Filter */}
+                <div className="flex flex-col md:flex-row gap-3 justify-between">
+                    <div className="relative flex-1">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" />
+                        <Input
+                            placeholder="Buscar item..."
+                            className="pl-8 bg-zinc-50"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+
+                    {/* Type Filter Segmented Control */}
+                    <div className="flex p-1 bg-zinc-100 rounded-md self-start md:self-auto w-full md:w-auto">
+                        {(['all', 'stock', 'product'] as const).map((t) => (
+                            <button
+                                key={t}
+                                onClick={() => setTypeFilter(t)}
+                                className={cn(
+                                    "flex-1 md:flex-none px-4 py-1.5 text-sm font-medium rounded-sm transition-all",
+                                    typeFilter === t
+                                        ? "bg-white text-zinc-900 shadow-sm"
+                                        : "text-zinc-500 hover:text-zinc-700"
+                                )}
+                            >
+                                {t === 'all' ? 'Todos' : t === 'stock' ? 'Insumos' : 'Acabados'}
+                            </button>
                         ))}
-                    </SelectContent>
-                </Select>
-                <Select value={stockFilter} onValueChange={setStockFilter}>
-                    <SelectTrigger className="w-[180px] bg-white">
-                        <SelectValue placeholder="Filtrar Saldo" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">Todos</SelectItem>
-                        <SelectItem value="with_balance">Com Saldo</SelectItem>
-                        <SelectItem value="no_balance">Sem Saldo</SelectItem>
-                    </SelectContent>
-                </Select>
+                    </div>
+                </div>
+
+                {/* Bottom Row: Detailed Filters */}
+                <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0">
+                    <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                        <SelectTrigger className="w-[160px] bg-zinc-50">
+                            <SelectValue placeholder="Categoria" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Todas Categorias</SelectItem>
+                            {uniqueCategories.map(cat => (
+                                <SelectItem key={cat || 'unknown'} value={cat || 'unknown'}>{cat}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Select value={stockFilter} onValueChange={setStockFilter}>
+                        <SelectTrigger className="w-[160px] bg-zinc-50">
+                            <SelectValue placeholder="Saldo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Qualquer Saldo</SelectItem>
+                            <SelectItem value="with_balance">Com Estoque</SelectItem>
+                            <SelectItem value="no_balance">Sem Estoque</SelectItem>
+                            <SelectItem value="low">Baixo Estoque</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
             </div >
 
             {/* Mobile View: Cards */}

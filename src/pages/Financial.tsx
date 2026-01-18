@@ -3,7 +3,7 @@ import { supabase } from "@/supabaseClient";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, CheckCircle, ArrowDownCircle, RotateCcw, Trash2, Filter, ChevronDown, ChevronUp, Layers, Calculator, TrendingUp, TrendingDown, Building2 } from "lucide-react";
+import { Loader2, CheckCircle, ArrowDownCircle, RotateCcw, Trash2, Filter, ChevronDown, ChevronUp, Layers, Calculator, TrendingUp, TrendingDown, Building2, MessageCircle } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FinancialMovement, BatchGroup } from "@/types";
 import { calculateTotalPending, calculateTotalPaid } from "@/lib/financialUtils";
 import { PaymentConfirmationDialog } from "@/components/financial/PaymentConfirmationDialog";
+import { WhatsAppChargeDialog, ChargeItem } from "@/components/financial/WhatsAppChargeDialog";
 
 export default function Financial() {
     const [movements, setMovements] = useState<FinancialMovement[]>([]);
@@ -47,6 +48,20 @@ export default function Financial() {
         type: 'income' | 'expense',
         count?: number
     }>({ mode: 'single', type: 'expense' });
+
+    // WhatsApp Dialog State
+    const [isWhatsAppDialogOpen, setIsWhatsAppDialogOpen] = useState(false);
+    const [whatsAppDialogData, setWhatsAppDialogData] = useState<{
+        clientName: string;
+        phone: string;
+        items: ChargeItem[];
+        pixKey?: string;
+    }>({
+        clientName: '',
+        phone: '',
+        items: [],
+        pixKey: ''
+    });
 
     const { toast } = useToast();
 
@@ -155,7 +170,7 @@ export default function Financial() {
             if (saleIds.length > 0) {
                 const { data: sales, error: salesError } = await supabase
                     .from('sales')
-                    .select('id, client_id, clients(name), sale_items(quantity, products(name))')
+                    .select('id, client_id, clients(name, phone), sale_items(quantity, products(name))')
                     .in('id', saleIds);
 
                 if (sales) {
@@ -176,6 +191,8 @@ export default function Financial() {
                                     ...m,
                                     description: desc.length > 60 ? desc.substring(0, 60) + '...' : desc,
                                     detail_buyer: clientName === 'Consumidor Final' ? 'Balcão' : clientName,
+                                    detail_phone: (sale.clients as any)?.phone, // Extract phone
+
 
                                     detail_supplier: 'Loja', // Income source
                                     detail_bank_name: m.bank_account_id ? banksMap[m.bank_account_id] : undefined
@@ -282,6 +299,31 @@ export default function Financial() {
             count: 1
         });
         setIsPaymentDialogOpen(true);
+    }
+
+    function openWhatsAppDialog(movement: FinancialMovement) {
+        const clientPhone = (movement as any).clients?.phone || (movement as any).detail_phone;
+        const clientName = movement.detail_buyer || 'Cliente';
+
+        if (!clientPhone) {
+            toast({ variant: 'destructive', title: "Sem telefone", description: "Telefone não encontrado." });
+            return;
+        }
+
+        const item: ChargeItem = {
+            id: movement.id,
+            description: movement.description,
+            amount: Math.abs(movement.amount),
+            date: movement.created_at,
+            originalDescription: movement.description
+        };
+
+        setWhatsAppDialogData({
+            clientName: clientName,
+            phone: clientPhone,
+            items: [item]
+        });
+        setIsWhatsAppDialogOpen(true);
     }
 
     async function handlePaymentConfirm(bankAccountId: string, date: string) {
@@ -740,6 +782,12 @@ export default function Financial() {
                                                             {mov.status === 'pending' && (
                                                                 <Button size="sm" variant="ghost" className="h-8 w-8 text-green-600 bg-green-50" onClick={() => openPaymentDialog(mov)}>
                                                                     <CheckCircle className="h-4 w-4" />
+                                                                </Button>
+                                                            )}
+                                                            {/* WhatsApp Button for Pending Income */}
+                                                            {mov.status === 'pending' && mov.type === 'income' && (
+                                                                <Button size="sm" variant="ghost" className="h-8 w-8 text-green-600 bg-green-50" onClick={() => openWhatsAppDialog(mov)}>
+                                                                    <MessageCircle className="h-4 w-4" />
                                                                 </Button>
                                                             )}
                                                             {mov.status === 'paid' && (isAdmin || isFinancial) && (

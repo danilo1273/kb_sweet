@@ -12,6 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { MessageCircle } from "lucide-react";
+import { WhatsAppChargeDialog, ChargeItem } from "@/components/financial/WhatsAppChargeDialog";
 
 interface FinancialMovement {
     id: string;
@@ -22,6 +24,8 @@ interface FinancialMovement {
     due_date: string;
     payment_date: string;
     created_at: string;
+
+    related_sale_id?: number; // Corrected column name
 }
 
 interface Client {
@@ -46,6 +50,75 @@ export default function Clients() {
     const [isSaving, setIsSaving] = useState(false);
     const [isAdmin, setIsAdmin] = useState(false);
 
+    // WhatsApp State
+    const [isWhatsAppDialogOpen, setIsWhatsAppDialogOpen] = useState(false);
+    const [whatsAppDialogData, setWhatsAppDialogData] = useState<{
+        clientName: string;
+        phone: string;
+        items: ChargeItem[];
+        pixKey?: string;
+    }>({
+        clientName: '',
+        phone: '',
+        items: [],
+        pixKey: ''
+    });
+
+    const handleOpenWhatsApp = async (client: Client, pendingAmount: number) => {
+        if (pendingAmount <= 0) return;
+
+        const pendingMovements = client.financial_movements
+            ?.filter(m => m.type === 'income' && m.status === 'pending') || [];
+
+        if (pendingMovements.length === 0) return;
+
+        // Fetch details for these movements
+        // We need to know which products were bought for each sale associated with these movements
+        const saleIds = pendingMovements.map(m => m.related_sale_id).filter(id => id !== undefined && id !== null) as number[];
+
+        // Dictionary to store sale details if found
+        const saleDetailsMap: Record<number, string> = {};
+
+        if (saleIds.length > 0) {
+            const { data: salesData } = await supabase
+                .from('sales')
+                .select('id, sale_items(quantity, products(name))')
+                .in('id', saleIds);
+
+            if (salesData) {
+                salesData.forEach(sale => {
+                    const desc = sale.sale_items?.map((item: any) => {
+                        return `${item.products?.name} (x${item.quantity})`;
+                    }).join(', ');
+                    if (desc) saleDetailsMap[sale.id] = desc;
+                });
+            }
+        }
+
+        const items: ChargeItem[] = pendingMovements.map(m => {
+            let desc = m.description;
+            // If it's a sale and we have details, append them
+            if (m.related_sale_id && saleDetailsMap[m.related_sale_id]) {
+                desc = saleDetailsMap[m.related_sale_id];
+            }
+
+            return {
+                id: m.id,
+                description: desc,
+                amount: Number(m.amount),
+                date: m.created_at, // or due_date
+                originalDescription: m.description
+            };
+        });
+
+        setWhatsAppDialogData({
+            clientName: client.name,
+            phone: client.phone || '',
+            items: items,
+        });
+        setIsWhatsAppDialogOpen(true);
+    };
+
     useEffect(() => {
         fetchClients();
         checkUserRole();
@@ -62,7 +135,7 @@ export default function Clients() {
         setLoading(true);
         const { data, error } = await supabase
             .from('clients')
-            .select('*, financial_movements(id, amount, status, type, description, due_date, payment_date, created_at)')
+            .select('*, financial_movements(id, amount, status, type, description, due_date, payment_date, created_at, related_sale_id)')
             .order('name');
 
         if (error) {
@@ -182,7 +255,18 @@ export default function Clients() {
                                             <User className="h-4 w-4 text-zinc-500" />
                                         </div>
                                         <div>
-                                            <div className="font-bold text-zinc-900">{client.name}</div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="font-bold text-zinc-900">{client.name}</div>
+                                                {pending > 0 && (
+                                                    <Button
+                                                        size="sm"
+                                                        className="h-6 bg-green-600 hover:bg-green-700 text-white text-xs ml-2 px-2"
+                                                        onClick={() => handleOpenWhatsApp(client, pending)}
+                                                    >
+                                                        <MessageCircle className="h-3 w-3 mr-1" /> Cobrar
+                                                    </Button>
+                                                )}
+                                            </div>
                                             <div className="text-xs text-zinc-500">{client.phone || '-'}</div>
                                         </div>
                                     </div>
@@ -244,6 +328,16 @@ export default function Clients() {
                                                 <User className="h-4 w-4 text-zinc-500" />
                                             </div>
                                             {client.name}
+                                            {pending > 0 && (
+                                                <Button
+                                                    size="sm"
+                                                    className="h-6 bg-green-600 hover:bg-green-700 text-white text-xs ml-2 px-2"
+                                                    onClick={() => handleOpenWhatsApp(client, pending)}
+                                                    title="Cobrar via WhatsApp"
+                                                >
+                                                    <MessageCircle className="h-3 w-3 mr-1" /> Cobrar
+                                                </Button>
+                                            )}
                                         </TableCell>
                                         <TableCell>{client.phone || '-'}</TableCell>
                                         <TableCell>{client.email || '-'}</TableCell>
@@ -331,6 +425,12 @@ export default function Clients() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <WhatsAppChargeDialog
+                isOpen={isWhatsAppDialogOpen}
+                onClose={() => setIsWhatsAppDialogOpen(false)}
+                data={whatsAppDialogData}
+            />
         </div>
     );
 }

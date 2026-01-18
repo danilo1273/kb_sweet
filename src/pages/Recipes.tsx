@@ -58,6 +58,8 @@ export default function Recipes() {
     const [products, setProducts] = useState<Product[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
+    const [typeFilter, setTypeFilter] = useState("all");
+    const [categoryFilter, setCategoryFilter] = useState("all");
     const { toast } = useToast();
 
     // Dialog state
@@ -285,10 +287,17 @@ export default function Recipes() {
         setAvailableIntermediates(prodData || []);
     }
 
-    const filteredProducts = products.filter(p =>
-        p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.category?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const uniqueCategories = Array.from(new Set(products.map(p => p.category))).filter(Boolean).sort();
+
+    const filteredProducts = products.filter(p => {
+        const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            p.category?.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesType = typeFilter === 'all' ||
+            (typeFilter === 'intermediate' ? p.type === 'intermediate' : p.type !== 'intermediate');
+        const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
+
+        return matchesSearch && matchesType && matchesCategory;
+    });
 
     async function handleSave() {
         setIsSaving(true);
@@ -580,15 +589,51 @@ export default function Recipes() {
                 </Button>
             </div>
 
-            <div className="flex items-center space-x-2">
-                <div className="relative flex-1 max-w-sm">
-                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                        placeholder="Buscar receita..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-8 bg-white"
-                    />
+            <div className="flex flex-col gap-4 mb-6 bg-white p-3 rounded-lg border shadow-sm">
+
+                {/* Search & Type Filters */}
+                <div className="flex flex-col md:flex-row gap-3 justify-between">
+                    <div className="relative flex-1">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" />
+                        <Input
+                            placeholder="Buscar receita ou produto..."
+                            className="pl-8 bg-zinc-50"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+
+                    <div className="flex p-1 bg-zinc-100 rounded-md self-start md:self-auto w-full md:w-auto overflow-x-auto">
+                        {(['all', 'finished', 'intermediate'] as const).map((t) => (
+                            <button
+                                key={t}
+                                onClick={() => setTypeFilter(t)}
+                                className={cn(
+                                    "flex-1 md:flex-none px-4 py-1.5 text-sm font-medium rounded-sm transition-all whitespace-nowrap",
+                                    typeFilter === t
+                                        ? "bg-white text-zinc-900 shadow-sm"
+                                        : "text-zinc-500 hover:text-zinc-700"
+                                )}
+                            >
+                                {t === 'all' ? 'Todos' : t === 'finished' ? 'Acabados' : 'Bases/Interm.'}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Secondary Filters */}
+                <div className="flex gap-2">
+                    <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                        <SelectTrigger className="w-[180px] bg-zinc-50">
+                            <SelectValue placeholder="Categoria" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Todas as Categorias</SelectItem>
+                            {uniqueCategories.map(cat => (
+                                <SelectItem key={cat || 'unknown'} value={cat || 'unknown'}>{cat}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                 </div>
             </div>
 

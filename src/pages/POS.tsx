@@ -187,6 +187,7 @@ export default function POS() {
                             <StockConsultationDialog
                                 onAddProduct={handleProductSelect}
                                 stockSource={stockSource}
+                                cartItems={orderItems}
                             />
                             <Select value={stockSource} onValueChange={(v: any) => setStockSource(v)}>
                                 <SelectTrigger className="w-[140px] h-8 text-xs bg-zinc-100 border-zinc-200">

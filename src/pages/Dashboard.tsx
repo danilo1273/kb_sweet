@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Activity, Package, DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowRight, ShoppingBag } from "lucide-react";
+import { Activity, Package, DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowRight, ShoppingBag, Zap } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +41,8 @@ export default function Dashboard() {
     const [salesTrend, setSalesTrend] = useState<any[]>([]);
     const [lowStockItems, setLowStockItems] = useState<any[]>([]);
     const [notifications, setNotifications] = useState<any[]>([]);
+    const [buyerPerformance, setBuyerPerformance] = useState<any[]>([]);
+    const [productionPerformance, setProductionPerformance] = useState<any[]>([]); // New State
 
     useEffect(() => {
         async function loadDashboardData() {
@@ -63,7 +65,9 @@ export default function Dashboard() {
                     productsRes,
                     financialRes,
                     productionRes,
-                    salesRes
+                    salesRes,
+                    purchasesRes,
+                    productionStatsRes
                 ] = await Promise.all([
                     supabase.from('ingredients').select('*'),
                     supabase.from('products').select('*'),
@@ -78,12 +82,27 @@ export default function Dashboard() {
                             product_id,
                             products (name, cost)
                         )
-                    `)
+                    `),
+                    // Fetch Purchases for Buyer Stats
+                    supabase.from('purchase_orders').select(`
+                        id, created_by, created_at,
+                        purchase_requests (cost, status)
+                    `).gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+                    // Fetch Production Stats (Closed this month)
+                    supabase.from('production_orders').select(`
+                        id, quantity, user_id, status, closed_at,
+                        products (cost, name, unit, type)
+                    `).eq('status', 'closed').gte('closed_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString())
                 ]);
 
-                // --- 1b. Manual Join for Profiles (to avoid Ambiguous Embedding 400 error) ---
+                // --- 1b. Manual Join for Profiles (Sales + Purchases) ---
                 const rawSales = salesRes.data || [];
-                const userIds = Array.from(new Set(rawSales.map((s: any) => s.user_id).filter(Boolean)));
+                const rawPurchases = purchasesRes.data || [];
+
+                const userIds = Array.from(new Set([
+                    ...rawSales.map((s: any) => s.user_id),
+                    ...rawPurchases.map((p: any) => p.created_by)
+                ].filter(Boolean)));
 
                 let profilesMap: Record<string, any> = {};
                 if (userIds.length > 0) {
@@ -98,6 +117,63 @@ export default function Dashboard() {
                     ...s,
                     profiles: profilesMap[s.user_id] || { full_name: 'Desconhecido' }
                 }));
+
+                // Attach profiles to purchases & Process Buyer Stats
+                const buyerStats: Record<string, number> = {};
+                rawPurchases.forEach((order: any) => {
+                    const buyerName = profilesMap[order.created_by]?.full_name?.split(' ')[0] || 'Desconhecido';
+                    // Sum approved/pending requests (exclude rejected)
+                    const orderTotal = order.purchase_requests?.reduce((acc: number, r: any) => {
+                        if (r.status !== 'rejected') return acc + (Number(r.cost) || 0);
+                        return acc;
+                    }, 0) || 0;
+
+                    if (orderTotal > 0) {
+                        buyerStats[buyerName] = (buyerStats[buyerName] || 0) + orderTotal;
+                    }
+                });
+
+                const buyerPerformanceData = Object.entries(buyerStats)
+                    .map(([name, total]) => ({ name, total }))
+                    .sort((a, b) => b.total - a.total);
+
+                setBuyerPerformance(buyerPerformanceData);
+
+                // Process Production Stats
+                const rawProduction = productionStatsRes.data || [];
+                const prodStats: Record<string, { count: number, val: number, items: Record<string, { qty: number, unit: string }> }> = {};
+
+                rawProduction.forEach((order: any) => {
+                    // FILTER: Only FINISHED products
+                    if (order.products?.type !== 'finished') return;
+
+                    const userName = profilesMap[order.user_id]?.full_name?.split(' ')[0] || profilesMap[order.user_id]?.full_name || 'Desconhecido';
+                    const qty = Number(order.quantity) || 0;
+                    const cost = Number(order.products?.cost) || 0;
+                    const totalVal = qty * cost; // Approximated value (Cost based)
+                    const prodName = order.products?.name || 'Item Desconhecido';
+                    const unit = order.products?.unit || 'un';
+
+                    if (!prodStats[userName]) prodStats[userName] = { count: 0, val: 0, items: {} };
+                    prodStats[userName].count += 1;
+                    prodStats[userName].val += totalVal;
+
+                    if (!prodStats[userName].items[prodName]) {
+                        prodStats[userName].items[prodName] = { qty: 0, unit };
+                    }
+                    prodStats[userName].items[prodName].qty += qty;
+                });
+
+                const productionPerformanceData = Object.entries(prodStats)
+                    .map(([name, stats]) => ({
+                        name,
+                        ...stats,
+                        itemsList: Object.entries(stats.items)
+                            .map(([pName, details]) => ({ name: pName, ...details }))
+                            .sort((a, b) => b.qty - a.qty)
+                    }))
+                    .sort((a, b) => b.val - a.val);
+                setProductionPerformance(productionPerformanceData);
 
                 // --- 2. Calculate KPI Metrics ---
 
@@ -359,7 +435,7 @@ export default function Dashboard() {
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold text-red-600">
-                                    R$ {stats.pendingPayments.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {Math.abs(stats.pendingPayments).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
                                 <p className="text-xs text-zinc-500 cursor-pointer hover:underline" onClick={() => navigate('/financial')}>
                                     Ver contas pendentes &rarr;
@@ -446,7 +522,7 @@ export default function Dashboard() {
                 </div>
 
                 {/* 3. ALERTS & LISTS ROW */}
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 
                     {/* Low Stock Alert */}
                     <Card className="shadow-sm border-red-100">
@@ -480,8 +556,40 @@ export default function Dashboard() {
                         </CardContent>
                     </Card>
 
+                    {/* Purchases by Buyer Widget */}
+                    <Card className="shadow-sm">
+                        <CardHeader className="pb-2">
+                            <div className="flex items-center justify-between">
+                                <CardTitle className="text-base font-semibold text-blue-900">Compras (Mês)</CardTitle>
+                                <ShoppingBag className="h-4 w-4 text-blue-500" />
+                            </div>
+                            <CardDescription>Por Comprador</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-3 mt-2">
+                                {buyerPerformance.length === 0 ? (
+                                    <div className="text-sm text-zinc-400 text-center py-4">Sem compras no mês</div>
+                                ) : (
+                                    buyerPerformance.map((buyer: any, i: number) => (
+                                        <div key={i} className="flex items-center justify-between p-2 bg-blue-50/50 rounded-md border border-blue-100">
+                                            <div className="flex items-center gap-2">
+                                                <div className="h-6 w-6 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-700">
+                                                    {buyer.name.charAt(0)}
+                                                </div>
+                                                <span className="font-medium text-zinc-700 text-sm">{buyer.name}</span>
+                                            </div>
+                                            <span className="font-bold text-zinc-900 text-sm">
+                                                R$ {buyer.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </span>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </CardContent>
+                    </Card>
+
                     {/* Sales Volume Mini-Chart */}
-                    <Card className="md:col-span-2 shadow-sm">
+                    <Card className="shadow-sm">
                         <CardHeader className="pb-2">
                             <CardTitle className="text-base font-semibold">Volume de Vendas</CardTitle>
                             <CardDescription>Vendas por dia (últimas 2 semanas)</CardDescription>
@@ -496,6 +604,58 @@ export default function Dashboard() {
                                         <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: "#3b82f6" }} activeDot={{ r: 6 }} />
                                     </LineChart>
                                 </ResponsiveContainer>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Production Summary Widget */}
+                    <Card className="shadow-sm">
+                        <CardHeader className="pb-2">
+                            <div className="flex items-center justify-between">
+                                <CardTitle className="text-base font-semibold text-amber-900">Produção (Mês)</CardTitle>
+                                <Zap className="h-4 w-4 text-amber-500" />
+                            </div>
+                            <CardDescription>Valor Produzido</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-3 mt-2">
+                                {productionPerformance.length === 0 ? (
+                                    <div className="text-sm text-zinc-400 text-center py-4">Sem produção no mês</div>
+                                ) : (
+                                    productionPerformance.map((user: any, i: number) => (
+                                        <div key={i} className="flex flex-col gap-2 p-2 bg-amber-50/50 rounded-md border border-amber-100">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="h-6 w-6 rounded-full bg-amber-100 flex items-center justify-center text-xs font-bold text-amber-700">
+                                                        {user.name.charAt(0)}
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <span className="font-medium text-zinc-700 text-sm">{user.name}</span>
+                                                        <span className="text-[10px] text-zinc-500">{user.count} produções</span>
+                                                    </div>
+                                                </div>
+                                                <span className="font-bold text-zinc-900 text-sm">
+                                                    R$ {user.val.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+                                            {/* Product Detailed List */}
+                                            {user.itemsList && user.itemsList.length > 0 && (
+                                                <div className="pl-8 text-xs text-zinc-500 space-y-1">
+                                                    {user.itemsList.slice(0, 5).map((item: any, idx: number) => (
+                                                        <div key={idx} className="flex justify-between border-b last:border-0 border-amber-100 pb-1 last:pb-0">
+                                                            <span>{item.qty} {item.unit} x {item.name}</span>
+                                                        </div>
+                                                    ))}
+                                                    {user.itemsList.length > 5 && (
+                                                        <div className="text-[10px] text-zinc-400 italic">
+                                                            + {user.itemsList.length - 5} outros itens...
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))
+                                )}
                             </div>
                         </CardContent>
                     </Card>
