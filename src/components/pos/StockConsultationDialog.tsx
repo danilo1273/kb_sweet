@@ -71,10 +71,16 @@ export function StockConsultationDialog({ isOpen, onOpenChange, onAddProduct, st
         const { data: locs } = await supabase.from('stock_locations').select('id, slug');
         setLocations(locs || []);
 
-        // 2. Fetch Products
-        // Removed broken join with product_stocks
+        // 2. Fetch Products with their stocks
         const { data } = await supabase.from('products')
-            .select('*')
+            .select(`
+                *,
+                product_stocks (
+                    quantity,
+                    location_id,
+                    average_cost
+                )
+            `)
             .neq('type', 'intermediate')
             .order('name');
 
@@ -126,18 +132,24 @@ export function StockConsultationDialog({ isOpen, onOpenChange, onAddProduct, st
                                 // Resolve Stock Logic
                                 let currentStock = 0;
 
-                                // 1. Try Legacy Fallback first (since we know migration is pending/broken for products)
-                                const locationSlug = locations.find(l => l.id === stockSource)?.slug;
+                                // 1. Try new product_stocks table first
+                                const stockEntry = (p as any).product_stocks?.find((s: any) => s.location_id === stockSource);
 
-                                if (locationSlug === 'stock-danilo') {
-                                    currentStock = (p as any).stock_danilo || 0;
-                                } else if (locationSlug === 'stock-adriel') {
-                                    currentStock = (p as any).stock_adriel || 0;
+                                if (stockEntry) {
+                                    currentStock = stockEntry.quantity || 0;
                                 } else {
-                                    // Fallback to 0 if unknown location or try legacy property if just one stock
-                                    // If stockSource is empty, maybe sum both?
-                                    if (!stockSource) {
-                                        currentStock = ((p as any).stock_danilo || 0) + ((p as any).stock_adriel || 0);
+                                    // 2. Fallback to Legacy Columns for safety
+                                    const locationSlug = locations.find(l => l.id === stockSource)?.slug;
+
+                                    if (locationSlug === 'stock-danilo') {
+                                        currentStock = (p as any).stock_danilo || 0;
+                                    } else if (locationSlug === 'stock-adriel') {
+                                        currentStock = (p as any).stock_adriel || 0;
+                                    } else if (!stockSource) {
+                                        // If no source selected, sum everything available
+                                        const sumNew = (p as any).product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) || 0;
+                                        const sumLegacy = ((p as any).stock_danilo || 0) + ((p as any).stock_adriel || 0);
+                                        currentStock = Math.max(sumNew, sumLegacy);
                                     }
                                 }
 

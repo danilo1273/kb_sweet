@@ -378,7 +378,6 @@ export default function Inventory() {
             const productionPromise = supabase
                 .from('production_order_items')
                 .select(`
-                    id, quantity_used, waste_quantity, unit_cost, unit,
                     production_orders!inner(
                         id, closed_at, status, products(name),
                         profiles: user_id(full_name)

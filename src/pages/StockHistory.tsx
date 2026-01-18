@@ -4,9 +4,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Search, ArrowUpCircle, ArrowDownCircle, AlertCircle, ShoppingCart, Box, ClipboardCheck, ArrowLeft } from "lucide-react";
+import { Loader2, Search, ArrowUpCircle, AlertCircle, ShoppingCart, Box, ClipboardCheck, ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -133,7 +133,6 @@ export default function StockHistory() {
             const mappedAdjustments: HistoryItem[] = (adjustmentsRes.data || []).map((a: any) => {
                 const prof = a.profiles;
                 const userName = Array.isArray(prof) ? prof[0]?.full_name : (prof as any)?.full_name;
-                const isPositive = a.quantity_diff >= 0;
 
                 return {
                     id: a.id,
