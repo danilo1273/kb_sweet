@@ -369,15 +369,6 @@ export default function Inventory() {
                 .order('created_at', { ascending: false })
                 .limit(15);
 
-            // 2. Fetch Production Usage
-            const productionPromise = supabase
-                .from('production_order_items')
-                .select(`
-                    id, quantity_used, waste_quantity, unit, unit_cost,
-                    production_orders!inner (
-                        id, closed_at, quantity, status,
-                        products (name),
-                        profiles:user_id (full_name)
             // 2. Fetch Production Usage (Ingredients Consumed)
             const productionPromise = supabase
                 .from('production_order_items')
@@ -436,10 +427,10 @@ export default function Inventory() {
             // For now, let's stick to valid queries.
 
             const [purchasesRes, productionRes, productionOutputRes, adjustmentsRes, salesRes] = await Promise.all([
-                purchasesPromise, 
-                productionPromise, 
+                purchasesPromise,
+                productionPromise,
                 productionOutputPromise,
-                adjustmentsPromise, 
+                adjustmentsPromise,
                 salesPromise
             ]);
 
@@ -450,7 +441,7 @@ export default function Inventory() {
 
             // ... Process Purchases ...
             let purchaseItems: UnifiedHistoryItem[] = [];
-             const userIds = new Set<string>();
+            const userIds = new Set<string>();
             purchasesRes.data?.forEach((r: any) => {
                 if (r.purchase_orders?.created_by) userIds.add(r.purchase_orders.created_by);
             });
@@ -463,13 +454,13 @@ export default function Inventory() {
             purchaseItems = (purchasesRes.data || []).map((r: any) => {
                 const po = r.purchase_orders || {};
                 const supplierName = po.suppliers?.name || r.supplier || 'Fornecedor Externo';
-                const userName = profileMap.get(po.created_by) || 'Sistema'; 
+                const userName = profileMap.get(po.created_by) || 'Sistema';
 
                 return {
                     id: r.id,
                     date: r.created_at || new Date().toISOString(),
                     type: 'purchase',
-                    description: `Compra: ${ supplierName }`,
+                    description: `Compra: ${supplierName}`,
                     quantity: Number(r.quantity || 0),
                     unit: r.unit || 'un',
                     total_value: Number(r.cost || 0),
@@ -485,7 +476,7 @@ export default function Inventory() {
                 const qtdUsed = (item.quantity_used || 0) + (item.waste_quantity || 0);
                 const cost = qtdUsed * (item.unit_cost || 0);
                 let userName = 'Produção';
-                 if (order.profiles) {
+                if (order.profiles) {
                     if (Array.isArray(order.profiles)) userName = order.profiles[0]?.full_name;
                     else userName = (order.profiles as any).full_name;
                 }
@@ -494,7 +485,7 @@ export default function Inventory() {
                     id: item.id,
                     date: order.closed_at || new Date().toISOString(),
                     type: 'usage',
-                    description: `Usado em: ${ prodName }`,
+                    description: `Usado em: ${prodName}`,
                     quantity: qtdUsed,
                     unit: item.unit || 'un',
                     total_value: cost,
@@ -504,13 +495,13 @@ export default function Inventory() {
             });
 
             // 4b. Process Production Output (NEW)
-             const productionOutputItems: UnifiedHistoryItem[] = (productionOutputRes.data || []).map((order: any) => {
-                 let userName = 'Produção';
-                 if (order.profiles) {
+            const productionOutputItems: UnifiedHistoryItem[] = (productionOutputRes.data || []).map((order: any) => {
+                let userName = 'Produção';
+                if (order.profiles) {
                     if (Array.isArray(order.profiles)) userName = order.profiles[0]?.full_name;
                     else userName = (order.profiles as any).full_name;
                 }
-                
+
                 return {
                     id: order.id,
                     date: order.closed_at || new Date().toISOString(),
@@ -528,7 +519,7 @@ export default function Inventory() {
             const salesItems: UnifiedHistoryItem[] = (salesRes.data || []).map((item: any) => {
                 const sale = item.sales;
                 let userName = 'Vendedor';
-                 if (sale.profiles) {
+                if (sale.profiles) {
                     if (Array.isArray(sale.profiles)) userName = sale.profiles[0]?.full_name;
                     else userName = (sale.profiles as any).full_name;
                 }
@@ -565,7 +556,7 @@ export default function Inventory() {
                     // Let's stick to usage=red (out), purchase=green (in).
                     // Actually, if we use 'purchase' type it might show supplier fields which are missing.
                     // Let's patch the type definition or map to existing.
-                    description: `${ descMap[adj.type] || 'Ajuste' }: ${ adj.reason || '-' }(${ adj.stock_owner })`,
+                    description: `${descMap[adj.type] || 'Ajuste'}: ${adj.reason || '-'}(${adj.stock_owner})`,
                     quantity: Math.abs(adj.quantity_diff),
                     unit: ingredient.unit || 'un',
                     total_value: 0, // No monetary value stored usually, or we could estimate? Keep 0 for now.
@@ -576,10 +567,10 @@ export default function Inventory() {
 
             // 5. Merge & Sort
             const allHistory = [
-                ...purchaseItems, 
-                ...productionUsageItems, 
-                ...productionOutputItems, 
-                ...adjustmentItems, 
+                ...purchaseItems,
+                ...productionUsageItems,
+                ...productionOutputItems,
+                ...adjustmentItems,
                 ...salesItems
             ].sort((a, b) =>
                 new Date(b.date).getTime() - new Date(a.date).getTime()
@@ -735,7 +726,7 @@ export default function Inventory() {
                                     </div>
                                 )}
                                 <div className="flex justify-between items-center text-xs text-zinc-400 pt-1">
-                                    <span>Total: {item.type === 'expense' ? '-' : `${ totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) } ${ item.unit }`}</span>
+                                    <span>Total: {item.type === 'expense' ? '-' : `${totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
                                     <Button variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => openHistory(item)}>
                                         <History className="h-3 w-3 mr-1" /> Histórico
                                     </Button>
@@ -845,7 +836,7 @@ export default function Inventory() {
                                                         <TableCell className={cn("text-right bg-zinc-50/30 border-l border-zinc-100", qty <= (item.min_stock || 0) && item.type !== 'expense' ? "text-red-600 font-bold" : "")}>
                                                             {item.type === 'expense' ? '-' : (
                                                                 <div className="flex flex-col items-end">
-                                                                    <span>{`${ qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) } ${ item.unit }`}</span>
+                                                                    <span>{`${qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
                                                                     {item.unit_type && item.unit_weight && item.unit_weight > 0 && (
                                                                         <span className="text-[10px] text-zinc-500 font-normal opacity-80">
                                                                             = {(qty * item.unit_weight).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {item.unit_type}
@@ -865,7 +856,7 @@ export default function Inventory() {
                                                             )}
                                                         </TableCell>
                                                         <TableCell className="text-right text-xs font-bold text-zinc-700 bg-zinc-50/30 border-r border-zinc-100">
-                                                            {item.type === 'expense' ? '-' : `R$ ${ totalLocVal.toFixed(2) }`}
+                                                            {item.type === 'expense' ? '-' : `R$ ${totalLocVal.toFixed(2)}`}
                                                         </TableCell>
                                                     </Fragment>
                                                 );
@@ -875,7 +866,7 @@ export default function Inventory() {
                                             <TableCell className="text-right font-bold bg-zinc-50">
                                                 {item.type === 'expense' ? '-' : (
                                                     <div className="flex flex-col items-end">
-                                                        <span>{`${ totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) } ${ item.unit }`}</span>
+                                                        <span>{`${totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
                                                         {item.unit_type && item.unit_weight && item.unit_weight > 0 && (
                                                             <span className="text-[10px] text-zinc-500 font-normal opacity-80 font-mono">
                                                                 = {(totalQtd * item.unit_weight).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {item.unit_type}
@@ -884,7 +875,7 @@ export default function Inventory() {
                                                     </div>
                                                 )}
                                             </TableCell>
-                                            <TableCell className="text-right font-bold text-green-700 bg-zinc-50">{item.type === 'expense' ? '-' : `R$ ${ totalVal.toFixed(2) }`}</TableCell>
+                                            <TableCell className="text-right font-bold text-green-700 bg-zinc-50">{item.type === 'expense' ? '-' : `R$ ${totalVal.toFixed(2)}`}</TableCell>
 
                                             <TableCell className="text-right space-x-1">
                                                 <Button variant="ghost" size="icon" onClick={() => openHistory(item)} title="Histórico de Compras">
@@ -1149,7 +1140,7 @@ export default function Inventory() {
                                     <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Nenhuma movimentação recente.</TableCell></TableRow>
                                 ) : (
                                     historyData.map(h => (
-                                        <TableRow key={`${ h.type } - ${ h.id }`} className="hover:bg-zinc-50/50">
+                                        <TableRow key={`${h.type} - ${h.id}`} className="hover:bg-zinc-50/50">
                                             <TableCell className="text-xs whitespace-nowrap text-zinc-500">
                                                 {new Date(h.date).toLocaleDateString()} <span className="text-[10px]">{new Date(h.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                             </TableCell>
@@ -1169,8 +1160,8 @@ export default function Inventory() {
                                                         className="h-auto p-0 ml-2 text-[10px] text-blue-500 underline decoration-blue-200"
                                                         onClick={() => {
                                                             setIsHistoryOpen(false);
-                                                            if (h.type === 'purchase') navigate(`/ purchases ? openOrder = ${ h.link_id }`);
-                                                            if (h.type === 'usage') navigate(`/ production ? openOrder = ${ h.link_id }`);
+                                                            if (h.type === 'purchase') navigate(`/ purchases ? openOrder = ${h.link_id}`);
+                                                            if (h.type === 'usage') navigate(`/ production ? openOrder = ${h.link_id}`);
                                                         }}
                                                     >
                                                         #{h.link_id.slice(0, 6)}...
@@ -1255,7 +1246,7 @@ export default function Inventory() {
                                 <div key={c.name} className="flex justify-between items-center bg-white border p-2 rounded text-sm">
                                     <div className="flex flex-col">
                                         <span>{c.name}</span>
-                                        <span className={`text - [10px] ${ c.type === 'expense' ? 'text-purple-600' : 'text-blue-600' }`}>
+                                        <span className={`text - [10px] ${c.type === 'expense' ? 'text-purple-600' : 'text-blue-600'}`}>
                                             {c.type === 'expense' ? 'Despesa' : 'Estoque'}
                                         </span>
                                     </div>

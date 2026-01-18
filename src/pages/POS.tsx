@@ -175,6 +175,15 @@ export default function POS() {
     const handleFinalizeSale = async () => {
         if (orderItems.length === 0) return;
 
+        if (!selectedClient) {
+            toast({
+                variant: "destructive",
+                title: "Selecione um Cliente",
+                description: "É obrigatório vincular a venda a um cliente."
+            });
+            return;
+        }
+
         const success = await processSale(
             orderItems,
             total,

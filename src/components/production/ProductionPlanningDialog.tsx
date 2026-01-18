@@ -152,26 +152,23 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                         name = ing.name;
                         const rawStock = source === 'danilo' ? (ing.stock_danilo || 0) : (ing.stock_adriel || 0);
 
-                        // Unit Conversion Logic
-                        // If BOM unit is different from Stock Unit, try to convert Stock -> BOM Unit
-                        if (ing.unit && bomItem.unit && ing.unit.toLowerCase() !== bomItem.unit.toLowerCase()) {
-                            // Case: Stock is in 'UN' / 'CX' and BOM is in 'g' / 'ml'
-                            // We expect a conversion factor in 'unit_weight' or 'purchase_unit_factor'
-                            // Usually 'unit_weight' is the weight of 1 'UN' in grams
+                        // Unit Conversion Logic (Aligned with Production.tsx)
+                        const stockUnitLower = ing.unit?.toLowerCase();
+                        const targetUnitLower = bomItem.unit?.toLowerCase();
+                        const unitWeight = ing.unit_weight || ing.purchase_unit_factor || 1;
+                        const unitTypeLower = (ing.unit_type || '').toLowerCase();
 
-                            if ((ing.unit.toLowerCase() === 'un' || ing.unit.toLowerCase() === 'cx' || ing.unit.toLowerCase() === 'sc') &&
-                                (bomItem.unit.toLowerCase() === 'g' || bomItem.unit.toLowerCase() === 'ml')) {
+                        if ((stockUnitLower === 'un' || stockUnitLower === 'cx' || stockUnitLower === 'sc' || stockUnitLower === 'saco' || stockUnitLower === 'pct' || stockUnitLower === 'kg' || stockUnitLower === 'l') &&
+                            (targetUnitLower === 'g' || targetUnitLower === 'ml')) {
 
-                                const factor = ing.unit_weight || ing.purchase_unit_factor || 1;
-                                // If factor is 1 and units differ significantly (UN vs g), it might be missing data, but we proceed with 1
-                                currentStock = rawStock * factor;
+                            if (stockUnitLower === 'kg' || stockUnitLower === 'l') {
+                                currentStock = rawStock * 1000;
                             } else {
-                                // Unknown conversion, assume direct mapping or 1:1 fallback
-                                // Or maybe Stock is in 'kg' and BOM in 'g'?
-                                if (ing.unit.toLowerCase() === 'kg' && bomItem.unit.toLowerCase() === 'g') currentStock = rawStock * 1000;
-                                else if (ing.unit.toLowerCase() === 'l' && bomItem.unit.toLowerCase() === 'ml') currentStock = rawStock * 1000;
-                                else currentStock = rawStock;
+                                currentStock = rawStock * unitWeight;
                             }
+                        } else if (unitWeight > 1 && unitTypeLower && targetUnitLower === unitTypeLower) {
+                            // Generic conversion for customized secondary units
+                            currentStock = rawStock * unitWeight;
                         } else {
                             currentStock = rawStock;
                         }
@@ -290,9 +287,9 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                 // Initialize map if source is unexpected, though type limits to danilo/adriel
                 if (!requirements[source]) requirements[source] = new Map();
 
-                const product = productsMap.get(order.product_id);
+                const product = productsMap.get(order.product_id) as any;
                 // Fallback to fetchProducts state if not in map (should be in map due to step 4)
-                const fallbackProd = products.find(p => p.id === order.product_id);
+                const fallbackProd = (products.find(p => p.id === order.product_id) as any);
                 const batchSize = product?.batch_size || fallbackProd?.batch_size || 1;
 
                 const ratio = order.quantity / Number(batchSize);
@@ -321,20 +318,25 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                             let rawStockDanilo = i.stock_danilo || 0;
                             let rawStockAdriel = i.stock_adriel || 0;
 
-                            // Apply Conversion Logic for Stock (Same as Single Mode)
-                            if (i.unit && bom.unit && i.unit.toLowerCase() !== bom.unit.toLowerCase()) {
-                                if ((i.unit.toLowerCase() === 'un' || i.unit.toLowerCase() === 'cx' || i.unit.toLowerCase() === 'sc') &&
-                                    (bom.unit.toLowerCase() === 'g' || bom.unit.toLowerCase() === 'ml')) {
-                                    const factor = i.unit_weight || i.purchase_unit_factor || 1;
-                                    rawStockDanilo *= factor;
-                                    rawStockAdriel *= factor;
-                                } else if (i.unit.toLowerCase() === 'kg' && bom.unit.toLowerCase() === 'g') {
+                            // Apply Conversion Logic for Stock (Same as Single Mode / Production.tsx)
+                            const stockUnitLower = i.unit?.toLowerCase();
+                            const targetUnitLower = bom.unit?.toLowerCase();
+                            const unitWeight = i.unit_weight || i.purchase_unit_factor || 1;
+                            const unitTypeLower = (i.unit_type || '').toLowerCase();
+
+                            if ((stockUnitLower === 'un' || stockUnitLower === 'cx' || stockUnitLower === 'sc' || stockUnitLower === 'saco' || stockUnitLower === 'pct' || stockUnitLower === 'kg' || stockUnitLower === 'l') &&
+                                (targetUnitLower === 'g' || targetUnitLower === 'ml')) {
+
+                                if (stockUnitLower === 'kg' || stockUnitLower === 'l') {
                                     rawStockDanilo *= 1000;
                                     rawStockAdriel *= 1000;
-                                } else if (i.unit.toLowerCase() === 'l' && bom.unit.toLowerCase() === 'ml') {
-                                    rawStockDanilo *= 1000;
-                                    rawStockAdriel *= 1000;
+                                } else {
+                                    rawStockDanilo *= unitWeight;
+                                    rawStockAdriel *= unitWeight;
                                 }
+                            } else if (unitWeight > 1 && unitTypeLower && targetUnitLower === unitTypeLower) {
+                                rawStockDanilo *= unitWeight;
+                                rawStockAdriel *= unitWeight;
                             }
 
                             stockDanilo = rawStockDanilo;

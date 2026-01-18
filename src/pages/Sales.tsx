@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Plus, ShoppingCart, TrendingUp, Edit, Trash2 } from "lucide-react";
+import { Loader2, Plus, ShoppingCart, TrendingUp, Edit, Trash2, Eye } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -28,7 +28,7 @@ export default function Sales() {
         const { data, error } = await supabase
             .from('sales')
 
-            .select('*, clients(name), stock_locations(name, slug)')
+            .select('*, clients(name), stock_locations(name, slug), financial_movements(status), sale_items(*, products(name))')
             .order('created_at', { ascending: false });
 
         if (!error) {
@@ -36,6 +36,28 @@ export default function Sales() {
         }
         setLoading(false);
     }
+
+    // View Items State
+    const [isViewOpen, setIsViewOpen] = useState(false);
+    const [viewSaleItems, setViewSaleItems] = useState<any[]>([]);
+
+    // User State for Permissions
+    const [currentUser, setCurrentUser] = useState<any>(null);
+    const [isAdmin, setIsAdmin] = useState(false);
+
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data: { user } }) => {
+            if (user) {
+                setCurrentUser(user);
+                // Check if admin (this logic depends on your role system, typically stored in profiles or metadata)
+                // For now, assuming profile fetch or checking email/metadata if available.
+                // Or simplified: fetch profile
+                supabase.from('profiles').select('role').eq('id', user.id).single().then(({ data }) => {
+                    if (data?.role === 'super_admin' || data?.role === 'admin') setIsAdmin(true);
+                });
+            }
+        });
+    }, []);
 
     // Edit State
     const { toast } = useToast();
@@ -183,58 +205,56 @@ export default function Sales() {
 
                             <div className="flex justify-between items-center pt-3 border-t mt-1">
                                 <div className="font-bold text-lg text-green-600">R$ {Number(sale.total).toFixed(2)}</div>
-                                <div className="flex gap-2">
-                                    {sale.edit_status === 'requested' && (
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-zinc-500 hover:text-blue-500"
+                                    onClick={() => {
+                                        setViewSaleItems(sale.sale_items || []);
+                                        setIsViewOpen(true);
+                                    }}
+                                >
+                                    <Eye className="h-4 w-4" />
+                                </Button>
+
+                                {(isAdmin || (currentUser && sale.user_id === currentUser.id)) && !(sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received') && (
+                                    <>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500 bg-blue-50" onClick={() => handleEditClick(sale)}>
+                                            <Edit className="h-4 w-4" />
+                                        </Button>
                                         <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="h-8 text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200"
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 text-red-500 bg-red-50"
                                             onClick={async () => {
-                                                if (!confirm("Autorizar edição desta venda?")) return;
-                                                await supabase.from('sales').update({ edit_status: 'approved' }).eq('id', sale.id);
-                                                toast({ title: "Edição Autorizada" });
-                                                fetchSales();
+                                                if (!confirm('Tem certeza que deseja EXCLUIR permanentemente? O estoque será devolvido.')) return;
+                                                const reason = prompt("Digite o motivo da exclusão para auditoria:");
+                                                if (!reason) return;
+
+                                                setLoading(true);
+                                                try {
+                                                    const { error } = await supabase.rpc('delete_sale_secure', {
+                                                        p_sale_id: sale.id,
+                                                        p_reason: reason
+                                                    });
+
+                                                    if (error) throw error;
+
+                                                    toast({ title: "Venda excluída e estoque estornado!" });
+                                                    fetchSales();
+
+                                                } catch (e: any) {
+                                                    alert('Erro: ' + e.message);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
                                             }}
                                         >
-                                            Autorizar
+                                            <Trash2 className="h-4 w-4" />
                                         </Button>
-                                    )}
+                                    </>
+                                )}
 
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500 bg-blue-50" onClick={() => handleEditClick(sale)}>
-                                        <Edit className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8 text-red-500 bg-red-50"
-                                        onClick={async () => {
-                                            if (!confirm('Tem certeza que deseja EXCLUIR permanentemente? O estoque será devolvido.')) return;
-                                            const reason = prompt("Digite o motivo da exclusão para auditoria:");
-                                            if (!reason) return;
-
-                                            setLoading(true);
-                                            try {
-                                                const { error } = await supabase.rpc('delete_sale_secure', {
-                                                    p_sale_id: sale.id,
-                                                    p_reason: reason
-                                                });
-
-                                                if (error) throw error;
-
-                                                toast({ title: "Venda excluída e estoque estornado!" });
-                                                fetchSales();
-
-                                            } catch (e: any) {
-                                                alert('Erro: ' + e.message);
-                                            } finally {
-                                                setLoading(false);
-                                            }
-                                        }}
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
-
-                                </div>
                             </div>
                         </div>
                     ))
@@ -302,41 +322,60 @@ export default function Sales() {
                                         R$ {Number(sale.total).toFixed(2)}
                                     </TableCell>
                                     <TableCell className="text-right space-x-2">
-                                        <Button variant="ghost" size="icon" onClick={() => handleEditClick(sale)}>
-                                            <Edit className="h-4 w-4 text-blue-500" />
-                                        </Button>
-                                        {sale.status !== 'canceled' && (
+                                        <div className="flex justify-end gap-2">
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                onClick={async () => {
-                                                    if (!confirm('Tem certeza que deseja EXCLUIR permanentemente? O estoque será devolvido.')) return;
-                                                    const reason = prompt("Digite o motivo da exclusão para auditoria:");
-                                                    if (!reason) return;
-
-                                                    setLoading(true);
-                                                    try {
-                                                        const { error } = await supabase.rpc('delete_sale_secure', {
-                                                            p_sale_id: sale.id,
-                                                            p_reason: reason
-                                                        });
-
-                                                        if (error) throw error;
-
-                                                        toast({ title: "Venda excluída e estoque estornado!" });
-                                                        fetchSales();
-
-                                                    } catch (e: any) {
-                                                        alert('Erro: ' + e.message);
-                                                    } finally {
-                                                        setLoading(false);
-                                                    }
+                                                className="h-8 w-8 text-zinc-500 hover:text-blue-500"
+                                                onClick={() => {
+                                                    setViewSaleItems(sale.sale_items || []);
+                                                    setIsViewOpen(true);
                                                 }}
+                                                title="Ver Itens"
                                             >
-                                                <Trash2 className="h-4 w-4" />
+                                                <Eye className="h-4 w-4" />
                                             </Button>
-                                        )}
+
+                                            {(isAdmin || (currentUser && sale.user_id === currentUser.id)) && !(sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received') && (
+                                                <>
+                                                    <Button variant="ghost" size="icon" className="h-4 w-4 text-blue-500" onClick={() => handleEditClick(sale)}>
+                                                        <Edit className="h-4 w-4" />
+                                                    </Button>
+                                                    {sale.status !== 'canceled' && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                            onClick={async () => {
+                                                                if (!confirm('Tem certeza que deseja EXCLUIR permanentemente? O estoque será devolvido.')) return;
+                                                                const reason = prompt("Digite o motivo da exclusão para auditoria:");
+                                                                if (!reason) return;
+
+                                                                setLoading(true);
+                                                                try {
+                                                                    const { error } = await supabase.rpc('delete_sale_secure', {
+                                                                        p_sale_id: sale.id,
+                                                                        p_reason: reason
+                                                                    });
+
+                                                                    if (error) throw error;
+
+                                                                    toast({ title: "Venda excluída e estoque estornado!" });
+                                                                    fetchSales();
+
+                                                                } catch (e: any) {
+                                                                    alert('Erro: ' + e.message);
+                                                                } finally {
+                                                                    setLoading(false);
+                                                                }
+                                                            }}
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
+                                                </>
+                                            )}
+                                        </div>
                                     </TableCell>
                                 </TableRow>
                             ))
@@ -389,6 +428,45 @@ export default function Sales() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-        </div>
+
+            <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Itens da Venda</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="border rounded-md overflow-hidden">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Produto</TableHead>
+                                        <TableHead className="text-right">Qtd</TableHead>
+                                        <TableHead className="text-right">Unitário</TableHead>
+                                        <TableHead className="text-right">Total</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {viewSaleItems.length === 0 ? (
+                                        <TableRow><TableCell colSpan={4} className="text-center">Nenhum item encontrado.</TableCell></TableRow>
+                                    ) : (
+                                        viewSaleItems.map((item: any) => (
+                                            <TableRow key={item.id}>
+                                                <TableCell>{item.products?.name || 'Item Desconhecido'}</TableCell>
+                                                <TableCell className="text-right">{item.quantity}</TableCell>
+                                                <TableCell className="text-right">R$ {item.unit_price?.toFixed(2)}</TableCell>
+                                                <TableCell className="text-right font-medium">R$ {(item.quantity * item.unit_price)?.toFixed(2)}</TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsViewOpen(false)}>Fechar</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </div >
     );
 }

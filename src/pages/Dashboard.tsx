@@ -185,33 +185,26 @@ export default function Dashboard() {
                     return acc + ((Number(prod.stock_quantity) || 0) * (Number(prod.cost) || 0));
                 }, 0) || 0);
 
-                // Finished Products Stats
+                // Stock Value (Finished Goods - Asset Value based on Cost)
                 const finishedProducts = productsRes.data || [];
                 const totalFinishedStock = finishedProducts.reduce((acc, p) => {
                     const stockEntries = p.product_stocks || [];
-
-                    // If the product has entries in the new system (even if 0), use it.
-                    // Only fall back to legacy if NO entries exist in product_stocks.
                     if (stockEntries.length > 0) {
-                        const dbStock = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
-                        return acc + dbStock;
+                        return acc + stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
                     }
-
-                    // Fallback to legacy
                     return acc + (Number(p.stock_quantity) || 0);
                 }, 0);
 
-                const projectedSalesValue = finishedProducts.reduce((acc, p) => {
+                // FIX: Use Cost for Inventory Value, not Price
+                const stockAssetValue = finishedProducts.reduce((acc, p) => {
                     const stockEntries = p.product_stocks || [];
                     let stock = 0;
-
                     if (stockEntries.length > 0) {
                         stock = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
                     } else {
                         stock = (Number(p.stock_quantity) || 0);
                     }
-
-                    return acc + (stock * (Number(p.price) || 0));
+                    return acc + (stock * (Number(p.cost) || 0));
                 }, 0);
 
                 // Pending Financials
@@ -222,7 +215,6 @@ export default function Dashboard() {
                 // Current Month Stats
                 const now = new Date();
                 const currentMonthMovements = financialRes.data?.filter(m => {
-                    // Start of Fix: Prioritize payment_date for Cash Flow view
                     const refDate = m.status === 'paid' ? m.payment_date : m.due_date;
                     const d = new Date(refDate || m.created_at);
                     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
@@ -232,9 +224,6 @@ export default function Dashboard() {
                 const monthlySalesIncome = currentMonthMovements.filter(m => m.type === 'income' && m.status === 'paid').reduce((acc, m) => acc + Number(m.amount), 0);
 
                 // Sales Data Processing
-                // Sales Data Processing
-
-
                 // Volume
                 const currentMonthSales = salesData.filter(s => {
                     const d = new Date(s.created_at);
@@ -243,7 +232,7 @@ export default function Dashboard() {
                 });
                 const monthlySalesTotal = currentMonthSales.reduce((acc, s) => acc + Number(s.total), 0);
 
-                // Net Profit (Sales Margin Estimate) - More accurate than just cash flow if desired, but let's stick to Cash Flow for the "Net Profit" card for now
+                // Net Profit
                 const netProfit = monthlySalesIncome - monthlyPurchases;
 
                 // Avg Ticket
@@ -273,7 +262,6 @@ export default function Dashboard() {
                 const sellerStats: Record<string, { revenue: number, cost: number, count: number }> = {};
 
                 salesData.forEach((sale: any) => {
-                    // Extract Seller Name safely
                     const sellerName = sale.profiles?.full_name?.split(' ')[0] || 'Desconhecido';
 
                     if (!sellerStats[sellerName]) {
@@ -346,7 +334,7 @@ export default function Dashboard() {
                     monthlySales: monthlySalesTotal,
                     netProfit: monthlySalesIncome,
                     avgTicket,
-                    projectedSalesValue,
+                    projectedSalesValue: stockAssetValue,
                     totalFinishedStock
                 });
 
@@ -356,7 +344,6 @@ export default function Dashboard() {
 
                 // Store Seller Performance in 'notifications' state temporarily
                 setNotifications(sellerPerformanceData);
-
             }
             setLoading(false);
         }
@@ -376,112 +363,128 @@ export default function Dashboard() {
     if (loading) return <div className="p-8 space-y-4">{[1, 2, 3].map(i => <Skeleton key={i} className="h-40 w-full" />)}</div>;
 
     return (
-        <div className="flex-1 p-4 md:p-8 space-y-8 bg-zinc-50 dark:bg-zinc-950 min-h-screen overflow-x-hidden">
+        <div className="flex-1 p-6 md:p-8 space-y-8 bg-zinc-50 dark:bg-zinc-950 min-h-screen overflow-x-hidden font-sans">
             <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                 <div>
-                    <h2 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">Dashboard</h2>
-                    <p className="text-zinc-500">Visão geral e performance do negócio.</p>
+                    <h2 className="text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-blue-600">
+                        Painel de Controle
+                    </h2>
+                    <p className="text-zinc-500 font-medium">Visão geral e performance do negócio.</p>
                 </div>
-                <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => navigate('/production')}>Nova Produção</Button>
-                    <Button onClick={() => navigate('/pos')}>Nova Venda</Button>
+                <div className="flex gap-3">
+                    <Button variant="outline" onClick={() => navigate('/production')} className="border-purple-200 text-purple-700 hover:bg-purple-50">
+                        <Zap className="mr-2 h-4 w-4" /> Nova Produção
+                    </Button>
+                    <Button onClick={() => navigate('/pos')} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md hover:shadow-lg transition-all">
+                        <ShoppingBag className="mr-2 h-4 w-4" /> Nova Venda
+                    </Button>
                 </div>
             </div>
 
             <motion.div variants={container} initial="hidden" animate="show" className="space-y-8">
 
-                {/* 1. KEY METRICS ROW */}
+                {/* 1. KEY METRICS ROW - PREMIUM DESIGN */}
                 <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+
+                    {/* Estoque Acabado */}
                     <motion.div variants={itemVariant}>
-                        <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-purple-500">
+                        <Card className="hover:shadow-xl transition-all duration-300 border-none bg-gradient-to-br from-purple-600 to-indigo-700 text-white shadow-lg shadow-purple-200">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-medium text-zinc-500">Estoque Acabado</CardTitle>
-                                <Package className="h-4 w-4 text-purple-500" />
+                                <CardTitle className="text-xs font-semibold uppercase opacity-90 tracking-wider">Estoque Acabado</CardTitle>
+                                <Package className="h-4 w-4 text-purple-100 opacity-80" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold text-purple-600">
+                                <div className="text-2xl font-bold tracking-tight">
                                     R$ {stats.projectedSalesValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
-                                <p className="text-xs text-zinc-500">{stats.totalFinishedStock} un. prontas para venda</p>
+                                <p className="text-xs text-purple-100 opacity-80 mt-1 font-medium">{stats.totalFinishedStock} un. em estoque (Custo)</p>
                             </CardContent>
                         </Card>
                     </motion.div>
+
+                    {/* Vendas (Mês) */}
                     <motion.div variants={itemVariant}>
-                        <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-blue-500">
+                        <Card className="hover:shadow-xl transition-all duration-300 border-none bg-gradient-to-br from-blue-500 to-cyan-600 text-white shadow-lg shadow-blue-200">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-medium text-zinc-500">Vendas (Mês)</CardTitle>
-                                <ShoppingBag className="h-4 w-4 text-blue-500" />
+                                <CardTitle className="text-xs font-semibold uppercase opacity-90 tracking-wider">Vendas (Mês)</CardTitle>
+                                <ShoppingBag className="h-4 w-4 text-blue-100 opacity-80" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold text-blue-600">
+                                <div className="text-2xl font-bold tracking-tight">
                                     R$ {stats.monthlySales.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
-                                <p className="text-xs text-zinc-500">Total vendido (Faturado)</p>
+                                <p className="text-xs text-blue-100 opacity-80 mt-1 font-medium">Total vendido (Faturado)</p>
                             </CardContent>
                         </Card>
                     </motion.div>
 
+                    {/* Recebido */}
                     <motion.div variants={itemVariant}>
-                        <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-green-500">
+                        <Card className="hover:shadow-xl transition-all duration-300 border-none bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-200">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-medium text-zinc-500">Recebido (Mês)</CardTitle>
-                                <DollarSign className="h-4 w-4 text-green-500" />
+                                <CardTitle className="text-xs font-semibold uppercase opacity-90 tracking-wider">Recebido (Mês)</CardTitle>
+                                <DollarSign className="h-4 w-4 text-emerald-100 opacity-80" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold text-green-600">
+                                <div className="text-2xl font-bold tracking-tight">
                                     R$ {stats.netProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
-                                <p className="text-xs text-zinc-500">Entradas confirmadas</p>
+                                <p className="text-xs text-emerald-100 opacity-80 mt-1 font-medium">Entradas confirmadas</p>
                             </CardContent>
                         </Card>
                     </motion.div>
 
-                    {/* NEW: Total Expense Paid (Month) */}
+                    {/* Pago */}
                     <motion.div variants={itemVariant}>
-                        <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-rose-500">
+                        <Card className="hover:shadow-xl transition-all duration-300 border-none bg-gradient-to-br from-rose-500 to-pink-600 text-white shadow-lg shadow-rose-200">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-medium text-zinc-500">Pago (Mês)</CardTitle>
-                                <TrendingDown className="h-4 w-4 text-rose-500" />
+                                <CardTitle className="text-xs font-semibold uppercase opacity-90 tracking-wider">Pago (Mês)</CardTitle>
+                                <TrendingDown className="h-4 w-4 text-rose-100 opacity-80" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold text-rose-600">
+                                <div className="text-2xl font-bold tracking-tight">
                                     R$ {stats.monthlyPurchases.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
-                                <p className="text-xs text-zinc-500">Saídas confirmadas</p>
+                                <p className="text-xs text-rose-100 opacity-80 mt-1 font-medium">Saídas confirmadas</p>
                             </CardContent>
                         </Card>
                     </motion.div>
 
+                    {/* A Receber */}
                     <motion.div variants={itemVariant}>
-                        <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-orange-500">
+                        <Card className="hover:shadow-xl transition-all duration-300 border-none bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-lg shadow-amber-200">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-medium text-zinc-500">A Receber (Pend)</CardTitle>
-                                <Activity className="h-4 w-4 text-orange-500" />
+                                <CardTitle className="text-xs font-semibold uppercase opacity-90 tracking-wider">A Receber</CardTitle>
+                                <Activity className="h-4 w-4 text-amber-100 opacity-80" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold text-orange-600">
+                                <div className="text-2xl font-bold tracking-tight">
                                     R$ {stats.pendingReceivables.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
-                                <p className="text-xs text-zinc-500 cursor-pointer hover:underline" onClick={() => navigate('/financial')}>
-                                    Ver a receber &rarr;
-                                </p>
+                                <div className="flex items-center gap-1 mt-1 cursor-pointer hover:bg-white/10 p-0.5 rounded px-1 -ml-1 transition-colors w-fit" onClick={() => navigate('/financial')}>
+                                    <p className="text-xs text-amber-100 opacity-90 font-medium">Ver pendentes</p>
+                                    <ArrowRight className="h-3 w-3 text-amber-100" />
+                                </div>
                             </CardContent>
                         </Card>
                     </motion.div>
 
+                    {/* A Pagar */}
                     <motion.div variants={itemVariant}>
-                        <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-red-500">
-                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-medium text-zinc-500">A Pagar (Total)</CardTitle>
+                        <Card className="hover:shadow-xl transition-all duration-300 border-none bg-white text-zinc-800 shadow-md border-zinc-200 relative overflow-hidden group">
+                            <div className="absolute top-0 right-0 w-16 h-16 bg-red-100 rounded-bl-full -mr-8 -mt-8 z-0 group-hover:bg-red-200 transition-colors"></div>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 relative z-10">
+                                <CardTitle className="text-xs font-semibold uppercase text-zinc-500 tracking-wider">A Pagar</CardTitle>
                                 <AlertTriangle className="h-4 w-4 text-red-500" />
                             </CardHeader>
-                            <CardContent>
-                                <div className="text-2xl font-bold text-red-600">
+                            <CardContent className="relative z-10">
+                                <div className="text-2xl font-bold tracking-tight text-zinc-900">
                                     R$ {Math.abs(stats.pendingPayments).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
-                                <p className="text-xs text-zinc-500 cursor-pointer hover:underline" onClick={() => navigate('/financial')}>
-                                    Ver contas pendentes &rarr;
-                                </p>
+                                <div className="flex items-center gap-1 mt-1 cursor-pointer hover:underline decoration-red-300 w-fit" onClick={() => navigate('/financial')}>
+                                    <p className="text-xs text-red-500 font-medium">Ver contas</p>
+                                    <ArrowRight className="h-3 w-3 text-red-500" />
+                                </div>
                             </CardContent>
                         </Card>
                     </motion.div>

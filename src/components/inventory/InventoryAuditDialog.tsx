@@ -178,6 +178,35 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
                         const { error } = await supabase.from('ingredients').update(updatePayload).eq('id', item.id);
                         if (error) throw error;
                     }
+
+                    // 2.1 Update location-specific average_cost in product_stocks
+                    const { data: locs } = await supabase.from('stock_locations').select('id, slug');
+                    const targetLoc = locs?.find(l => l.slug === `stock-${stockOwner}`);
+
+                    if (targetLoc) {
+                        const { data: existingStock } = await supabase.from('product_stocks')
+                            .select('id')
+                            .eq('location_id', targetLoc.id)
+                            .eq(isProduct ? 'product_id' : 'ingredient_id', item.id)
+                            .maybeSingle();
+
+                        if (existingStock) {
+                            await supabase.from('product_stocks')
+                                .update({ average_cost: newCostVal, last_updated: new Date().toISOString() })
+                                .eq('id', existingStock.id);
+                        } else {
+                            const insertData: any = {
+                                location_id: targetLoc.id,
+                                average_cost: newCostVal,
+                                quantity: 0,
+                                last_updated: new Date().toISOString()
+                            };
+                            if (isProduct) insertData.product_id = item.id;
+                            else insertData.ingredient_id = item.id;
+
+                            await supabase.from('product_stocks').insert(insertData);
+                        }
+                    }
                 }
             }
             toast({ title: "Inventário processado com sucesso!" });

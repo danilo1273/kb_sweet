@@ -251,7 +251,7 @@ export default function Financial() {
                 if (!grouped[groupId]) {
                     grouped[groupId] = {
                         order_id: groupId,
-                        order_nickname: `Avulsos - ${dateKey}`,
+                        order_nickname: `Vendas - ${dateKey}`,
                         supplier_name: '-', // Mixed
                         movements: [],
                         total_pending: 0,
