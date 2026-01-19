@@ -30,36 +30,48 @@ export default function Marketing() {
     }, []);
 
     async function fetchProducts() {
-        setLoading(true);
-        // Fetch finished goods from products table (Source of Truth for legacy + new)
-        const { data } = await supabase
-            .from("products")
-            .select("*, product_stocks(quantity)")
-            .eq('type', 'finished');
+        try {
+            setLoading(true);
+            // Fetch finished goods from products table (Source of Truth for legacy + new)
+            const { data, error } = await supabase
+                .from("products")
+                .select("*, product_stocks(quantity)")
+                .eq('type', 'finished');
 
-        if (data) {
-            const formatted = data
-                .map((product: any) => {
-                    const stockQty = product.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) || 0;
-                    const legacyQty = Number(product.stock_quantity) || 0;
-                    const totalQty = stockQty > 0 ? stockQty : legacyQty;
+            if (error) throw error;
 
-                    return {
-                        id: product.id,
-                        name: product.name,
-                        price: product.sale_price,
-                        unit: product.unit,
-                        stock: totalQty
-                    };
-                })
-                .filter(p => p.stock > 0)
-                .sort((a, b) => b.stock - a.stock);
+            if (data) {
+                const formatted = data
+                    .map((product: any) => {
+                        const stockQty = product.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0;
+                        const legacyQty = Number(product.stock_quantity) || 0;
+                        const totalQty = stockQty > 0 ? stockQty : legacyQty;
 
-            setProducts(formatted);
-            // Select top 5 by default
-            setSelectedProducts(formatted.slice(0, 5).map((p: any) => p.id));
+                        return {
+                            id: product.id,
+                            name: product.name,
+                            price: product.sale_price,
+                            unit: product.unit,
+                            stock: totalQty
+                        };
+                    })
+                    .filter(p => p.stock > 0)
+                    .sort((a, b) => b.stock - a.stock);
+
+                setProducts(formatted);
+                // Select top 5 by default
+                setSelectedProducts(formatted.slice(0, 5).map((p: any) => p.id));
+            }
+        } catch (error) {
+            console.error("Error fetching products:", error);
+            toast({
+                title: "Erro ao carregar produtos",
+                description: "Não foi possível carregar o estoque.",
+                variant: "destructive"
+            });
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     }
 
     const toggleProduct = (id: string) => {

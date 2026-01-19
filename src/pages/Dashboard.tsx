@@ -1009,11 +1009,11 @@ export default function Dashboard() {
                             <TableBody>
                                 {products
                                     .filter(p => p.type === 'finished' && (
-                                        (p.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) > 0) ||
+                                        (p.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) > 0) ||
                                         (p.stock_quantity > 0)
                                     ))
                                     .map(product => {
-                                        const stockQty = product.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) || 0;
+                                        const stockQty = product.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0;
                                         const legacyQty = Number(product.stock_quantity) || 0;
                                         const totalQty = stockQty > 0 ? stockQty : legacyQty; // Prioritize stock table, fallback to legacy
 
@@ -1049,6 +1049,83 @@ export default function Dashboard() {
                             )).length} itens
                         </div>
                         <Button variant="outline" onClick={() => setIsFinishedGoodsModalOpen(false)} className="bg-white border-zinc-200">
+                            Fechar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal de Detalhes de Insumos */}
+            <Dialog open={isIngredientsModalOpen} onOpenChange={setIsIngredientsModalOpen}>
+                <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col p-0 overflow-hidden bg-white">
+                    <DialogHeader className="p-6 pb-2">
+                        <DialogTitle className="text-xl font-bold text-zinc-800 flex items-center gap-2">
+                            <Package className="h-5 w-5 text-pink-600" />
+                            Estoque de Insumos
+                        </DialogTitle>
+                        <p className="text-sm text-zinc-500">Matéria-prima disponível para produção.</p>
+                    </DialogHeader>
+
+                    <div className="flex-1 overflow-y-auto p-6 pt-2">
+                        <Table>
+                            <TableHeader>
+                                <TableRow className="hover:bg-transparent border-zinc-100">
+                                    <TableHead className="text-zinc-500 font-bold uppercase text-[10px] tracking-wider">Insumo</TableHead>
+                                    <TableHead className="text-zinc-500 font-bold uppercase text-[10px] tracking-wider">Local</TableHead>
+                                    <TableHead className="text-zinc-500 font-bold uppercase text-[10px] tracking-wider text-right">Qtd Total</TableHead>
+                                    <TableHead className="text-zinc-500 font-bold uppercase text-[10px] tracking-wider text-right">Custo Médio</TableHead>
+                                    <TableHead className="text-zinc-500 font-bold uppercase text-[10px] tracking-wider text-right">Valor Total</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {ingredients
+                                    .filter(ing => {
+                                        const stockQty = ing.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0;
+                                        const legacyQty = (Number(ing.stock_danilo) || 0) + (Number(ing.stock_adriel) || 0);
+                                        return stockQty > 0 || legacyQty > 0;
+                                    })
+                                    .map(ing => {
+                                        const stockQty = ing.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0;
+                                        const legacyQty = (Number(ing.stock_danilo) || 0) + (Number(ing.stock_adriel) || 0);
+                                        const totalQty = stockQty > 0 ? stockQty : legacyQty;
+
+                                        // Resolve Location Name
+                                        let locationName = "Estoque Antigo (Migrar)";
+                                        if (stockQty > 0 && ing.product_stocks?.length > 0) {
+                                            const activeStock = ing.product_stocks.find((s: any) => Number(s.quantity) > 0);
+                                            if (activeStock?.stock_locations?.name) {
+                                                locationName = activeStock.stock_locations.name;
+                                            } else if (activeStock) {
+                                                locationName = "Local não definido";
+                                            }
+                                        }
+
+                                        const cost = ing.product_stocks?.[0]?.average_cost || Number(ing.cost) || Number(ing.cost_danilo) || Number(ing.cost_adriel) || 0;
+                                        const totalVal = totalQty * cost;
+
+                                        return (
+                                            <TableRow key={ing.id} className="border-zinc-50 hover:bg-zinc-50/50 transition-colors">
+                                                <TableCell className="font-medium text-zinc-700">{ing.name}</TableCell>
+                                                <TableCell className="text-xs text-zinc-500">{locationName}</TableCell>
+                                                <TableCell className="text-right font-bold text-zinc-900">{totalQty} {ing.unit}</TableCell>
+                                                <TableCell className="text-right text-zinc-500 text-xs">R$ {cost.toFixed(2)}</TableCell>
+                                                <TableCell className="text-right font-bold text-pink-700">R$ {totalVal.toFixed(2)}</TableCell>
+                                            </TableRow>
+                                        );
+                                    })}
+                            </TableBody>
+                        </Table>
+                    </div>
+
+                    <DialogFooter className="p-4 bg-zinc-50 border-t items-center justify-between sm:justify-between">
+                        <div className="text-xs text-zinc-500 font-medium">
+                            Total: {ingredients.filter(ing => {
+                                const stockQty = ing.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0;
+                                const legacyQty = (Number(ing.stock_danilo) || 0) + (Number(ing.stock_adriel) || 0);
+                                return stockQty > 0 || legacyQty > 0;
+                            }).length} itens
+                        </div>
+                        <Button variant="outline" onClick={() => setIsIngredientsModalOpen(false)} className="bg-white border-zinc-200">
                             Fechar
                         </Button>
                     </DialogFooter>
