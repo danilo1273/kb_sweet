@@ -80,9 +80,12 @@ export default function POS() {
         const { data: prodData } = await supabase.from('products')
             .select(`
                 *, 
+                cost_danilo,
+                cost_adriel, 
                 product_stocks (
                     quantity,
-                    location_id
+                    location_id,
+                    average_cost
                 )
             `)
             .order('name');
@@ -166,9 +169,31 @@ export default function POS() {
 
     // --- Calculations ---
 
+    // Helper to resolve effective cost based on selected stock source
+    const resolveCost = (product: Product, locationId: string): number => {
+        // 1. Check Product Stocks for current average_cost
+        const stockEntry = product.product_stocks?.find((s: any) => s.location_id === locationId);
+        if (stockEntry && stockEntry.average_cost > 0) {
+            return Number(stockEntry.average_cost);
+        }
+
+        // 2. Check Legacy Fields based on Location Slug
+        const location = stockLocations.find(l => l.id === locationId);
+        if (location) {
+            if (location.slug === 'stock-danilo' && (product.cost_danilo || 0) > 0) return Number(product.cost_danilo);
+            if (location.slug === 'stock-adriel' && (product.cost_adriel || 0) > 0) return Number(product.cost_adriel);
+        }
+
+        // 3. Fallback to generic cost
+        return Number(product.cost) || 0;
+    };
+
     const subtotal = orderItems.reduce((acc, item) => acc + item.total, 0);
     const total = Math.max(0, subtotal - globalDiscount);
-    const totalCost = orderItems.reduce((acc, item) => acc + (item.product.cost * item.quantity), 0);
+    const totalCost = orderItems.reduce((acc, item) => {
+        const cost = resolveCost(item.product, stockSource);
+        return acc + (cost * item.quantity);
+    }, 0);
     const estimatedProfit = total - totalCost;
     const marginPercent = total > 0 ? (estimatedProfit / total) * 100 : 0;
 
@@ -184,8 +209,14 @@ export default function POS() {
             return;
         }
 
+        // Inject effective resolve cost snapshot
+        const itemsWithCost = orderItems.map(item => ({
+            ...item,
+            cost: resolveCost(item.product, stockSource)
+        }));
+
         const success = await processSale(
-            orderItems,
+            itemsWithCost,
             total,
             globalDiscount,
             'pending', // Default payment method for pending sales

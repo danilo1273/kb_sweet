@@ -165,6 +165,8 @@ export interface POSProduct {
     name: string;
     price: number;
     cost: number;
+    cost_danilo?: number; // Added
+    cost_adriel?: number; // Added
     category: string;
     stock_danilo: number;
     stock_adriel: number;
@@ -177,6 +179,7 @@ export interface POSOrderItem {
     product: POSProduct;
     quantity: number;
     unit_price: number;
+    cost?: number; // Added: Effective Cost Snapshot
     total: number;
 }
 

@@ -25,7 +25,7 @@ export function usePOS() {
                 product_id: item.product.id,
                 quantity: item.quantity,
                 unit_price: item.unit_price,
-                cost: item.product.cost
+                cost: item.cost ?? item.product.cost // Use effective cost if available
             }));
 
             // Call Secure RPC
