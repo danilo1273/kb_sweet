@@ -50,7 +50,7 @@ export default function Marketing() {
                         return {
                             id: product.id,
                             name: product.name,
-                            price: product.sale_price,
+                            price: Number(product.sale_price) || 0,
                             unit: product.unit,
                             stock: totalQty
                         };

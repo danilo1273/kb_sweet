@@ -1015,9 +1015,27 @@ export default function Dashboard() {
                                     .map(product => {
                                         const stockQty = product.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0;
                                         const legacyQty = Number(product.stock_quantity) || 0;
-                                        const totalQty = stockQty > 0 ? stockQty : legacyQty; // Prioritize stock table, fallback to legacy
+                                        // Resolve Location Name & Cost
+                                        let locationName = "Estoque Antigo (Migrar)";
+                                        let unitCost = Number(product.cost) || 0;
 
-                                        const totalVal = totalQty * (product.cost || 0);
+                                        if (stockQty > 0 && product.product_stocks?.length > 0) {
+                                            // Find the first stock entry with qty > 0 to display location
+                                            const activeStock = product.product_stocks.find((s: any) => Number(s.quantity) > 0);
+                                            if (activeStock) {
+                                                if (activeStock.stock_locations?.name) {
+                                                    locationName = activeStock.stock_locations.name;
+                                                } else {
+                                                    locationName = "Local não definido";
+                                                }
+                                                // ALWAYS use current average cost from stock if available
+                                                if (activeStock.average_cost > 0) {
+                                                    unitCost = Number(activeStock.average_cost);
+                                                }
+                                            }
+                                        }
+
+                                        const totalVal = totalQty * unitCost;
                                         return (
                                             <TableRow key={product.id} className="border-zinc-50 hover:bg-zinc-50/50 transition-colors">
                                                 <TableCell className="font-medium text-zinc-700">{product.name}</TableCell>
@@ -1089,26 +1107,35 @@ export default function Dashboard() {
                                         const legacyQty = (Number(ing.stock_danilo) || 0) + (Number(ing.stock_adriel) || 0);
                                         const totalQty = stockQty > 0 ? stockQty : legacyQty;
 
-                                        // Resolve Location Name
+                                        // Resolve Location Name & Cost
                                         let locationName = "Estoque Antigo (Migrar)";
+                                        let unitCost = Number(ing.cost) || Number(ing.cost_danilo) || Number(ing.cost_adriel) || 0;
+
                                         if (stockQty > 0 && ing.product_stocks?.length > 0) {
                                             const activeStock = ing.product_stocks.find((s: any) => Number(s.quantity) > 0);
-                                            if (activeStock?.stock_locations?.name) {
-                                                locationName = activeStock.stock_locations.name;
-                                            } else if (activeStock) {
-                                                locationName = "Local não definido";
+                                            if (activeStock) {
+                                                if (activeStock.stock_locations?.name) {
+                                                    locationName = activeStock.stock_locations.name;
+                                                } else {
+                                                    locationName = "Local não definido";
+                                                }
+                                                // ALWAYS use current average cost from stock if available
+                                                if (activeStock.average_cost > 0) {
+                                                    unitCost = Number(activeStock.average_cost);
+                                                }
                                             }
                                         }
 
-                                        const cost = ing.product_stocks?.[0]?.average_cost || Number(ing.cost) || Number(ing.cost_danilo) || Number(ing.cost_adriel) || 0;
-                                        const totalVal = totalQty * cost;
+                                        const totalVal = totalQty * unitCost;
 
                                         return (
                                             <TableRow key={ing.id} className="border-zinc-50 hover:bg-zinc-50/50 transition-colors">
                                                 <TableCell className="font-medium text-zinc-700">{ing.name}</TableCell>
                                                 <TableCell className="text-xs text-zinc-500">{locationName}</TableCell>
                                                 <TableCell className="text-right font-bold text-zinc-900">{totalQty} {ing.unit}</TableCell>
-                                                <TableCell className="text-right text-zinc-500 text-xs">R$ {cost.toFixed(2)}</TableCell>
+                                                <TableCell className="text-right font-bold text-zinc-900">{totalQty} {ing.unit}</TableCell>
+                                                <TableCell className="text-right text-zinc-500 text-xs">R$ {unitCost.toFixed(2)}</TableCell>
+                                                <TableCell className="text-right font-bold text-pink-700">R$ {totalVal.toFixed(2)}</TableCell>
                                                 <TableCell className="text-right font-bold text-pink-700">R$ {totalVal.toFixed(2)}</TableCell>
                                             </TableRow>
                                         );
