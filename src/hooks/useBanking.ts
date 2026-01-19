@@ -39,6 +39,7 @@ export function useBanking() {
             const { data: movements, error: movError } = await supabase
                 .from('financial_movements')
                 .select('bank_account_id, amount, type')
+                .eq('status', 'paid')
                 .not('bank_account_id', 'is', null);
 
             if (movError) throw movError;
@@ -134,9 +135,10 @@ export function useBanking() {
 
             const reqMap: Record<string, any> = {};
             reqs?.forEach(r => {
+                const po = Array.isArray(r.purchase_orders) ? r.purchase_orders[0] : r.purchase_orders;
                 reqMap[r.id] = {
-                    id: r.purchase_orders?.id,
-                    nickname: r.purchase_orders?.nickname
+                    id: po?.id,
+                    nickname: po?.nickname
                 };
             });
 

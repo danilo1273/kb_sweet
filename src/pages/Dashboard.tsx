@@ -15,9 +15,7 @@ import {
     YAxis,
     CartesianGrid,
     Tooltip,
-    ResponsiveContainer,
-    LineChart,
-    Line
+    ResponsiveContainer
 } from "recharts";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -40,7 +38,7 @@ export default function Dashboard() {
     });
 
     const [financialData, setFinancialData] = useState<any[]>([]);
-    const [salesTrend, setSalesTrend] = useState<any[]>([]);
+    const [topClients, setTopClients] = useState<any[]>([]); // Replaces salesTrend
     const [lowStockItems, setLowStockItems] = useState<any[]>([]);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [buyerPerformance, setBuyerPerformance] = useState<any[]>([]);
@@ -82,6 +80,7 @@ export default function Dashboard() {
                     financialRes,
                     productionRes,
                     salesRes,
+                    clientsRes, // Correct position (Index 5)
                     purchasesRes,
                     productionStatsRes
                 ] = await Promise.all([
@@ -91,7 +90,7 @@ export default function Dashboard() {
                     supabase.from('production_orders').select('id, status').eq('status', 'open'),
                     // Fetch Sales with Items and Product Cost for Margin Calculation
                     supabase.from('sales').select(`
-                        id, total, created_at, user_id, 
+                        id, total, created_at, user_id, client_id,
                         sale_items (
                             quantity, 
                             unit_price, 
@@ -100,6 +99,8 @@ export default function Dashboard() {
                             products (name, cost)
                         )
                     `),
+                    // Fetch Clients for naming
+                    supabase.from('clients').select('id, name'),
                     // Fetch Purchases for Buyer Stats
                     supabase.from('purchase_orders').select(`
                         id, created_by, created_at,
@@ -326,20 +327,29 @@ export default function Dashboard() {
                 })).sort((a, b) => b.revenue - a.revenue);
 
 
-                // D. Sales Volume Trend
-                const dailySales: Record<string, number> = {};
+                // D. Top 5 Clients (Replacing Sales Volume Trend)
+                const clientsList = clientsRes.data || [];
+                const clientMap = clientsList.reduce((acc: any, c: any) => {
+                    acc[c.id] = c.name;
+                    return acc;
+                }, {});
+
+                const clientStats: Record<string, { name: string, total: number, count: number }> = {};
                 salesData.forEach((s: any) => {
-                    const day = new Date(s.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-                    dailySales[day] = (dailySales[day] || 0) + 1;
+                    const clientId = s.client_id;
+                    const clientName = clientId ? (clientMap[clientId] || 'Cliente Removido') : 'Consumidor Final';
+
+                    if (!clientStats[clientName]) {
+                        clientStats[clientName] = { name: clientName, total: 0, count: 0 };
+                    }
+                    clientStats[clientName].total += Number(s.total);
+                    clientStats[clientName].count += 1;
                 });
-                const salesTrendData = Object.entries(dailySales)
-                    .map(([date, count]) => ({ date, count }))
-                    .sort((a, b) => {
-                        const [da, ma] = a.date.split('/');
-                        const [db, mb] = b.date.split('/');
-                        return new Date(now.getFullYear(), Number(ma) - 1, Number(da)).getTime() - new Date(now.getFullYear(), Number(mb) - 1, Number(db)).getTime();
-                    })
-                    .slice(-14);
+
+                const topClientData = Object.values(clientStats)
+                    .sort((a, b) => b.total - a.total)
+                    .slice(0, 5);
+
 
 
                 // E. Low Stock (Fixing NaN)
@@ -382,7 +392,9 @@ export default function Dashboard() {
                 });
 
                 setFinancialData(chartData);
-                setSalesTrend(salesTrendData);
+                // setSalesTrend(salesTrendData);
+                setTopClients(topClientData); // Connected state // REMOVED
+                // setTopClients(topClientData); // WILL BE ADDED IN NEXT STEP
                 setLowStockItems(lowStock);
 
                 // Store Seller Performance in 'notifications' state temporarily
@@ -714,22 +726,39 @@ export default function Dashboard() {
                         </CardContent>
                     </Card>
 
-                    {/* Sales Volume Mini-Chart */}
+                    {/* Top 5 Clients Widget */}
                     <Card className="shadow-sm">
                         <CardHeader className="pb-2">
-                            <CardTitle className="text-base font-semibold">Volume de Vendas</CardTitle>
-                            <CardDescription>Vendas por dia (últimas 2 semanas)</CardDescription>
+                            <CardTitle className="text-base font-semibold">Top 5 Clientes</CardTitle>
+                            <CardDescription>Maiores compradores (valor)</CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <div className="h-[150px] w-full mt-2">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <LineChart data={salesTrend}>
-                                        <Tooltip
-                                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                        />
-                                        <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: "#3b82f6" }} activeDot={{ r: 6 }} />
-                                    </LineChart>
-                                </ResponsiveContainer>
+                            <div className="space-y-4 mt-2">
+                                {topClients.length === 0 ? (
+                                    <div className="text-center text-zinc-400 py-6 text-sm">Sem dados de clientes</div>
+                                ) : (
+                                    topClients.map((client, i) => (
+                                        <div key={i} className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`
+                                                    h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold
+                                                    ${i === 0 ? 'bg-yellow-100 text-yellow-700' :
+                                                        i === 1 ? 'bg-zinc-100 text-zinc-700' :
+                                                            i === 2 ? 'bg-orange-100 text-orange-800' : 'bg-blue-50 text-blue-600'}
+                                                `}>
+                                                    {i + 1}
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-medium text-zinc-800">{client.name}</span>
+                                                    <span className="text-[10px] text-zinc-500">{client.count} compras</span>
+                                                </div>
+                                            </div>
+                                            <div className="text-sm font-bold text-zinc-700">
+                                                R$ {client.total.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
                             </div>
                         </CardContent>
                     </Card>

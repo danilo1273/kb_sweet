@@ -6,11 +6,12 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Pencil, Save, Check, Ban, Loader2, PackageSearch } from "lucide-react";
+import { Plus, Trash2, Pencil, Save, Check, Ban, Loader2, PackageSearch, ScrollText } from "lucide-react";
 import { usePurchases } from "@/hooks/usePurchases";
 import { useToast } from "@/components/ui/use-toast";
 import { ItemDraft } from "@/types";
 import { StockConsultationDialog } from "@/components/pos/StockConsultationDialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface ManageOrderDialogProps {
     isOpen: boolean;
@@ -64,6 +65,10 @@ export function ManageOrderDialog({
 
     // Se estiver locked, campos de edição ficam desabilitados
     const disableEditing = isReadOnly || isLocked;
+
+    // Show Edit/Add controls only if not read only, not locked, 
+    // AND user is either admin or the creator of the order
+    const showEditControls = !isReadOnly && !isLocked && (currentUserRoles?.includes('admin') || currentUserId === order?.created_by);
 
     // Local state for header editing
     const [headerNickname, setHeaderNickname] = useState(order?.nickname || '');
@@ -146,98 +151,105 @@ export function ManageOrderDialog({
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
                 <DialogHeader className="flex flex-row justify-between items-center pr-8">
-                    <DialogTitle>{isReadOnly ? 'Visualizar Lote / Pedido' : 'Gerenciar Lote / Pedido'}</DialogTitle>
+                    <DialogTitle className="flex items-center gap-2">
+                        <ScrollText className="h-5 w-5 text-indigo-600" />
+                        Gerenciar Lote: {order?.nickname || "Sem Nome"}
+                    </DialogTitle>
                     <Button variant="outline" size="sm" onClick={() => setIsConsultOpen(true)} className="gap-2">
                         <PackageSearch className="h-4 w-4" /> Ver Estoque
                     </Button>
                 </DialogHeader>
 
                 {order && (
-                    <div className="py-4 space-y-6">
-                        {isReadOnly ? (
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border-b pb-4 bg-slate-50 p-3 rounded-lg">
-                                <div>
-                                    <Label className="text-muted-foreground text-xs">Fornecedor</Label>
-                                    <div className="font-medium text-sm">{order.supplier_name || 'Não informado'}</div>
-                                </div>
-                                <div>
-                                    <Label className="text-muted-foreground text-xs">Apelido</Label>
-                                    <div className="font-medium text-sm">{order.nickname || '-'}</div>
-                                </div>
-                                <div>
-                                    <Label className="text-muted-foreground text-xs">Comprador</Label>
-                                    <div className="font-medium text-sm">{order.creator_name || 'Desconhecido'}</div>
-                                </div>
-                                {order.approver_name && (
+                    <ScrollArea className="flex-1 pr-4">
+                        <div className="py-4 space-y-6">
+                            {isReadOnly ? (
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border-b pb-4 bg-slate-50 p-3 rounded-lg">
                                     <div>
-                                        <Label className="text-muted-foreground text-xs">Aprovador</Label>
-                                        <div className="font-medium text-sm text-green-700">{order.approver_name}</div>
+                                        <Label className="text-muted-foreground text-xs">Fornecedor</Label>
+                                        <div className="font-medium text-sm">{suppliers.find(s => s.id === order.supplier_id)?.name || 'N/A'}</div>
                                     </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-2 gap-4 border-b pb-4">
-                                <div className="space-y-2">
-                                    <Label>Fornecedor</Label>
-                                    <div className="flex gap-2">
-                                        <Select
-                                            value={headerSupplier}
-                                            onValueChange={setHeaderSupplier}
-                                            disabled={disableEditing}
-                                        >
-                                            <SelectTrigger className="flex-1"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="default">Fornecedor (campo obrigatório)</SelectItem>
-                                                {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                        {!disableEditing && (
-                                            <Button variant="outline" size="icon" onClick={onNewSupplier} title="Novo Fornecedor">
-                                                <Plus className="h-4 w-4" />
-                                            </Button>
-                                        )}
+                                    <div>
+                                        <Label className="text-muted-foreground text-xs">Status do Lote</Label>
+                                        <div className="mt-1"><Badge>{formatStatus(order.status)}</Badge></div>
+                                    </div>
+                                    <div>
+                                        <Label className="text-muted-foreground text-xs">Data Criação</Label>
+                                        <div className="font-medium text-sm">{new Date(order.created_at).toLocaleDateString()}</div>
+                                    </div>
+                                    {order.approver_name && (
+                                        <div>
+                                            <Label className="text-muted-foreground text-xs">Aprovado por</Label>
+                                            <div className="font-medium text-sm text-green-700">{order.approver_name}</div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-4 border-b pb-4">
+                                    <div className="space-y-2">
+                                        <Label>Fornecedor</Label>
+                                        <div className="flex gap-2">
+                                            <Select
+                                                value={headerSupplier}
+                                                onValueChange={(val) => setHeaderSupplier(val)}
+                                                disabled={isLocked}
+                                            >
+                                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                                                <SelectContent>
+                                                    {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                                                </SelectContent>
+                                            </Select>
+                                            {!isLocked && (
+                                                <Button size="icon" variant="outline" onClick={onNewSupplier} className="shrink-0 h-9 w-9">
+                                                    <Plus className="h-4 w-4" />
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Apelido do Lote</Label>
+                                        <div className="flex gap-2">
+                                            <Input
+                                                value={headerNickname}
+                                                onChange={e => setHeaderNickname(e.target.value)}
+                                                placeholder="Ex: Refil Semanal"
+                                                className="h-9"
+                                                disabled={isLocked}
+                                            />
+                                            {!isLocked && (
+                                                <Button onClick={handleSaveHeader} disabled={isSavingHeader} size="sm" className="h-9">
+                                                    {isSavingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                                </Button>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label>Apelido</Label>
-                                    <div className="flex gap-2">
-                                        <Input
-                                            value={headerNickname}
-                                            onChange={e => setHeaderNickname(e.target.value)}
-                                            readOnly={disableEditing}
-                                            className={disableEditing ? "bg-zinc-100" : ""}
-                                        />
-                                        {!disableEditing && (
-                                            <Button onClick={handleSaveHeader} disabled={isSavingHeader} size="icon" variant="ghost">
-                                                {isSavingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                                            </Button>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+                            )}
 
-                        <div className="space-y-2">
-                            <h4 className="font-semibold text-sm text-zinc-700">Itens neste Lote ({order.requests?.length || 0})</h4>
-                            <div className="rounded bg-white overflow-hidden max-h-[300px] overflow-y-auto">
-                                {/* Mobile View: Cards */}
-                                <div className="md:hidden space-y-2 p-1">
+                            <div>
+                                <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                                    Conteúdo do Lote
+                                    <Badge variant="secondary" className="text-[10px]">{order.requests?.length || 0} itens</Badge>
+                                </h4>
+
+                                {/* Mobile View: List */}
+                                <div className="md:hidden space-y-3">
                                     {order.requests?.map((item: any) => (
-                                        <div key={item.id} className="p-3 border rounded-md shadow-sm bg-white space-y-2">
-                                            <div className="flex justify-between items-start">
-                                                <div className="font-medium text-sm w-[60%]">{item.item_name}</div>
-                                                <div className="text-right font-bold text-sm w-[40%]">{formatCurrency(Number(item.cost))}</div>
+                                        <div key={item.id} className="bg-zinc-50 p-3 rounded-lg border text-sm space-y-2">
+                                            <div className="flex justify-between font-medium text-zinc-900">
+                                                <span>{item.item_name}</span>
+                                                <span>{formatCurrency(Number(item.cost))}</span>
                                             </div>
-                                            <div className="flex justify-between items-center text-xs text-zinc-500">
+                                            <div className="flex justify-between text-zinc-500 text-xs">
                                                 <span>{item.quantity} {item.unit}</span>
-                                                {item.financial_status === 'paid' ?
-                                                    <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge>
+                                                {item.financial_status === 'paid'
+                                                    ? <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge>
                                                     : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>
                                                 }
                                             </div>
-                                            {!disableEditing && (
+                                            {showEditControls && (
                                                 <div className="flex justify-end gap-2 pt-2 border-t mt-1">
                                                     {item.status === 'pending' && canApprove && (
                                                         <>
@@ -268,7 +280,15 @@ export function ManageOrderDialog({
                                 {/* Desktop View: Table */}
                                 <div className="hidden md:block">
                                     <Table>
-                                        <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qtd</TableHead><TableHead>Custo</TableHead><TableHead>Status</TableHead>{!disableEditing && <TableHead className="text-right">Ação</TableHead>}</TableRow></TableHeader>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Item</TableHead>
+                                                <TableHead>Qtd</TableHead>
+                                                <TableHead>Custo</TableHead>
+                                                <TableHead>Status</TableHead>
+                                                {showEditControls && <TableHead className="text-right">Ação</TableHead>}
+                                            </TableRow>
+                                        </TableHeader>
                                         <TableBody>
                                             {order.requests?.map((item: any) => (
                                                 <TableRow key={item.id}>
@@ -278,7 +298,7 @@ export function ManageOrderDialog({
                                                     <TableCell>
                                                         {item.financial_status === 'paid' ? <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge> : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>}
                                                     </TableCell>
-                                                    {!disableEditing && (
+                                                    {showEditControls && (
                                                         <TableCell className="text-right flex justify-end gap-1">
                                                             {item.status === 'pending' && canApprove && (
                                                                 <>
@@ -308,90 +328,87 @@ export function ManageOrderDialog({
                                     </Table>
                                 </div>
                             </div>
-                        </div>
 
-
-
-                        {!isReadOnly && !isLocked && (
-                            <div className="pt-4 border-t space-y-3">
-                                <h4 className="font-semibold text-sm text-zinc-700">Adicionar Novo Item ao Lote</h4>
-                                <div className="grid grid-cols-2 md:grid-cols-12 gap-2 items-end bg-zinc-50 p-3 rounded border">
-                                    <div className="col-span-2 md:col-span-3">
-                                        <Label className="text-[10px]">Produto</Label>
-                                        <div className="flex items-center gap-1">
+                            {showEditControls && (
+                                <div className="pt-4 border-t space-y-3">
+                                    <h4 className="font-semibold text-sm text-zinc-700">Adicionar Novo Item ao Lote</h4>
+                                    <div className="grid grid-cols-2 md:grid-cols-12 gap-2 items-end bg-zinc-50 p-3 rounded border">
+                                        <div className="col-span-2 md:col-span-3">
+                                            <Label className="text-[10px]">Produto</Label>
+                                            <div className="flex items-center gap-1">
+                                                <Select
+                                                    value={newItemDraft.ingredient_id || 'custom'}
+                                                    onValueChange={(val) => {
+                                                        if (val === 'custom') setNewItemDraft({ ...newItemDraft, ingredient_id: undefined, item_name: '' });
+                                                        else {
+                                                            const i = ingredients.find(x => x.id === val);
+                                                            setNewItemDraft({ ...newItemDraft, ingredient_id: val, item_name: i?.name || '', unit: i?.unit || 'un' });
+                                                        }
+                                                    }}
+                                                >
+                                                    <SelectTrigger className="h-8 flex-1"><SelectValue /></SelectTrigger>
+                                                    <SelectContent><SelectItem value="custom">Item (obrigatório)</SelectItem>{ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+                                                </Select>
+                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={onNewProduct}><Plus className="h-3 w-3" /></Button>
+                                            </div>
+                                        </div>
+                                        <div className="col-span-1 md:col-span-2">
+                                            <Label className="text-[10px]">Unid. Selecionada</Label>
                                             <Select
-                                                value={newItemDraft.ingredient_id || 'custom'}
-                                                onValueChange={(val) => {
-                                                    if (val === 'custom') setNewItemDraft({ ...newItemDraft, ingredient_id: undefined, item_name: '' });
-                                                    else {
-                                                        const i = ingredients.find(x => x.id === val);
-                                                        setNewItemDraft({ ...newItemDraft, ingredient_id: val, item_name: i?.name || '', unit: i?.unit || 'un' });
-                                                    }
-                                                }}
+                                                value={newItemDraft.unit || 'un'}
+                                                onValueChange={(val) => setNewItemDraft({ ...newItemDraft, unit: val })}
                                             >
-                                                <SelectTrigger className="h-8 flex-1"><SelectValue /></SelectTrigger>
-                                                <SelectContent><SelectItem value="custom">Item (obrigatório)</SelectItem>{ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+                                                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    {(() => {
+                                                        const ing = ingredients.find(i => i.id === newItemDraft.ingredient_id);
+                                                        if (!ing) return null;
+                                                        return (
+                                                            <>
+                                                                <SelectItem value={ing.unit}>Estoque ({ing.unit})</SelectItem>
+                                                                {ing.purchase_unit && ing.purchase_unit !== ing.unit && <SelectItem value={ing.purchase_unit}>Compra ({ing.purchase_unit})</SelectItem>}
+                                                            </>
+                                                        );
+                                                    })()}
+                                                    {!ingredients.find(i => i.id === newItemDraft.ingredient_id) && ["un", "kg", "g", "l", "ml", "cx"].map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                                                </SelectContent>
                                             </Select>
-                                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={onNewProduct}><Plus className="h-3 w-3" /></Button>
+                                        </div>
+                                        <div className="col-span-1 md:col-span-1">
+                                            <Label className="text-[10px]">Destino</Label>
+                                            <Select value={newItemDraft.destination} onValueChange={(val: any) => setNewItemDraft({ ...newItemDraft, destination: val })}>
+                                                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="danilo">Danilo</SelectItem>
+                                                    <SelectItem value="adriel">Adriel</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="col-span-2 md:col-span-2">
+                                            <Label className="text-[10px]">Obs/Marca</Label>
+                                            <Input className="h-8" value={newItemDraft.item_name} onChange={e => setNewItemDraft({ ...newItemDraft, item_name: e.target.value })} />
+                                        </div>
+                                        <div className="col-span-1 md:col-span-1">
+                                            <Label className="text-[10px]">Qtd</Label>
+                                            <Input className="h-8" type="number" value={newItemDraft.quantity || ''} onChange={e => setNewItemDraft({ ...newItemDraft, quantity: Number(e.target.value) })} />
+                                        </div>
+                                        <div className="col-span-1 md:col-span-2">
+                                            <Label className="text-[10px]">Total (R$)</Label>
+                                            <Input className="h-8" type="number" value={newItemDraft.cost || ''} onChange={e => setNewItemDraft({ ...newItemDraft, cost: Number(e.target.value) })} />
+                                        </div>
+                                        <div className="col-span-2 md:col-span-1">
+                                            <Button onClick={handleAddItem} disabled={isAddingItem} size="sm" className="h-8 w-full md:w-8 px-2 md:p-0" title="Adicionar ao lote">
+                                                {isAddingItem ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : <Plus className="h-4 w-4 mx-auto" />}
+                                            </Button>
                                         </div>
                                     </div>
-                                    <div className="col-span-1 md:col-span-2">
-                                        <Label className="text-[10px]">Unid. Selecionada</Label>
-                                        <Select
-                                            value={newItemDraft.unit || 'un'}
-                                            onValueChange={(val) => setNewItemDraft({ ...newItemDraft, unit: val })}
-                                        >
-                                            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                {(() => {
-                                                    const ing = ingredients.find(i => i.id === newItemDraft.ingredient_id);
-                                                    if (!ing) return null;
-                                                    return (
-                                                        <>
-                                                            <SelectItem value={ing.unit}>Estoque ({ing.unit})</SelectItem>
-                                                            {ing.purchase_unit && ing.purchase_unit !== ing.unit && <SelectItem value={ing.purchase_unit}>Compra ({ing.purchase_unit})</SelectItem>}
-                                                        </>
-                                                    );
-                                                })()}
-                                                {!ingredients.find(i => i.id === newItemDraft.ingredient_id) && ["un", "kg", "g", "l", "ml", "cx"].map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="col-span-1 md:col-span-1">
-                                        <Label className="text-[10px]">Destino</Label>
-                                        <Select value={newItemDraft.destination} onValueChange={(val: any) => setNewItemDraft({ ...newItemDraft, destination: val })}>
-                                            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="danilo">Danilo</SelectItem>
-                                                <SelectItem value="adriel">Adriel</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="col-span-2 md:col-span-2">
-                                        <Label className="text-[10px]">Obs/Marca</Label>
-                                        <Input className="h-8" value={newItemDraft.item_name} onChange={e => setNewItemDraft({ ...newItemDraft, item_name: e.target.value })} />
-                                    </div>
-                                    <div className="col-span-1 md:col-span-1">
-                                        <Label className="text-[10px]">Qtd</Label>
-                                        <Input className="h-8" type="number" value={newItemDraft.quantity || ''} onChange={e => setNewItemDraft({ ...newItemDraft, quantity: Number(e.target.value) })} />
-                                    </div>
-                                    <div className="col-span-1 md:col-span-2">
-                                        <Label className="text-[10px]">Total (R$)</Label>
-                                        <Input className="h-8" type="number" value={newItemDraft.cost || ''} onChange={e => setNewItemDraft({ ...newItemDraft, cost: Number(e.target.value) })} />
-                                    </div>
-                                    <div className="col-span-2 md:col-span-1">
-                                        <Button onClick={handleAddItem} disabled={isAddingItem} size="sm" className="h-8 w-full md:w-8 px-2 md:p-0" title="Adicionar ao lote">
-                                            {isAddingItem ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : <Plus className="h-4 w-4 mx-auto" />}
-                                        </Button>
-                                    </div>
                                 </div>
-                            </div>
-                        )}
-                    </div>
+                            )}
+                        </div>
+                    </ScrollArea>
                 )}
 
-
-                <DialogFooter className="sm:justify-between gap-2 flex-wrap">
+                <DialogFooter className="sm:justify-between gap-2 flex-wrap border-t p-4">
                     <div className="flex gap-2 order-2 sm:order-1">
                         {order && order.requests?.some((r: any) => r.status === 'pending') && !isReadOnly && canApprove && (
                             <>
@@ -511,7 +528,7 @@ export function ManageOrderDialog({
                     isOpen={isConsultOpen}
                     onOpenChange={setIsConsultOpen}
                 />
-            </DialogContent >
-        </Dialog >
+            </DialogContent>
+        </Dialog>
     );
 }
