@@ -24,16 +24,37 @@ export default function Sales() {
 
     async function fetchSales() {
         setLoading(true);
-        // Fetch sales with client info
-        const { data, error } = await supabase
+        // Fetch sales with client info - REMOVED profiles(full_name) causing issues
+        const { data: rawSales, error } = await supabase
             .from('sales')
             .select('*, clients(name), stock_locations(name, slug), financial_movements!financial_movements_related_sale_id_fkey(status), sale_items(*, products(name))')
             .order('created_at', { ascending: false });
 
-        if (!error) {
-            setSales(data || []);
+        if (!error && rawSales) {
+            // Manual fetch for profiles (Sellers) to ensure no data loss if FK is missing
+            const userIds = Array.from(new Set(rawSales.map((s: any) => s.user_id).filter(Boolean)));
+
+            let profilesMap: Record<string, any> = {};
+            if (userIds.length > 0) {
+                const { data: profiles } = await supabase
+                    .from('profiles')
+                    .select('id, full_name')
+                    .in('id', userIds);
+
+                profiles?.forEach((p: any) => {
+                    profilesMap[p.id] = p;
+                });
+            }
+
+            const salesWithProfiles = rawSales.map((sale: any) => ({
+                ...sale,
+                profiles: profilesMap[sale.user_id] || { full_name: 'Sistema' }
+            }));
+
+            setSales(salesWithProfiles);
         } else {
             console.error("Sales Fetch Error:", error);
+            setSales([]);
         }
         setLoading(false);
     }
@@ -270,7 +291,7 @@ export default function Sales() {
                         <TableRow>
                             <TableHead>Data</TableHead>
                             <TableHead>Cliente</TableHead>
-                            <TableHead>Método</TableHead>
+                            <TableHead>Vendedor</TableHead>
                             <TableHead>Origem Estoque</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead className="text-right">Total</TableHead>
@@ -287,7 +308,7 @@ export default function Sales() {
                                 <TableRow key={sale.id}>
                                     <TableCell>{new Date(sale.created_at).toLocaleString()}</TableCell>
                                     <TableCell>{sale.clients?.name || 'Consumidor Final'}</TableCell>
-                                    <TableCell className="capitalize">{sale.payment_method === 'money' ? 'Dinheiro' : sale.payment_method}</TableCell>
+                                    <TableCell className="capitalize text-zinc-600 text-xs">{(sale.profiles?.full_name || 'Sistema').split(' ')[0]}</TableCell>
                                     <TableCell>
                                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${sale.stock_locations?.slug === 'stock-danilo' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'
                                             }`}>

@@ -28,6 +28,8 @@ const POS = lazy(() => import('@/pages/POS'));
 const Banking = lazy(() => import('@/pages/Banking'));
 const StockHistory = lazy(() => import('@/pages/StockHistory'));
 const AuditLogs = lazy(() => import('@/pages/AuditLogs'));
+const Raffle = lazy(() => import('@/pages/Raffle'));
+const Marketing = lazy(() => import('@/pages/Marketing'));
 
 function App() {
     const [session, setSession] = useState<Session | null>(null);
@@ -82,6 +84,16 @@ function App() {
                     <Route path="/banking" element={<Banking />} />
                     <Route path="/purchases" element={<Purchases />} />
                     <Route path="/production" element={<Production />} />
+                    <Route path="/raffle" element={
+                        <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
+                            <Raffle />
+                        </Suspense>
+                    } />
+                    <Route path="/marketing" element={
+                        <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
+                            <Marketing />
+                        </Suspense>
+                    } />
                     {/* Old Admin Routes - Commented out to avoid conflict with new SaaS Admin
                     <Route path="/admin/users" element={...} />
                     */}

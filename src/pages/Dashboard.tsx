@@ -11,6 +11,9 @@ import { Button } from "@/components/ui/button";
 import {
     BarChart,
     Bar,
+    Line,
+    ComposedChart,
+    Legend,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -40,6 +43,7 @@ export default function Dashboard() {
     const [financialData, setFinancialData] = useState<any[]>([]);
     const [topClients, setTopClients] = useState<any[]>([]); // Replaces salesTrend
     const [topProducts, setTopProducts] = useState<any[]>([]);
+    const [topMarginProducts, setTopMarginProducts] = useState<any[]>([]);
     const [lowStockItems, setLowStockItems] = useState<any[]>([]);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [buyerPerformance, setBuyerPerformance] = useState<any[]>([]);
@@ -290,7 +294,7 @@ export default function Dashboard() {
                     });
                     const expense = mData?.filter(m => m.type === 'expense').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
                     const income = mData?.filter(m => m.type === 'income').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
-                    return { name: monthKey, Receita: income, Despesa: expense };
+                    return { name: monthKey, Receita: income, Despesa: expense, Líquido: income + expense };
                 });
 
                 // B. Sales by Seller (Margin)
@@ -372,6 +376,35 @@ export default function Dashboard() {
                     .sort((a, b) => b.total - a.total)
                     .slice(0, 5);
 
+                // Top 5 Margins Logic
+                const marginStats: Record<string, { name: string, profit: number, marginPercent: number, count: number, totalRevenue: number }> = {};
+                salesData.forEach((s: any) => {
+                    if (s.sale_items && Array.isArray(s.sale_items)) {
+                        s.sale_items.forEach((item: any) => {
+                            const pName = item.products?.name || 'Produto Desconhecido';
+                            if (!marginStats[pName]) {
+                                marginStats[pName] = { name: pName, profit: 0, marginPercent: 0, count: 0, totalRevenue: 0 };
+                            }
+                            const qty = Number(item.quantity) || 0;
+                            const revenue = qty * Number(item.unit_price || 0);
+                            const cost = qty * Number(item.cost_price_snapshot || 0);
+
+                            marginStats[pName].count += qty;
+                            marginStats[pName].totalRevenue += revenue;
+                            marginStats[pName].profit += (revenue - cost);
+                        });
+                    }
+                });
+
+                // Calculate average margin % for sorting/display preference? 
+                // Requests asks for "Top 5 Margens". Usually means highest profit value or highest %.
+                // Business wise, highest PROFIT VALUE is often more relevant for "Top". 
+                // Let's sort by Total Profit (Value).
+                const topMarginData = Object.values(marginStats)
+                    .sort((a, b) => b.profit - a.profit)
+                    .slice(0, 5);
+
+
                 // E. Low Stock (Fixing NaN)
                 const lowStock = [
                     ...(ingredientsRes.data || []).map(i => {
@@ -415,6 +448,7 @@ export default function Dashboard() {
                 // setSalesTrend(salesTrendData);
                 setTopClients(topClientData);
                 setTopProducts(topProductData);
+                setTopMarginProducts(topMarginData);
                 setLowStockItems(lowStock);
 
                 // Store Seller Performance in 'notifications' state temporarily
@@ -615,7 +649,7 @@ export default function Dashboard() {
                         <CardContent className="pl-2">
                             <div className="h-[300px] w-full">
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={financialData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                                    <ComposedChart data={financialData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                                         <XAxis dataKey="name" stroke="#9CA3AF" tickLine={false} axisLine={false} />
                                         <YAxis stroke="#9CA3AF" tickLine={false} axisLine={false} tickFormatter={(value) => `R$${value}`} />
@@ -624,9 +658,11 @@ export default function Dashboard() {
                                             contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                             formatter={(value: any) => [`R$ ${Number(value).toFixed(2)}`, '']}
                                         />
-                                        <Bar dataKey="Receita" fill="#22c55e" radius={[4, 4, 0, 0]} maxBarSize={50} />
-                                        <Bar dataKey="Despesa" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={50} />
-                                    </BarChart>
+                                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                                        <Bar dataKey="Receita" fill="#22c55e" radius={[4, 4, 0, 0]} maxBarSize={40} stackId="a" />
+                                        <Bar dataKey="Despesa" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={40} stackId="b" />
+                                        <Line type="monotone" dataKey="Líquido" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: "#3b82f6", strokeWidth: 2, stroke: "#fff" }} />
+                                    </ComposedChart>
                                 </ResponsiveContainer>
                             </div>
                         </CardContent>
@@ -814,6 +850,47 @@ export default function Dashboard() {
                                             </div>
                                             <div className="text-sm font-bold text-zinc-700">
                                                 R$ {prod.total.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Top 5 Margin Widget (New) */}
+                    <Card className="shadow-sm">
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-base font-semibold text-emerald-700">Top Lucratividade</CardTitle>
+                            <CardDescription>Melhores margens (valor)</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-4 mt-2">
+                                {topMarginProducts.length === 0 ? (
+                                    <div className="text-center text-zinc-400 py-6 text-sm">Sem dados de custo</div>
+                                ) : (
+                                    topMarginProducts.map((prod, i) => (
+                                        <div key={i} className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`
+                                                    h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold
+                                                    ${i === 0 ? 'bg-emerald-100 text-emerald-700' :
+                                                        i === 1 ? 'bg-zinc-100 text-zinc-700' :
+                                                            i === 2 ? 'bg-orange-100 text-orange-800' : 'bg-emerald-50 text-emerald-600'}
+                                                `}>
+                                                    {i + 1}
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-medium text-zinc-800 truncate max-w-[110px] sm:max-w-[140px]" title={prod.name}>{prod.name}</span>
+                                                    <span className="text-[10px] text-zinc-500">
+                                                        Margem: {prod.totalRevenue > 0
+                                                            ? ((prod.profit / prod.totalRevenue) * 100).toFixed(1)
+                                                            : 0}%
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className="text-sm font-bold text-zinc-700">
+                                                R$ {prod.profit.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
                                             </div>
                                         </div>
                                     ))

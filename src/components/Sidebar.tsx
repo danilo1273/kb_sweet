@@ -12,7 +12,9 @@ import {
     Factory,
     Database,
     Building2,
-    ShieldCheck
+    ShieldCheck,
+    Gift,
+    Megaphone
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/supabaseClient";
@@ -68,6 +70,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         { name: "Compras", href: "/purchases", icon: ClipboardList, roles: ['admin', 'buyer', 'approver', 'financial'] },
         { name: "Vendas", href: "/sales", icon: ShoppingCart, roles: ['admin', 'seller'] },
         { name: "Clientes", href: "/clients", icon: User, roles: ['admin', 'seller'] },
+        { name: "Sorteador", href: "/raffle", icon: Gift, roles: ['admin', 'seller'] },
+        { name: "Marketing", href: "/marketing", icon: Megaphone, roles: ['admin', 'seller'] },
         { name: "Financeiro", href: "/financial", icon: DollarSign, roles: ['admin', 'financial'] },
         { name: "Bancos", href: "/banking", icon: Building2, roles: ['admin', 'financial'] },
         { name: "Cadastros", href: "/admin/registers", icon: Database, roles: ['admin'] },

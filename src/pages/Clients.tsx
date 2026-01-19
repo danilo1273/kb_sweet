@@ -11,7 +11,6 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { MessageCircle } from "lucide-react";
 import { WhatsAppChargeDialog, ChargeItem } from "@/components/financial/WhatsAppChargeDialog";
 
@@ -435,6 +434,7 @@ export default function Clients() {
     );
 }
 
+
 function ClientDetailsContent({ client }: { client: Client }) {
     const movements = client.financial_movements || [];
     const income = movements.filter(m => m.type === 'income');
@@ -444,6 +444,68 @@ function ClientDetailsContent({ client }: { client: Client }) {
 
     const totalBought = income.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
     const totalPending = pendingMovements.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+    const [viewSaleItems, setViewSaleItems] = useState<any[] | null>(null);
+    const [viewSaleId, setViewSaleId] = useState<string | null>(null);
+
+    const handleViewSale = async (saleId: number) => {
+        if (!saleId) return;
+        setViewSaleId(String(saleId));
+
+        const { data } = await supabase
+            .from('sale_items')
+            .select('*, products(name)')
+            .eq('sale_id', saleId);
+
+        if (data) {
+            setViewSaleItems(data);
+        } else {
+            setViewSaleItems([]);
+        }
+    };
+
+    const closeDetails = () => {
+        setViewSaleItems(null);
+        setViewSaleId(null);
+    };
+
+    if (viewSaleItems) {
+        return (
+            <div className="flex flex-col h-full animate-in fade-in slide-in-from-right-4 duration-200">
+                <div className="flex items-center gap-2 mb-4">
+                    <Button variant="ghost" size="sm" onClick={closeDetails} className="-ml-2">
+                        ← Voltar
+                    </Button>
+                    <span className="font-semibold text-sm">Detalhes da Compra #{viewSaleId}</span>
+                </div>
+
+                <div className="border rounded-md overflow-hidden bg-white">
+                    <Table>
+                        <TableHeader className="bg-zinc-50">
+                            <TableRow>
+                                <TableHead>Produto</TableHead>
+                                <TableHead className="text-right">Qtd</TableHead>
+                                <TableHead className="text-right">Total</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {viewSaleItems.length === 0 ? (
+                                <TableRow><TableCell colSpan={3} className="text-center text-zinc-400">Sem itens.</TableCell></TableRow>
+                            ) : (
+                                viewSaleItems.map((item: any) => (
+                                    <TableRow key={item.id}>
+                                        <TableCell className="font-medium text-sm">{item.products?.name || 'Item'}</TableCell>
+                                        <TableCell className="text-right text-sm">{item.quantity}</TableCell>
+                                        <TableCell className="text-right font-bold text-sm">R$ {((Number(item.quantity) * Number(item.unit_price))).toFixed(2)}</TableCell>
+                                    </TableRow>
+                                ))
+                            )}
+                        </TableBody>
+                    </Table>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6 overflow-hidden flex flex-col flex-1">
@@ -489,9 +551,16 @@ function ClientDetailsContent({ client }: { client: Client }) {
                                             <div className="font-medium text-sm">{m.description}</div>
                                             <div className="text-xs text-zinc-500">Vencimento: {m.due_date ? new Date(m.due_date).toLocaleDateString() : '-'}</div>
                                         </div>
-                                        <div className="text-right">
-                                            <div className="font-bold text-red-600">R$ {Number(m.amount).toFixed(2)}</div>
-                                            <Badge variant="outline" className="text-[10px] text-red-500 border-red-200">Pendente</Badge>
+                                        <div className="text-right flex items-center gap-2">
+                                            <div className="flex flex-col items-end">
+                                                <div className="font-bold text-red-600">R$ {Number(m.amount).toFixed(2)}</div>
+                                                <Badge variant="outline" className="text-[10px] text-red-500 border-red-200">Pendente</Badge>
+                                            </div>
+                                            {m.related_sale_id && (
+                                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSale(m.related_sale_id!)}>
+                                                    <Eye className="h-3 w-3 text-zinc-400" />
+                                                </Button>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
@@ -512,9 +581,16 @@ function ClientDetailsContent({ client }: { client: Client }) {
                                             <div className="font-medium text-sm">{m.description}</div>
                                             <div className="text-xs text-zinc-500">Pago em: {m.payment_date ? new Date(m.payment_date).toLocaleDateString() : '-'}</div>
                                         </div>
-                                        <div className="text-right">
-                                            <div className="font-bold text-green-600">R$ {Number(m.amount).toFixed(2)}</div>
-                                            <Badge variant="outline" className="text-[10px] text-green-500 border-green-200">Pago</Badge>
+                                        <div className="text-right flex items-center gap-2">
+                                            <div className="flex flex-col items-end">
+                                                <div className="font-bold text-green-600">R$ {Number(m.amount).toFixed(2)}</div>
+                                                <Badge variant="outline" className="text-[10px] text-green-500 border-green-200">Pago</Badge>
+                                            </div>
+                                            {m.related_sale_id && (
+                                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSale(m.related_sale_id!)}>
+                                                    <Eye className="h-3 w-3 text-zinc-400" />
+                                                </Button>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
