@@ -1039,8 +1039,9 @@ export default function Dashboard() {
                                         return (
                                             <TableRow key={product.id} className="border-zinc-50 hover:bg-zinc-50/50 transition-colors">
                                                 <TableCell className="font-medium text-zinc-700">{product.name}</TableCell>
+                                                <TableCell className="text-xs text-zinc-500">{locationName}</TableCell>
                                                 <TableCell className="text-right font-bold text-zinc-900">{totalQty} {product.unit}</TableCell>
-                                                <TableCell className="text-right text-zinc-500 text-xs">R$ {(product.cost || 0).toFixed(2)}</TableCell>
+                                                <TableCell className="text-right text-zinc-500 text-xs">R$ {unitCost.toFixed(2)}</TableCell>
                                                 <TableCell className="text-right font-bold text-purple-700">R$ {totalVal.toFixed(2)}</TableCell>
                                             </TableRow>
                                         );
@@ -1133,9 +1134,7 @@ export default function Dashboard() {
                                                 <TableCell className="font-medium text-zinc-700">{ing.name}</TableCell>
                                                 <TableCell className="text-xs text-zinc-500">{locationName}</TableCell>
                                                 <TableCell className="text-right font-bold text-zinc-900">{totalQty} {ing.unit}</TableCell>
-                                                <TableCell className="text-right font-bold text-zinc-900">{totalQty} {ing.unit}</TableCell>
                                                 <TableCell className="text-right text-zinc-500 text-xs">R$ {unitCost.toFixed(2)}</TableCell>
-                                                <TableCell className="text-right font-bold text-pink-700">R$ {totalVal.toFixed(2)}</TableCell>
                                                 <TableCell className="text-right font-bold text-pink-700">R$ {totalVal.toFixed(2)}</TableCell>
                                             </TableRow>
                                         );
