@@ -1028,6 +1028,8 @@ export default function Dashboard() {
                                     .map(product => {
                                         const stockQty = product.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0;
                                         const legacyQty = Number(product.stock_quantity) || 0;
+                                        const totalQty = stockQty > 0 ? stockQty : legacyQty; // Define totalQty
+
                                         // Resolve Location Name & Cost
                                         let locationName = "Estoque Antigo (Migrar)";
                                         let unitCost = Number(product.cost) || 0;
