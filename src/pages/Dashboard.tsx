@@ -37,7 +37,8 @@ export default function Dashboard() {
         monthlyIncome: 0,
         avgTicket: 0,
         projectedSalesValue: 0,
-        totalFinishedStock: 0
+        totalFinishedStock: 0,
+        totalIngredientsValue: 0
     });
 
     const [financialData, setFinancialData] = useState<any[]>([]);
@@ -441,7 +442,8 @@ export default function Dashboard() {
                     monthlyIncome: monthlySalesIncome,
                     avgTicket,
                     projectedSalesValue: stockAssetValue,
-                    totalFinishedStock: totalFinishedStockUnits
+                    totalFinishedStock: totalFinishedStockUnits,
+                    totalIngredientsValue // Add this
                 });
 
                 setFinancialData(chartData);
@@ -509,6 +511,25 @@ export default function Dashboard() {
                                 <div className="flex items-center gap-1 mt-1 cursor-pointer hover:bg-white/10 p-0.5 rounded px-1 -ml-1 transition-colors w-fit" onClick={() => setIsFinishedGoodsModalOpen(true)}>
                                     <p className="text-xs text-purple-100 opacity-80 font-medium">{stats.totalFinishedStock} un. em estoque (Custo)</p>
                                     <ArrowRight className="h-3 w-3 text-purple-100" />
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </motion.div>
+
+                    {/* Estoque Insumos (NEW) */}
+                    <motion.div variants={itemVariant}>
+                        <Card className="hover:shadow-xl transition-all duration-300 border-none bg-gradient-to-br from-pink-600 to-rose-700 text-white shadow-lg shadow-pink-200">
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-xs font-semibold uppercase opacity-90 tracking-wider">Estoque Insumos</CardTitle>
+                                <Package className="h-4 w-4 text-pink-100 opacity-80" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold tracking-tight">
+                                    R$ {stats.totalIngredientsValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </div>
+                                <div className="flex items-center gap-1 mt-1 cursor-pointer hover:bg-white/10 p-0.5 rounded px-1 -ml-1 transition-colors w-fit" onClick={() => navigate('/inventory')}>
+                                    <p className="text-xs text-pink-100 opacity-80 font-medium">Matéria-prima (Custo)</p>
+                                    <ArrowRight className="h-3 w-3 text-pink-100" />
                                 </div>
                             </CardContent>
                         </Card>
