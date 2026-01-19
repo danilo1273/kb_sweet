@@ -1034,6 +1034,13 @@ export default function Dashboard() {
                                         let locationName = "Estoque Antigo (Migrar)";
                                         let unitCost = Number(product.cost) || 0;
 
+                                        // Refined Legacy Cost Fallback
+                                        const stockDanilo = Number(product.stock_danilo) || 0;
+                                        const stockAdriel = Number(product.stock_adriel) || 0;
+
+                                        if (stockDanilo > 0) unitCost = Number(product.cost_danilo) || unitCost;
+                                        else if (stockAdriel > 0) unitCost = Number(product.cost_adriel) || unitCost;
+
                                         if (stockQty > 0 && product.product_stocks?.length > 0) {
                                             // Find the first stock entry with qty > 0 to display location
                                             const activeStock = product.product_stocks.find((s: any) => Number(s.quantity) > 0);
@@ -1125,7 +1132,14 @@ export default function Dashboard() {
 
                                         // Resolve Location Name & Cost
                                         let locationName = "Estoque Antigo (Migrar)";
-                                        let unitCost = Number(ing.cost) || Number(ing.cost_danilo) || Number(ing.cost_adriel) || 0;
+                                        let unitCost = Number(ing.cost) || 0;
+
+                                        // Refined Legacy Cost Fallback
+                                        const stockDanilo = Number(ing.stock_danilo) || 0;
+                                        const stockAdriel = Number(ing.stock_adriel) || 0;
+
+                                        if (stockDanilo > 0) unitCost = Number(ing.cost_danilo) || unitCost;
+                                        else if (stockAdriel > 0) unitCost = Number(ing.cost_adriel) || unitCost;
 
                                         if (stockQty > 0 && ing.product_stocks?.length > 0) {
                                             const activeStock = ing.product_stocks.find((s: any) => Number(s.quantity) > 0);
