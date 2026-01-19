@@ -92,8 +92,8 @@ export default function Dashboard() {
                     purchasesRes,
                     productionStatsRes
                 ] = await Promise.all([
-                    supabase.from('ingredients').select('*, product_stocks(quantity, location_id, stock_locations(name))'),
-                    supabase.from('products').select('*, product_stocks(quantity, location_id, stock_locations(name))'),
+                    supabase.from('ingredients').select('*, product_stocks(quantity, average_cost, location_id, stock_locations(name))'),
+                    supabase.from('products').select('*, product_stocks(quantity, average_cost, location_id, stock_locations(name))'),
                     supabase.from('financial_movements').select('*').or(`due_date.gte.${sixMonthsAgo.toISOString()},payment_date.gte.${sixMonthsAgo.toISOString()}`),
                     supabase.from('production_orders').select('id, status').eq('status', 'open'),
                     // Fetch Sales with Items and Product Cost for Margin Calculation

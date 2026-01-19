@@ -27,7 +27,7 @@ export default function Sales() {
         // Fetch sales with client info - REMOVED profiles(full_name) causing issues
         const { data: rawSales, error } = await supabase
             .from('sales')
-            .select('*, clients(name), stock_locations(name, slug), financial_movements!financial_movements_related_sale_id_fkey(status), sale_items(*, products(name))')
+            .select('*, clients(name), stock_locations(name, slug), financial_movements!financial_movements_related_sale_id_fkey(status), sale_items(*, products(name, product_stocks(average_cost, location_id, quantity)))')
             .order('created_at', { ascending: false });
 
         if (!error && rawSales) {
@@ -483,7 +483,13 @@ export default function Sales() {
                                                 <TableCell className="font-medium">{item.products?.name || 'Item Desconhecido'}</TableCell>
                                                 <TableCell className="text-right font-semibold">{item.quantity}</TableCell>
                                                 <TableCell className="text-right text-zinc-600">R$ {Number(item.unit_price).toFixed(2)}</TableCell>
-                                                <TableCell className="text-right text-zinc-400 text-xs">R$ {Number(item.cost_price_snapshot || 0).toFixed(2)}</TableCell>
+                                                <TableCell className="text-right text-zinc-400 text-xs">
+                                                    R$ {(() => {
+                                                        const currentStock = item.products?.product_stocks?.find((s: any) => s.average_cost > 0) || item.products?.product_stocks?.[0];
+                                                        const cost = Number(currentStock?.average_cost) || 0;
+                                                        return cost.toFixed(2);
+                                                    })()}
+                                                </TableCell>
                                                 <TableCell className="text-right font-bold text-zinc-900">R$ {(item.quantity * item.unit_price).toFixed(2)}</TableCell>
                                             </TableRow>
                                         ))
@@ -496,7 +502,11 @@ export default function Sales() {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             {(() => {
                                 const totalSale = Number(selectedViewSale?.total || 0);
-                                const totalCost = viewSaleItems.reduce((acc, item) => acc + (item.quantity * (item.cost_price_snapshot || 0)), 0);
+                                const totalCost = viewSaleItems.reduce((acc, item) => {
+                                    const currentStock = item.products?.product_stocks?.find((s: any) => s.average_cost > 0) || item.products?.product_stocks?.[0];
+                                    const cost = Number(currentStock?.average_cost) || 0;
+                                    return acc + (item.quantity * cost);
+                                }, 0);
                                 const profit = totalSale - totalCost;
                                 const margin = totalSale > 0 ? (profit / totalSale) * 100 : 0;
 
