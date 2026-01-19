@@ -59,9 +59,9 @@ export default function Raffle() {
         // Fetch finished goods from stock
         const { data } = await supabase
             .from("product_stocks")
-            .select("quantity, products(id, name, cost_price)")
+            .select("quantity, products!inner(id, name, cost_price, type)")
             .gt('quantity', 0)
-            .eq('type', 'finished-good');
+            .eq('products.type', 'finished');
 
         // Map to flat structure
         if (data) {

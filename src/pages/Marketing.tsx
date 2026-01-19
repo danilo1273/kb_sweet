@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { useToast } from "@/components/ui/use-toast";
 import { LayoutTemplate, Download, Type, Image as ImageIcon, Palette, Loader2, Check } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -35,9 +34,9 @@ export default function Marketing() {
         // Fetch finished goods with positive stock
         const { data } = await supabase
             .from("product_stocks")
-            .select("quantity, products(id, name, sale_price, unit)")
+            .select("quantity, products!inner(id, name, sale_price, unit, type)")
             .gt('quantity', 0)
-            .eq('type', 'finished-good')
+            .eq('products.type', 'finished')
             .order('quantity', { ascending: false });
 
         if (data) {
