@@ -984,33 +984,45 @@ export default function Dashboard() {
                             </TableHeader>
                             <TableBody>
                                 {products
-                                    .filter(p => p.type === 'finished' && (p.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) > 0))
+                                    .filter(p => p.type === 'finished' && (
+                                        (p.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) > 0) ||
+                                        (p.stock_quantity > 0)
+                                    ))
                                     .map(product => {
-                                        const qty = product.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) || 0;
-                                        const totalVal = qty * (product.cost || 0);
+                                        const stockQty = product.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) || 0;
+                                        const legacyQty = Number(product.stock_quantity) || 0;
+                                        const totalQty = stockQty > 0 ? stockQty : legacyQty; // Prioritize stock table, fallback to legacy
+
+                                        const totalVal = totalQty * (product.cost || 0);
                                         return (
                                             <TableRow key={product.id} className="border-zinc-50 hover:bg-zinc-50/50 transition-colors">
                                                 <TableCell className="font-medium text-zinc-700">{product.name}</TableCell>
-                                                <TableCell className="text-right font-bold text-zinc-900">{qty} {product.unit}</TableCell>
+                                                <TableCell className="text-right font-bold text-zinc-900">{totalQty} {product.unit}</TableCell>
                                                 <TableCell className="text-right text-zinc-500 text-xs">R$ {(product.cost || 0).toFixed(2)}</TableCell>
                                                 <TableCell className="text-right font-bold text-purple-700">R$ {totalVal.toFixed(2)}</TableCell>
                                             </TableRow>
                                         );
                                     })}
-                                {products.filter(p => p.type === 'finished' && (p.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) > 0)).length === 0 && (
-                                    <TableRow>
-                                        <TableCell colSpan={4} className="text-center py-12 text-zinc-400 italic">
-                                            Nenhum produto acabado com estoque positivo.
-                                        </TableCell>
-                                    </TableRow>
-                                )}
+                                {products.filter(p => p.type === 'finished' && (
+                                    (p.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) > 0) ||
+                                    (p.stock_quantity > 0)
+                                )).length === 0 && (
+                                        <TableRow>
+                                            <TableCell colSpan={4} className="text-center py-12 text-zinc-400 italic">
+                                                Nenhum produto acabado com estoque positivo.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
                             </TableBody>
                         </Table>
                     </div>
 
                     <DialogFooter className="p-4 bg-zinc-50 border-t items-center justify-between sm:justify-between">
                         <div className="text-xs text-zinc-500 font-medium">
-                            Total: {products.filter(p => p.type === 'finished' && (p.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) > 0)).length} itens
+                            Total: {products.filter(p => p.type === 'finished' && (
+                                (p.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) > 0) ||
+                                (p.stock_quantity > 0)
+                            )).length} itens
                         </div>
                         <Button variant="outline" onClick={() => setIsFinishedGoodsModalOpen(false)} className="bg-white border-zinc-200">
                             Fechar

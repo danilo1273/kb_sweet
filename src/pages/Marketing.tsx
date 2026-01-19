@@ -31,22 +31,25 @@ export default function Marketing() {
 
     async function fetchProducts() {
         setLoading(true);
-        // Fetch finished goods with positive stock
+        // Fetch finished goods with positive stock (Simplified logic)
         const { data } = await supabase
             .from("product_stocks")
-            .select("quantity, products!inner(id, name, sale_price, unit, type)")
-            .gt('quantity', 0)
-            .eq('products.type', 'finished')
-            .order('quantity', { ascending: false });
+            .select("quantity, products(id, name, sale_price, unit, type)")
+            .gt('quantity', 0); // Only positive stock rows
 
         if (data) {
-            const formatted = data.map((item: any) => ({
-                id: item.products.id,
-                name: item.products.name,
-                price: item.products.sale_price,
-                unit: item.products.unit,
-                stock: item.quantity
-            }));
+            // Filter locally for 'finished' type to obtain robustness against Join filters
+            const formatted = data
+                .filter((item: any) => item.products?.type === 'finished')
+                .map((item: any) => ({
+                    id: item.products.id,
+                    name: item.products.name,
+                    price: item.products.sale_price,
+                    unit: item.products.unit,
+                    stock: item.quantity
+                }))
+                .sort((a, b) => b.stock - a.stock);
+
             setProducts(formatted);
             // Select top 5 by default
             setSelectedProducts(formatted.slice(0, 5).map((p: any) => p.id));

@@ -59,18 +59,20 @@ export default function Raffle() {
         // Fetch finished goods from stock
         const { data } = await supabase
             .from("product_stocks")
-            .select("quantity, products!inner(id, name, cost_price, type)")
-            .gt('quantity', 0)
-            .eq('products.type', 'finished');
+            .select("quantity, products(id, name, cost_price, type)")
+            .gt('quantity', 0);
 
-        // Map to flat structure
+        // Map to flat structure and filter
         if (data) {
-            setProducts(data.map((item: any) => ({
-                id: item.products.id,
-                name: item.products.name,
-                stock: item.quantity,
-                cost: item.products.cost_price || 0
-            })));
+            const valid = data
+                .filter((item: any) => item.products?.type === 'finished')
+                .map((item: any) => ({
+                    id: item.products.id,
+                    name: item.products.name,
+                    stock: item.quantity,
+                    cost: item.products.cost_price || 0
+                }));
+            setProducts(valid);
         }
     }
 
