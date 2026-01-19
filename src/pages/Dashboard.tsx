@@ -82,385 +82,395 @@ export default function Dashboard() {
                 const thirtyDaysAgo = new Date();
                 thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-                const [
-                    ingredientsRes,
-                    productsRes,
-                    financialRes,
-                    productionRes,
-                    salesRes,
-                    clientsRes, // Correct position (Index 5)
-                    purchasesRes,
-                    productionStatsRes
-                ] = await Promise.all([
-                    supabase.from('ingredients').select('*, product_stocks(quantity, average_cost, location_id, stock_locations(name))'),
-                    supabase.from('products').select('*, product_stocks(quantity, average_cost, location_id, stock_locations(name))'),
-                    supabase.from('financial_movements').select('*').or(`due_date.gte.${sixMonthsAgo.toISOString()},payment_date.gte.${sixMonthsAgo.toISOString()}`),
-                    supabase.from('production_orders').select('id, status').eq('status', 'open'),
-                    // Fetch Sales with Items and Product Cost for Margin Calculation
-                    supabase.from('sales').select(`
-                        id, total, created_at, user_id, client_id,
-                        sale_items (
-                            quantity, 
-                            unit_price, 
-                            product_id,
-                            cost_price_snapshot,
-                            products (name, cost)
-                        )
-                    `),
-                    // Fetch Clients for naming
-                    supabase.from('clients').select('id, name'),
-                    // Fetch Purchases for Buyer Stats
-                    supabase.from('purchase_orders').select(`
-                        id, created_by, created_at,
-                        purchase_requests (cost, status)
-                    `).gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
-                    // Fetch Production Stats (Closed this month)
-                    supabase.from('production_orders').select(`
-                        id, quantity, user_id, status, closed_at,
-                        products (cost, name, unit, type)
-                    `).eq('status', 'closed').gte('closed_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString())
-                ]);
+                try {
+                    const [
+                        ingredientsRes,
+                        productsRes,
+                        financialRes,
+                        productionRes,
+                        salesRes,
+                        clientsRes, // Correct position (Index 5)
+                        purchasesRes,
+                        productionStatsRes
+                    ] = await Promise.all([
+                        supabase.from('ingredients').select('*, product_stocks(quantity, average_cost, location_id, stock_locations(name))'),
+                        supabase.from('products').select('*, product_stocks(quantity, average_cost, location_id, stock_locations(name))'),
+                        supabase.from('financial_movements').select('*').or(`due_date.gte.${sixMonthsAgo.toISOString()},payment_date.gte.${sixMonthsAgo.toISOString()}`),
+                        supabase.from('production_orders').select('id, status').eq('status', 'open'),
+                        // Fetch Sales with Items and Product Cost for Margin Calculation
+                        supabase.from('sales').select(`
+                            id, total, created_at, user_id, client_id,
+                            sale_items (
+                                quantity, 
+                                unit_price, 
+                                product_id,
+                                cost_price_snapshot,
+                                products (name, cost)
+                            )
+                        `),
+                        // Fetch Clients for naming
+                        supabase.from('clients').select('id, name'),
+                        // Fetch Purchases for Buyer Stats
+                        supabase.from('purchase_orders').select(`
+                            id, created_by, created_at,
+                            purchase_requests (cost, status)
+                        `).gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+                        // Fetch Production Stats (Closed this month)
+                        supabase.from('production_orders').select(`
+                            id, quantity, user_id, status, closed_at,
+                            products (cost, name, unit, type)
+                        `).eq('status', 'closed').gte('closed_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString())
+                    ]);
 
-                if (productsRes.data) setProducts(productsRes.data);
-                if (ingredientsRes.data) setIngredients(ingredientsRes.data);
+                    if (productsRes.error) console.error("Products Error:", productsRes.error);
+                    if (ingredientsRes.error) console.error("Ingredients Error:", ingredientsRes.error);
 
-                // --- 1b. Manual Join for Profiles (Sales + Purchases) ---
-                const rawSales = salesRes.data || [];
-                const rawPurchases = purchasesRes.data || [];
+                    if (productsRes.data) setProducts(productsRes.data);
+                    if (ingredientsRes.data) setIngredients(ingredientsRes.data);
 
-                const userIds = Array.from(new Set([
-                    ...rawSales.map((s: any) => s.user_id),
-                    ...rawPurchases.map((p: any) => p.created_by)
-                ].filter(Boolean)));
+                    // --- 1b. Manual Join for Profiles (Sales + Purchases) ---
+                    const rawSales = salesRes.data || [];
+                    const rawPurchases = purchasesRes.data || [];
 
-                let profilesMap: Record<string, any> = {};
-                if (userIds.length > 0) {
-                    const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', userIds);
-                    profiles?.forEach((p: any) => {
-                        profilesMap[p.id] = p;
+                    const userIds = Array.from(new Set([
+                        ...rawSales.map((s: any) => s.user_id),
+                        ...rawPurchases.map((p: any) => p.created_by)
+                    ].filter(Boolean)));
+
+                    let profilesMap: Record<string, any> = {};
+                    if (userIds.length > 0) {
+                        const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', userIds);
+                        profiles?.forEach((p: any) => {
+                            profilesMap[p.id] = p;
+                        });
+                    }
+
+                    // Attach profiles to sales
+                    const salesData = rawSales.map((s: any) => ({
+                        ...s,
+                        profiles: profilesMap[s.user_id] || { full_name: 'Desconhecido' }
+                    }));
+
+
+                    // Attach profiles to purchases & Process Buyer Stats
+                    const buyerStats: Record<string, number> = {};
+                    rawPurchases.forEach((order: any) => {
+                        const buyerName = profilesMap[order.created_by]?.full_name?.split(' ')[0] || 'Desconhecido';
+                        // Sum approved/pending requests (exclude rejected)
+                        const orderTotal = order.purchase_requests?.reduce((acc: number, r: any) => {
+                            if (r.status !== 'rejected') return acc + (Number(r.cost) || 0);
+                            return acc;
+                        }, 0) || 0;
+
+                        if (orderTotal > 0) {
+                            buyerStats[buyerName] = (buyerStats[buyerName] || 0) + orderTotal;
+                        }
                     });
-                }
 
-                // Attach profiles to sales
-                const salesData = rawSales.map((s: any) => ({
-                    ...s,
-                    profiles: profilesMap[s.user_id] || { full_name: 'Desconhecido' }
-                }));
+                    const buyerPerformanceData = Object.entries(buyerStats)
+                        .map(([name, total]) => ({ name, total }))
+                        .sort((a, b) => b.total - a.total);
 
-                // Attach profiles to purchases & Process Buyer Stats
-                const buyerStats: Record<string, number> = {};
-                rawPurchases.forEach((order: any) => {
-                    const buyerName = profilesMap[order.created_by]?.full_name?.split(' ')[0] || 'Desconhecido';
-                    // Sum approved/pending requests (exclude rejected)
-                    const orderTotal = order.purchase_requests?.reduce((acc: number, r: any) => {
-                        if (r.status !== 'rejected') return acc + (Number(r.cost) || 0);
-                        return acc;
+                    setBuyerPerformance(buyerPerformanceData);
+
+                    // Process Production Stats
+                    const rawProduction = productionStatsRes.data || [];
+                    const prodStats: Record<string, { count: number, val: number, items: Record<string, { qty: number, unit: string }> }> = {};
+
+                    rawProduction.forEach((order: any) => {
+                        // FILTER: Only FINISHED products
+                        if (order.products?.type !== 'finished') return;
+
+                        const userName = profilesMap[order.user_id]?.full_name?.split(' ')[0] || profilesMap[order.user_id]?.full_name || 'Desconhecido';
+                        const qty = Number(order.quantity) || 0;
+                        const cost = Number(order.products?.cost) || 0;
+                        const totalVal = qty * cost; // Approximated value (Cost based)
+                        const prodName = order.products?.name || 'Item Desconhecido';
+                        const unit = order.products?.unit || 'un';
+
+                        if (!prodStats[userName]) prodStats[userName] = { count: 0, val: 0, items: {} };
+                        prodStats[userName].count += 1;
+                        prodStats[userName].val += totalVal;
+
+                        if (!prodStats[userName].items[prodName]) {
+                            prodStats[userName].items[prodName] = { qty: 0, unit };
+                        }
+                        prodStats[userName].items[prodName].qty += qty;
+                    });
+
+                    const productionPerformanceData = Object.entries(prodStats)
+                        .map(([name, stats]) => ({
+                            name,
+                            ...stats,
+                            itemsList: Object.entries(stats.items)
+                                .map(([pName, details]) => ({ name: pName, ...details }))
+                                .sort((a, b) => b.qty - a.qty)
+                        }))
+                        .sort((a, b) => b.val - a.val);
+                    setProductionPerformance(productionPerformanceData);
+
+                    // --- 2. Calculate KPI Metrics ---
+
+                    // Stock Value
+                    // Stock Value (Ingredients)
+                    const totalIngredientsValue = ingredientsRes.data?.reduce((acc, ing) => {
+                        const stockEntries = ing.product_stocks || [];
+                        let qty = 0;
+                        let cost = 0;
+                        if (stockEntries.length > 0) {
+                            qty = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
+                            // Using weighted average cost or just first available for simplicity here
+                            cost = stockEntries[0]?.average_cost || Number(ing.cost) || 0;
+                        } else {
+                            qty = (Number(ing.stock_danilo) || 0) + (Number(ing.stock_adriel) || 0);
+                            cost = Number(ing.cost_danilo) || Number(ing.cost_adriel) || Number(ing.cost) || 0;
+                        }
+                        return acc + (qty * cost);
                     }, 0) || 0;
 
-                    if (orderTotal > 0) {
-                        buyerStats[buyerName] = (buyerStats[buyerName] || 0) + orderTotal;
-                    }
-                });
-
-                const buyerPerformanceData = Object.entries(buyerStats)
-                    .map(([name, total]) => ({ name, total }))
-                    .sort((a, b) => b.total - a.total);
-
-                setBuyerPerformance(buyerPerformanceData);
-
-                // Process Production Stats
-                const rawProduction = productionStatsRes.data || [];
-                const prodStats: Record<string, { count: number, val: number, items: Record<string, { qty: number, unit: string }> }> = {};
-
-                rawProduction.forEach((order: any) => {
-                    // FILTER: Only FINISHED products
-                    if (order.products?.type !== 'finished') return;
-
-                    const userName = profilesMap[order.user_id]?.full_name?.split(' ')[0] || profilesMap[order.user_id]?.full_name || 'Desconhecido';
-                    const qty = Number(order.quantity) || 0;
-                    const cost = Number(order.products?.cost) || 0;
-                    const totalVal = qty * cost; // Approximated value (Cost based)
-                    const prodName = order.products?.name || 'Item Desconhecido';
-                    const unit = order.products?.unit || 'un';
-
-                    if (!prodStats[userName]) prodStats[userName] = { count: 0, val: 0, items: {} };
-                    prodStats[userName].count += 1;
-                    prodStats[userName].val += totalVal;
-
-                    if (!prodStats[userName].items[prodName]) {
-                        prodStats[userName].items[prodName] = { qty: 0, unit };
-                    }
-                    prodStats[userName].items[prodName].qty += qty;
-                });
-
-                const productionPerformanceData = Object.entries(prodStats)
-                    .map(([name, stats]) => ({
-                        name,
-                        ...stats,
-                        itemsList: Object.entries(stats.items)
-                            .map(([pName, details]) => ({ name: pName, ...details }))
-                            .sort((a, b) => b.qty - a.qty)
-                    }))
-                    .sort((a, b) => b.val - a.val);
-                setProductionPerformance(productionPerformanceData);
-
-                // --- 2. Calculate KPI Metrics ---
-
-                // Stock Value
-                // Stock Value (Ingredients)
-                const totalIngredientsValue = ingredientsRes.data?.reduce((acc, ing) => {
-                    const stockEntries = ing.product_stocks || [];
-                    let qty = 0;
-                    let cost = 0;
-                    if (stockEntries.length > 0) {
-                        qty = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
-                        // Using weighted average cost or just first available for simplicity here
-                        cost = stockEntries[0]?.average_cost || Number(ing.cost) || 0;
-                    } else {
-                        qty = (Number(ing.stock_danilo) || 0) + (Number(ing.stock_adriel) || 0);
-                        cost = Number(ing.cost_danilo) || Number(ing.cost_adriel) || Number(ing.cost) || 0;
-                    }
-                    return acc + (qty * cost);
-                }, 0) || 0;
-
-                // Finished Goods - Asset Value (Custo)
-                const finishedProducts = productsRes.data || [];
-                let totalFinishedStockUnits = 0;
-                const stockAssetValue = finishedProducts.reduce((acc, p) => {
-                    const stockEntries = p.product_stocks || [];
-                    let qty = 0;
-                    let cost = Number(p.cost) || 0;
-
-                    if (stockEntries.length > 0) {
-                        qty = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
-                        // If cost is 0 in product table, try average_cost in stocks
-                        if (cost === 0) cost = stockEntries[0]?.average_cost || 0;
-                    } else {
-                        qty = (Number(p.stock_quantity) || 0);
-                    }
-
-                    totalFinishedStockUnits += qty;
-                    return acc + (qty * cost);
-                }, 0);
-
-                const totalStockValue = totalIngredientsValue + stockAssetValue;
-
-                // Pending Financials
-                const { data: allPending } = await supabase.from('financial_movements').select('amount, type, status').eq('status', 'pending');
-                const pendingPayments = allPending?.filter(m => m.type === 'expense').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
-                const pendingReceivables = allPending?.filter(m => m.type === 'income').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
-
-                // Current Month Stats
-                const now = new Date();
-                const currentMonthMovements = financialRes.data?.filter(m => {
-                    const refDate = m.status === 'paid' ? m.payment_date : m.due_date;
-                    const d = new Date(refDate || m.created_at);
-                    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-                }) || [];
-
-                const monthlyPurchases = currentMonthMovements
-                    .filter(m => m.type === 'expense' && m.status === 'paid')
-                    .reduce((acc, m) => acc + (Math.abs(Number(m.amount)) || 0), 0);
-
-                const monthlySalesIncome = currentMonthMovements
-                    .filter(m => m.type === 'income' && m.status === 'paid')
-                    .reduce((acc, m) => acc + (Number(m.amount) || 0), 0);
-
-                // Sales Data Processing
-                // Volume
-                const currentMonthSales = salesData.filter(s => {
-                    const d = new Date(s.created_at);
-                    const isSameMonth = d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-                    return isSameMonth;
-                });
-                const monthlySalesTotal = currentMonthSales.reduce((acc, s) => acc + Number(s.total), 0);
-
-                // Net Profit
-                // const netProfit = monthlySalesIncome - monthlyPurchases; // Unused for now
-
-                // Avg Ticket
-                const avgTicket = currentMonthSales.length > 0 ? (monthlySalesTotal / currentMonthSales.length) : 0;
-
-
-                // --- 3. Chart & Widget Data Preparation ---
-
-                // A. Financial Trend
-                const months = [];
-                for (let i = 0; i < 6; i++) {
-                    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-                    months.unshift(d);
-                }
-                const chartData = months.map(date => {
-                    const monthKey = date.toLocaleString('pt-BR', { month: 'short' });
-                    const mData = financialRes.data?.filter(m => {
-                        const d = new Date(m.due_date || m.payment_date);
-                        return d.getMonth() === date.getMonth() && d.getFullYear() === date.getFullYear() && m.status === 'paid';
-                    });
-                    const expense = mData?.filter(m => m.type === 'expense').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
-                    const income = mData?.filter(m => m.type === 'income').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
-                    return { name: monthKey, Receita: income, Despesa: expense, Líquido: income + expense };
-                });
-
-                // B. Sales by Seller (Margin)
-                const sellerStats: Record<string, { revenue: number, cost: number, count: number }> = {};
-
-                salesData.forEach((sale: any) => {
-                    const sellerName = sale.profiles?.full_name?.split(' ')[0] || 'Desconhecido';
-
-                    if (!sellerStats[sellerName]) {
-                        sellerStats[sellerName] = { revenue: 0, cost: 0, count: 0 };
-                    }
-
-                    sellerStats[sellerName].count += 1;
-                    sellerStats[sellerName].revenue += Number(sale.total);
-
-                    // Calculate Cost for this Sale
-                    let saleCost = 0;
-                    if (sale.sale_items && Array.isArray(sale.sale_items)) {
-                        sale.sale_items.forEach((item: any) => {
-                            const productCost = Number(item.cost_price_snapshot || item.products?.cost || 0);
-                            const quantity = Number(item.quantity) || 0;
-                            saleCost += (productCost * quantity);
-                        });
-                    }
-                    sellerStats[sellerName].cost += saleCost;
-                });
-
-                const sellerPerformanceData = Object.entries(sellerStats).map(([name, stats]) => ({
-                    name,
-                    revenue: stats.revenue,
-                    cost: stats.cost,
-                    margin: stats.revenue - stats.cost,
-                    marginPercent: stats.revenue > 0 ? ((stats.revenue - stats.cost) / stats.revenue) * 100 : 0,
-                    count: stats.count
-                })).sort((a, b) => b.revenue - a.revenue);
-
-
-                // D. Top 5 Clients (Replacing Sales Volume Trend)
-                const clientsList = clientsRes.data || [];
-                const clientMap = clientsList.reduce((acc: any, c: any) => {
-                    acc[c.id] = c.name;
-                    return acc;
-                }, {});
-
-                const clientStats: Record<string, { name: string, total: number, count: number }> = {};
-                salesData.forEach((s: any) => {
-                    const clientId = s.client_id;
-                    const clientName = clientId ? (clientMap[clientId] || 'Cliente Removido') : 'Consumidor Final';
-
-                    if (!clientStats[clientName]) {
-                        clientStats[clientName] = { name: clientName, total: 0, count: 0 };
-                    }
-                    clientStats[clientName].total += Number(s.total);
-                    clientStats[clientName].count += 1;
-                });
-
-                const topClientData = Object.values(clientStats)
-                    .sort((a, b) => b.total - a.total)
-                    .slice(0, 5);
-
-
-
-                // Top 5 Products Logic
-                const productStats: Record<string, { name: string, total: number, count: number }> = {};
-                salesData.forEach((s: any) => {
-                    if (s.sale_items && Array.isArray(s.sale_items)) {
-                        s.sale_items.forEach((item: any) => {
-                            const pName = item.products?.name || 'Produto Desconhecido';
-                            if (!productStats[pName]) {
-                                productStats[pName] = { name: pName, total: 0, count: 0 };
-                            }
-                            productStats[pName].count += Number(item.quantity) || 0;
-                            productStats[pName].total += (Number(item.quantity) * Number(item.unit_price || 0));
-                        });
-                    }
-                });
-
-                const topProductData = Object.values(productStats)
-                    .sort((a, b) => b.total - a.total)
-                    .slice(0, 5);
-
-                // Top 5 Margins Logic
-                const marginStats: Record<string, { name: string, profit: number, marginPercent: number, count: number, totalRevenue: number }> = {};
-                salesData.forEach((s: any) => {
-                    if (s.sale_items && Array.isArray(s.sale_items)) {
-                        s.sale_items.forEach((item: any) => {
-                            const pName = item.products?.name || 'Produto Desconhecido';
-                            if (!marginStats[pName]) {
-                                marginStats[pName] = { name: pName, profit: 0, marginPercent: 0, count: 0, totalRevenue: 0 };
-                            }
-                            const qty = Number(item.quantity) || 0;
-                            const revenue = qty * Number(item.unit_price || 0);
-                            const cost = qty * Number(item.cost_price_snapshot || 0);
-
-                            marginStats[pName].count += qty;
-                            marginStats[pName].totalRevenue += revenue;
-                            marginStats[pName].profit += (revenue - cost);
-                        });
-                    }
-                });
-
-                // Calculate average margin % for sorting/display preference? 
-                // Requests asks for "Top 5 Margens". Usually means highest profit value or highest %.
-                // Business wise, highest PROFIT VALUE is often more relevant for "Top". 
-                // Let's sort by Total Profit (Value).
-                const topMarginData = Object.values(marginStats)
-                    .sort((a, b) => b.profit - a.profit)
-                    .slice(0, 5);
-
-
-                // E. Low Stock (Fixing NaN)
-                const lowStock = [
-                    ...(ingredientsRes.data || []).map(i => {
-                        const stockEntries = i.product_stocks || [];
-                        let qty = 0;
-                        if (stockEntries.length > 0) {
-                            qty = stockEntries.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0);
-                        } else {
-                            qty = (Number(i.stock_danilo) || 0) + (Number(i.stock_adriel) || 0);
-                        }
-                        return { ...i, isProduct: false, currentStock: qty };
-                    }),
-                    ...(productsRes.data || []).map(p => {
+                    // Finished Goods - Asset Value (Custo)
+                    const finishedProducts = productsRes.data || [];
+                    let totalFinishedStockUnits = 0;
+                    const stockAssetValue = finishedProducts.reduce((acc, p) => {
                         const stockEntries = p.product_stocks || [];
                         let qty = 0;
+                        let cost = Number(p.cost) || 0;
+
                         if (stockEntries.length > 0) {
-                            qty = stockEntries.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0);
+                            qty = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
+                            // If cost is 0 in product table, try average_cost in stocks
+                            if (cost === 0) cost = stockEntries[0]?.average_cost || 0;
                         } else {
-                            qty = Number(p.stock_quantity) || 0;
+                            qty = (Number(p.stock_quantity) || 0);
                         }
-                        return { ...p, isProduct: true, currentStock: qty };
-                    })
-                ].filter(item => {
-                    return !isNaN(item.currentStock) && item.currentStock <= 1; // Show items with 1 or less
-                }).sort((a, b) => a.currentStock - b.currentStock).slice(0, 5);
 
-                setStats({
-                    totalStockValue,
-                    pendingPayments,
-                    pendingReceivables,
-                    activeOrders: productionRes.data?.length || 0,
-                    monthlyPurchases,
-                    monthlySales: monthlySalesTotal,
-                    monthlyIncome: monthlySalesIncome,
-                    avgTicket,
-                    projectedSalesValue: stockAssetValue,
-                    totalFinishedStock: totalFinishedStockUnits,
-                    totalIngredientsValue // Add this
-                });
+                        totalFinishedStockUnits += qty;
+                        return acc + (qty * cost);
+                    }, 0);
 
-                setFinancialData(chartData);
-                // setSalesTrend(salesTrendData);
-                setTopClients(topClientData);
-                setTopProducts(topProductData);
-                setTopMarginProducts(topMarginData);
-                setLowStockItems(lowStock);
+                    const totalStockValue = totalIngredientsValue + stockAssetValue;
 
-                // Store Seller Performance in 'notifications' state temporarily
-                setNotifications(sellerPerformanceData);
+                    // Pending Financials
+                    const { data: allPending } = await supabase.from('financial_movements').select('amount, type, status').eq('status', 'pending');
+                    const pendingPayments = allPending?.filter(m => m.type === 'expense').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
+                    const pendingReceivables = allPending?.filter(m => m.type === 'income').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
+
+                    // Current Month Stats
+                    const now = new Date();
+                    const currentMonthMovements = financialRes.data?.filter(m => {
+                        const refDate = m.status === 'paid' ? m.payment_date : m.due_date;
+                        const d = new Date(refDate || m.created_at);
+                        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                    }) || [];
+
+                    const monthlyPurchases = currentMonthMovements
+                        .filter(m => m.type === 'expense' && m.status === 'paid')
+                        .reduce((acc, m) => acc + (Math.abs(Number(m.amount)) || 0), 0);
+
+                    const monthlySalesIncome = currentMonthMovements
+                        .filter(m => m.type === 'income' && m.status === 'paid')
+                        .reduce((acc, m) => acc + (Number(m.amount) || 0), 0);
+
+                    // Sales Data Processing
+                    // Volume
+                    const currentMonthSales = salesData.filter(s => {
+                        const d = new Date(s.created_at);
+                        const isSameMonth = d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                        return isSameMonth;
+                    });
+                    const monthlySalesTotal = currentMonthSales.reduce((acc, s) => acc + Number(s.total), 0);
+
+                    // Net Profit
+                    // const netProfit = monthlySalesIncome - monthlyPurchases; // Unused for now
+
+                    // Avg Ticket
+                    const avgTicket = currentMonthSales.length > 0 ? (monthlySalesTotal / currentMonthSales.length) : 0;
+
+
+                    // --- 3. Chart & Widget Data Preparation ---
+
+                    // A. Financial Trend
+                    const months = [];
+                    for (let i = 0; i < 6; i++) {
+                        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                        months.unshift(d);
+                    }
+                    const chartData = months.map(date => {
+                        const monthKey = date.toLocaleString('pt-BR', { month: 'short' });
+                        const mData = financialRes.data?.filter(m => {
+                            const d = new Date(m.due_date || m.payment_date);
+                            return d.getMonth() === date.getMonth() && d.getFullYear() === date.getFullYear() && m.status === 'paid';
+                        });
+                        const expense = mData?.filter(m => m.type === 'expense').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
+                        const income = mData?.filter(m => m.type === 'income').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
+                        return { name: monthKey, Receita: income, Despesa: expense, Líquido: income + expense };
+                    });
+
+                    // B. Sales by Seller (Margin)
+                    const sellerStats: Record<string, { revenue: number, cost: number, count: number }> = {};
+
+                    salesData.forEach((sale: any) => {
+                        const sellerName = sale.profiles?.full_name?.split(' ')[0] || 'Desconhecido';
+
+                        if (!sellerStats[sellerName]) {
+                            sellerStats[sellerName] = { revenue: 0, cost: 0, count: 0 };
+                        }
+
+                        sellerStats[sellerName].count += 1;
+                        sellerStats[sellerName].revenue += Number(sale.total);
+
+                        // Calculate Cost for this Sale
+                        let saleCost = 0;
+                        if (sale.sale_items && Array.isArray(sale.sale_items)) {
+                            sale.sale_items.forEach((item: any) => {
+                                const productCost = Number(item.cost_price_snapshot || item.products?.cost || 0);
+                                const quantity = Number(item.quantity) || 0;
+                                saleCost += (productCost * quantity);
+                            });
+                        }
+                        sellerStats[sellerName].cost += saleCost;
+                    });
+
+                    const sellerPerformanceData = Object.entries(sellerStats).map(([name, stats]) => ({
+                        name,
+                        revenue: stats.revenue,
+                        cost: stats.cost,
+                        margin: stats.revenue - stats.cost,
+                        marginPercent: stats.revenue > 0 ? ((stats.revenue - stats.cost) / stats.revenue) * 100 : 0,
+                        count: stats.count
+                    })).sort((a, b) => b.revenue - a.revenue);
+
+
+                    // D. Top 5 Clients (Replacing Sales Volume Trend)
+                    const clientsList = clientsRes.data || [];
+                    const clientMap = clientsList.reduce((acc: any, c: any) => {
+                        acc[c.id] = c.name;
+                        return acc;
+                    }, {});
+
+                    const clientStats: Record<string, { name: string, total: number, count: number }> = {};
+                    salesData.forEach((s: any) => {
+                        const clientId = s.client_id;
+                        const clientName = clientId ? (clientMap[clientId] || 'Cliente Removido') : 'Consumidor Final';
+
+                        if (!clientStats[clientName]) {
+                            clientStats[clientName] = { name: clientName, total: 0, count: 0 };
+                        }
+                        clientStats[clientName].total += Number(s.total);
+                        clientStats[clientName].count += 1;
+                    });
+
+                    const topClientData = Object.values(clientStats)
+                        .sort((a, b) => b.total - a.total)
+                        .slice(0, 5);
+
+
+
+                    // Top 5 Products Logic
+                    const productStats: Record<string, { name: string, total: number, count: number }> = {};
+                    salesData.forEach((s: any) => {
+                        if (s.sale_items && Array.isArray(s.sale_items)) {
+                            s.sale_items.forEach((item: any) => {
+                                const pName = item.products?.name || 'Produto Desconhecido';
+                                if (!productStats[pName]) {
+                                    productStats[pName] = { name: pName, total: 0, count: 0 };
+                                }
+                                productStats[pName].count += Number(item.quantity) || 0;
+                                productStats[pName].total += (Number(item.quantity) * Number(item.unit_price || 0));
+                            });
+                        }
+                    });
+
+                    const topProductData = Object.values(productStats)
+                        .sort((a, b) => b.total - a.total)
+                        .slice(0, 5);
+
+                    // Top 5 Margins Logic
+                    const marginStats: Record<string, { name: string, profit: number, marginPercent: number, count: number, totalRevenue: number }> = {};
+                    salesData.forEach((s: any) => {
+                        if (s.sale_items && Array.isArray(s.sale_items)) {
+                            s.sale_items.forEach((item: any) => {
+                                const pName = item.products?.name || 'Produto Desconhecido';
+                                if (!marginStats[pName]) {
+                                    marginStats[pName] = { name: pName, profit: 0, marginPercent: 0, count: 0, totalRevenue: 0 };
+                                }
+                                const qty = Number(item.quantity) || 0;
+                                const revenue = qty * Number(item.unit_price || 0);
+                                const cost = qty * Number(item.cost_price_snapshot || 0);
+
+                                marginStats[pName].count += qty;
+                                marginStats[pName].totalRevenue += revenue;
+                                marginStats[pName].profit += (revenue - cost);
+                            });
+                        }
+                    });
+
+                    // Calculate average margin % for sorting/display preference? 
+                    // Requests asks for "Top 5 Margens". Usually means highest profit value or highest %.
+                    // Business wise, highest PROFIT VALUE is often more relevant for "Top". 
+                    // Let's sort by Total Profit (Value).
+                    const topMarginData = Object.values(marginStats)
+                        .sort((a, b) => b.profit - a.profit)
+                        .slice(0, 5);
+
+
+                    // E. Low Stock (Fixing NaN)
+                    const lowStock = [
+                        ...(ingredientsRes.data || []).map(i => {
+                            const stockEntries = i.product_stocks || [];
+                            let qty = 0;
+                            if (stockEntries.length > 0) {
+                                qty = stockEntries.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0);
+                            } else {
+                                qty = (Number(i.stock_danilo) || 0) + (Number(i.stock_adriel) || 0);
+                            }
+                            return { ...i, isProduct: false, currentStock: qty };
+                        }),
+                        ...(productsRes.data || []).map(p => {
+                            const stockEntries = p.product_stocks || [];
+                            let qty = 0;
+                            if (stockEntries.length > 0) {
+                                qty = stockEntries.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0);
+                            } else {
+                                qty = Number(p.stock_quantity) || 0;
+                            }
+                            return { ...p, isProduct: true, currentStock: qty };
+                        })
+                    ].filter(item => {
+                        return !isNaN(item.currentStock) && item.currentStock <= 1; // Show items with 1 or less
+                    }).sort((a, b) => a.currentStock - b.currentStock).slice(0, 5);
+
+                    setStats({
+                        totalStockValue,
+                        pendingPayments,
+                        pendingReceivables,
+                        activeOrders: productionRes.data?.length || 0,
+                        monthlyPurchases,
+                        monthlySales: monthlySalesTotal,
+                        monthlyIncome: monthlySalesIncome,
+                        avgTicket,
+                        projectedSalesValue: stockAssetValue,
+                        totalFinishedStock: totalFinishedStockUnits,
+                        totalIngredientsValue // Add this
+                    });
+
+                    setFinancialData(chartData);
+                    // setSalesTrend(salesTrendData);
+                    setTopClients(topClientData);
+                    setTopProducts(topProductData);
+                    setTopMarginProducts(topMarginData);
+                    setLowStockItems(lowStock);
+
+                    // Store Seller Performance in 'notifications' state temporarily
+                    setNotifications(sellerPerformanceData);
+                }
+                setLoading(false);
+            } catch (error) {
+                console.error("Dashboard Load Error:", error);
+                toast({ variant: 'destructive', title: "Erro ao carregar dashboard", description: "Verifique o console para detalhes." });
+                setLoading(false);
             }
-            setLoading(false);
-        }
+        };
         loadDashboardData();
     }, []);
 
