@@ -412,7 +412,7 @@ export default function Inventory() {
                     `)
                 .eq('product_id', ingredient.id)
                 .neq('sales.status', 'canceled') // Ensure canceled sales don't show as usage
-                .order('created_at', { foreignTable: 'sales', ascending: false })
+                .order('created_at', { ascending: false })
                 .limit(20);
 
             // 5. Fetch Adjustments

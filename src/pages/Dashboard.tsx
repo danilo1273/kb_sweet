@@ -39,6 +39,7 @@ export default function Dashboard() {
 
     const [financialData, setFinancialData] = useState<any[]>([]);
     const [topClients, setTopClients] = useState<any[]>([]); // Replaces salesTrend
+    const [topProducts, setTopProducts] = useState<any[]>([]);
     const [lowStockItems, setLowStockItems] = useState<any[]>([]);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [buyerPerformance, setBuyerPerformance] = useState<any[]>([]);
@@ -352,6 +353,25 @@ export default function Dashboard() {
 
 
 
+                // Top 5 Products Logic
+                const productStats: Record<string, { name: string, total: number, count: number }> = {};
+                salesData.forEach((s: any) => {
+                    if (s.sale_items && Array.isArray(s.sale_items)) {
+                        s.sale_items.forEach((item: any) => {
+                            const pName = item.products?.name || 'Produto Desconhecido';
+                            if (!productStats[pName]) {
+                                productStats[pName] = { name: pName, total: 0, count: 0 };
+                            }
+                            productStats[pName].count += Number(item.quantity) || 0;
+                            productStats[pName].total += (Number(item.quantity) * Number(item.unit_price || 0));
+                        });
+                    }
+                });
+
+                const topProductData = Object.values(productStats)
+                    .sort((a, b) => b.total - a.total)
+                    .slice(0, 5);
+
                 // E. Low Stock (Fixing NaN)
                 const lowStock = [
                     ...(ingredientsRes.data || []).map(i => {
@@ -393,8 +413,8 @@ export default function Dashboard() {
 
                 setFinancialData(chartData);
                 // setSalesTrend(salesTrendData);
-                setTopClients(topClientData); // Connected state // REMOVED
-                // setTopClients(topClientData); // WILL BE ADDED IN NEXT STEP
+                setTopClients(topClientData);
+                setTopProducts(topProductData);
                 setLowStockItems(lowStock);
 
                 // Store Seller Performance in 'notifications' state temporarily
@@ -763,6 +783,45 @@ export default function Dashboard() {
                         </CardContent>
                     </Card>
 
+
+
+                    {/* Top 5 Products Widget (New) */}
+                    <Card className="shadow-sm">
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-base font-semibold text-pink-700">Top Produtos</CardTitle>
+                            <CardDescription>Mais vendidos (valor)</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-4 mt-2">
+                                {topProducts.length === 0 ? (
+                                    <div className="text-center text-zinc-400 py-6 text-sm">Sem vendas</div>
+                                ) : (
+                                    topProducts.map((prod, i) => (
+                                        <div key={i} className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`
+                                                    h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold
+                                                    ${i === 0 ? 'bg-pink-100 text-pink-700' :
+                                                        i === 1 ? 'bg-zinc-100 text-zinc-700' :
+                                                            i === 2 ? 'bg-orange-100 text-orange-800' : 'bg-pink-50 text-pink-600'}
+                                                `}>
+                                                    {i + 1}
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-medium text-zinc-800 truncate max-w-[110px] sm:max-w-[140px]" title={prod.name}>{prod.name}</span>
+                                                    <span className="text-[10px] text-zinc-500">{prod.count} un. vendidos</span>
+                                                </div>
+                                            </div>
+                                            <div className="text-sm font-bold text-zinc-700">
+                                                R$ {prod.total.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </CardContent>
+                    </Card>
+
                     {/* Production Summary Widget */}
                     <Card className="shadow-sm overflow-hidden border-amber-100 bg-white">
                         <CardHeader className="pb-2 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-100">
@@ -783,7 +842,11 @@ export default function Dashboard() {
                                     <div className="text-sm text-zinc-400 text-center py-8">Sem produção no mês</div>
                                 ) : (
                                     productionPerformance.map((user: any, i: number) => (
-                                        <div key={i} className="p-4 hover:bg-amber-50/30 transition-colors">
+                                        <div
+                                            key={i}
+                                            className="p-4 hover:bg-amber-50/50 transition-colors cursor-pointer active:bg-amber-100/50"
+                                            onClick={() => user.itemsList?.length > 0 && setSelectedUserProd(user)}
+                                        >
                                             <div className="flex items-center justify-between mb-3">
                                                 <div className="flex items-center gap-3">
                                                     <div className="h-10 w-10 rounded-full bg-gradient-to-br from-amber-100 to-orange-200 flex items-center justify-center text-sm font-bold text-amber-800 border-2 border-white shadow-sm">
@@ -804,13 +867,10 @@ export default function Dashboard() {
                                                     <div className="text-[9px] text-zinc-400 uppercase tracking-tighter font-bold">Valor Produzido</div>
                                                 </div>
                                             </div>
-                                            {/* Product Detailed List - Removed preview as requested */}
+                                            {/* Product Detailed List */}
                                             {user.itemsList && user.itemsList.length > 0 && (
                                                 <div className="ml-10 pl-3 mt-2 border-l-2 border-amber-100/50">
-                                                    <div
-                                                        className="text-[10px] text-amber-600 hover:text-amber-700 cursor-pointer italic pt-1 font-extrabold flex items-center gap-1 transition-colors underline-offset-2 hover:underline"
-                                                        onClick={() => setSelectedUserProd(user)}
-                                                    >
+                                                    <div className="text-[10px] text-amber-600 italic pt-1 font-bold flex items-center gap-1">
                                                         + Ver detalhes dos {user.itemsList.length} itens produzidos
                                                     </div>
                                                 </div>
