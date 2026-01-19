@@ -52,8 +52,10 @@ export default function Dashboard() {
     const [bankAccounts, setBankAccounts] = useState<any[]>([]);
     const [isFinancialUser, setIsFinancialUser] = useState(false);
     const [selectedUserProd, setSelectedUserProd] = useState<any>(null);
+    const [ingredients, setIngredients] = useState<any[]>([]); // New State
     const [products, setProducts] = useState<any[]>([]);
     const [isFinishedGoodsModalOpen, setIsFinishedGoodsModalOpen] = useState(false);
+    const [isIngredientsModalOpen, setIsIngredientsModalOpen] = useState(false);
     const { toast } = useToast();
 
     useEffect(() => {
@@ -90,8 +92,8 @@ export default function Dashboard() {
                     purchasesRes,
                     productionStatsRes
                 ] = await Promise.all([
-                    supabase.from('ingredients').select('*'),
-                    supabase.from('products').select('*, product_stocks(quantity, location_id)'),
+                    supabase.from('ingredients').select('*, product_stocks(quantity, location_id, stock_locations(name))'),
+                    supabase.from('products').select('*, product_stocks(quantity, location_id, stock_locations(name))'),
                     supabase.from('financial_movements').select('*').or(`due_date.gte.${sixMonthsAgo.toISOString()},payment_date.gte.${sixMonthsAgo.toISOString()}`),
                     supabase.from('production_orders').select('id, status').eq('status', 'open'),
                     // Fetch Sales with Items and Product Cost for Margin Calculation
@@ -120,6 +122,7 @@ export default function Dashboard() {
                 ]);
 
                 if (productsRes.data) setProducts(productsRes.data);
+                if (ingredientsRes.data) setIngredients(ingredientsRes.data);
 
                 // --- 1b. Manual Join for Profiles (Sales + Purchases) ---
                 const rawSales = salesRes.data || [];
@@ -527,7 +530,7 @@ export default function Dashboard() {
                                 <div className="text-2xl font-bold tracking-tight">
                                     R$ {stats.totalIngredientsValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
-                                <div className="flex items-center gap-1 mt-1 cursor-pointer hover:bg-white/10 p-0.5 rounded px-1 -ml-1 transition-colors w-fit" onClick={() => navigate('/inventory')}>
+                                <div className="flex items-center gap-1 mt-1 cursor-pointer hover:bg-white/10 p-0.5 rounded px-1 -ml-1 transition-colors w-fit" onClick={() => setIsIngredientsModalOpen(true)}>
                                     <p className="text-xs text-pink-100 opacity-80 font-medium">Matéria-prima (Custo)</p>
                                     <ArrowRight className="h-3 w-3 text-pink-100" />
                                 </div>

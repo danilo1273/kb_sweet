@@ -31,23 +31,28 @@ export default function Marketing() {
 
     async function fetchProducts() {
         setLoading(true);
-        // Fetch finished goods with positive stock (Simplified logic)
+        // Fetch finished goods from products table (Source of Truth for legacy + new)
         const { data } = await supabase
-            .from("product_stocks")
-            .select("quantity, products(id, name, sale_price, unit, type)")
-            .gt('quantity', 0); // Only positive stock rows
+            .from("products")
+            .select("*, product_stocks(quantity)")
+            .eq('type', 'finished');
 
         if (data) {
-            // Filter locally for 'finished' type to obtain robustness against Join filters
             const formatted = data
-                .filter((item: any) => item.products?.type === 'finished')
-                .map((item: any) => ({
-                    id: item.products.id,
-                    name: item.products.name,
-                    price: item.products.sale_price,
-                    unit: item.products.unit,
-                    stock: item.quantity
-                }))
+                .map((product: any) => {
+                    const stockQty = product.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) || 0;
+                    const legacyQty = Number(product.stock_quantity) || 0;
+                    const totalQty = stockQty > 0 ? stockQty : legacyQty;
+
+                    return {
+                        id: product.id,
+                        name: product.name,
+                        price: product.sale_price,
+                        unit: product.unit,
+                        stock: totalQty
+                    };
+                })
+                .filter(p => p.stock > 0)
                 .sort((a, b) => b.stock - a.stock);
 
             setProducts(formatted);
