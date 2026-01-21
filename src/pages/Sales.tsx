@@ -261,127 +261,136 @@ export default function Sales() {
                 ) : (
                     Object.entries(groupedSales).map(([date, dailySales]) => {
                         const dailyTotal = dailySales.filter(s => s.status === 'completed').reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
+                        const isExpanded = expandedGroups.has(date);
 
                         return (
-                            <div key={date} className="relative">
-                                <div className="sticky top-0 z-10 bg-zinc-50/95 backdrop-blur-sm py-2 mb-2 border-b border-zinc-200/50 flex justify-between items-end">
-                                    <h3 className="text-sm font-bold text-zinc-700 uppercase tracking-wider">{date}</h3>
+                            <div key={date} className="relative bg-white rounded-xl shadow-sm border border-zinc-100 overflow-hidden">
+                                <div
+                                    onClick={() => toggleGroup(date)}
+                                    className="sticky top-0 z-10 bg-zinc-50/95 backdrop-blur-sm p-4 border-b border-zinc-100 flex justify-between items-center cursor-pointer active:bg-zinc-100 transition-colors"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        {isExpanded ? <ChevronDown className="h-4 w-4 text-zinc-400" /> : <ChevronRight className="h-4 w-4 text-zinc-400" />}
+                                        <h3 className="text-sm font-bold text-zinc-700 uppercase tracking-wider">{date}</h3>
+                                    </div>
                                     <span className="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
                                         Total: R$ {dailyTotal.toFixed(2)}
                                     </span>
                                 </div>
 
-                                <div className="pl-4 space-y-3 border-l-2 border-zinc-200 ml-2">
-                                    {dailySales.map(sale => (
-                                        <div key={sale.id} className="relative bg-white p-4 rounded-xl shadow-sm border border-zinc-100 flex flex-col gap-3 group active:scale-[0.98] transition-all">
-                                            {/* Timestamp dot */}
-                                            <div className="absolute -left-[21px] top-6 h-3 w-3 rounded-full bg-zinc-300 border-2 border-zinc-50 group-hover:bg-blue-500 transition-colors" />
+                                {isExpanded && (
+                                    <div className="p-4 space-y-3 bg-zinc-50/30">
+                                        {dailySales.map(sale => (
+                                            <div key={sale.id} className="relative bg-white p-4 rounded-xl shadow-sm border border-zinc-100 flex flex-col gap-3 group active:scale-[0.98] transition-all">
+                                                {/* Timestamp dot */}
+                                                {/* <div className="absolute -left-[21px] top-6 h-3 w-3 rounded-full bg-zinc-300 border-2 border-zinc-50 group-hover:bg-blue-500 transition-colors" /> */}
 
-                                            <div className="flex justify-between items-start">
-                                                <div className="flex gap-3">
-                                                    <Avatar className="h-10 w-10 border border-zinc-100 bg-zinc-50">
-                                                        <AvatarFallback className="text-zinc-600 font-bold text-xs bg-zinc-100">
-                                                            {sale.clients?.name?.substring(0, 2).toUpperCase() || 'CF'}
-                                                        </AvatarFallback>
-                                                    </Avatar>
-                                                    <div>
-                                                        <div className="text-[10px] text-zinc-400 font-medium">
-                                                            {new Date(sale.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                <div className="flex justify-between items-start">
+                                                    <div className="flex gap-3">
+                                                        <Avatar className="h-10 w-10 border border-zinc-100 bg-zinc-50">
+                                                            <AvatarFallback className="text-zinc-600 font-bold text-xs bg-zinc-100">
+                                                                {sale.clients?.name?.substring(0, 2).toUpperCase() || 'CF'}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                        <div>
+                                                            <div className="text-[10px] text-zinc-400 font-medium">
+                                                                {new Date(sale.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                            </div>
+                                                            <div className="font-bold text-zinc-900 leading-tight">
+                                                                {sale.clients?.name || 'Consumidor Final'}
+                                                            </div>
+                                                            <div className="text-xs text-zinc-500 mt-0.5 max-w-[140px] truncate">
+                                                                {sale.sale_items?.map((i: any) => i.products?.name).join(', ') || 'Venda Rápida'}
+                                                            </div>
                                                         </div>
-                                                        <div className="font-bold text-zinc-900 leading-tight">
-                                                            {sale.clients?.name || 'Consumidor Final'}
+                                                    </div>
+
+                                                    <div className="flex flex-col items-end gap-1">
+                                                        <div className="flex items-center gap-1">
+                                                            {(sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received') && (
+                                                                <Badge className="bg-green-600 hover:bg-green-700 text-white text-[10px] h-5 px-1.5 flex items-center gap-0.5">
+                                                                    <span className="text-[9px]">✔</span>
+                                                                </Badge>
+                                                            )}
+                                                            <Badge
+                                                                variant="secondary"
+                                                                className={cn("text-[10px] font-bold px-2 h-5 flex items-center gap-1",
+                                                                    sale.status === 'completed' ? 'bg-green-100/50 text-green-700 hover:bg-green-100' :
+                                                                        sale.status === 'canceled' ? 'bg-red-100/50 text-red-700 hover:bg-red-100' : 'bg-amber-100/50 text-amber-700 hover:bg-amber-100'
+                                                                )}
+                                                            >
+                                                                {sale.status === 'completed' ? 'Concluída' : sale.status}
+                                                            </Badge>
                                                         </div>
-                                                        <div className="text-xs text-zinc-500 mt-0.5 max-w-[140px] truncate">
-                                                            {sale.sale_items?.map((i: any) => i.products?.name).join(', ') || 'Venda Rápida'}
+
+                                                        <div className="font-bold text-green-600 text-base">
+                                                            R$ {Number(sale.total).toFixed(2)}
                                                         </div>
                                                     </div>
                                                 </div>
 
-                                                <div className="flex flex-col items-end gap-1">
-                                                    <div className="flex items-center gap-1">
-                                                        {(sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received') && (
-                                                            <Badge className="bg-green-600 hover:bg-green-700 text-white text-[10px] h-5 px-1.5 flex items-center gap-0.5">
-                                                                <span className="text-[9px]">✔</span>
-                                                            </Badge>
-                                                        )}
-                                                        <Badge
-                                                            variant="secondary"
-                                                            className={cn("text-[10px] font-bold px-2 h-5 flex items-center gap-1",
-                                                                sale.status === 'completed' ? 'bg-green-100/50 text-green-700 hover:bg-green-100' :
-                                                                    sale.status === 'canceled' ? 'bg-red-100/50 text-red-700 hover:bg-red-100' : 'bg-amber-100/50 text-amber-700 hover:bg-amber-100'
-                                                            )}
-                                                        >
-                                                            {sale.status === 'completed' ? 'Concluída' : sale.status}
+                                                {/* Actions Footer */}
+                                                <div className="flex justify-between items-center pt-2 mt-1 border-t border-zinc-50">
+                                                    <div className="flex gap-2">
+                                                        <Badge variant="outline" className="text-[10px] h-5 border-zinc-200 text-zinc-500">
+                                                            {sale.payment_method === 'money' ? 'Dinheiro' : sale.payment_method}
+                                                        </Badge>
+                                                        <Badge variant="outline" className="text-[10px] h-5 border-blue-100 text-blue-600 bg-blue-50/30">
+                                                            {sale.stock_locations?.slug?.includes('danilo') ? 'Danilo' : 'Adriel'}
                                                         </Badge>
                                                     </div>
 
-                                                    <div className="font-bold text-green-600 text-base">
-                                                        R$ {Number(sale.total).toFixed(2)}
+                                                    <div className="flex gap-1">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-8 w-8 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-full"
+                                                            onClick={() => {
+                                                                setSelectedViewSale(sale);
+                                                                setViewSaleItems(sale.sale_items || []);
+                                                                setIsViewOpen(true);
+                                                            }}
+                                                        >
+                                                            <Eye className="h-4 w-4" />
+                                                        </Button>
+
+                                                        {(isAdmin || (currentUser && sale.user_id === currentUser.id)) && !(sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received') && (
+                                                            <>
+                                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-full" onClick={() => handleEditClick(sale)}>
+                                                                    <Edit className="h-4 w-4" />
+                                                                </Button>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-8 w-8 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-full"
+                                                                    onClick={async () => {
+                                                                        if (!confirm('Excluir venda?')) return;
+                                                                        const reason = prompt("Motivo:");
+                                                                        if (!reason) return;
+
+                                                                        setLoading(true);
+                                                                        try {
+                                                                            const { error } = await supabase.rpc('delete_sale_secure', { p_sale_id: sale.id, p_reason: reason });
+                                                                            if (error) throw error;
+                                                                            toast({ title: "Excluída!" });
+                                                                            fetchSales();
+                                                                        } catch (e: any) {
+                                                                            alert('Erro: ' + e.message);
+                                                                        } finally {
+                                                                            setLoading(false);
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    <Trash2 className="h-4 w-4" />
+                                                                </Button>
+                                                            </>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
-
-                                            {/* Actions Footer */}
-                                            <div className="flex justify-between items-center pt-2 mt-1 border-t border-zinc-50">
-                                                <div className="flex gap-2">
-                                                    <Badge variant="outline" className="text-[10px] h-5 border-zinc-200 text-zinc-500">
-                                                        {sale.payment_method === 'money' ? 'Dinheiro' : sale.payment_method}
-                                                    </Badge>
-                                                    <Badge variant="outline" className="text-[10px] h-5 border-blue-100 text-blue-600 bg-blue-50/30">
-                                                        {sale.stock_locations?.slug?.includes('danilo') ? 'Danilo' : 'Adriel'}
-                                                    </Badge>
-                                                </div>
-
-                                                <div className="flex gap-1">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-8 w-8 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-full"
-                                                        onClick={() => {
-                                                            setSelectedViewSale(sale);
-                                                            setViewSaleItems(sale.sale_items || []);
-                                                            setIsViewOpen(true);
-                                                        }}
-                                                    >
-                                                        <Eye className="h-4 w-4" />
-                                                    </Button>
-
-                                                    {(isAdmin || (currentUser && sale.user_id === currentUser.id)) && !(sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received') && (
-                                                        <>
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-full" onClick={() => handleEditClick(sale)}>
-                                                                <Edit className="h-4 w-4" />
-                                                            </Button>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="h-8 w-8 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-full"
-                                                                onClick={async () => {
-                                                                    if (!confirm('Excluir venda?')) return;
-                                                                    const reason = prompt("Motivo:");
-                                                                    if (!reason) return;
-
-                                                                    setLoading(true);
-                                                                    try {
-                                                                        const { error } = await supabase.rpc('delete_sale_secure', { p_sale_id: sale.id, p_reason: reason });
-                                                                        if (error) throw error;
-                                                                        toast({ title: "Excluída!" });
-                                                                        fetchSales();
-                                                                    } catch (e: any) {
-                                                                        alert('Erro: ' + e.message);
-                                                                    } finally {
-                                                                        setLoading(false);
-                                                                    }
-                                                                }}
-                                                            >
-                                                                <Trash2 className="h-4 w-4" />
-                                                            </Button>
-                                                        </>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )
                     })
