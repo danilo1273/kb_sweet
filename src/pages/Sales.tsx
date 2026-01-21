@@ -163,11 +163,14 @@ export default function Sales() {
                 </div>
                 <div className="flex gap-2">
 
-                    <Button onClick={() => navigate('/clients')} variant="outline">
-                        Gerenciar Clientes
+                    <Button onClick={() => navigate('/clients')} variant="outline" size="sm" className="md:size-default">
+                        <span className="hidden md:inline">Gerenciar Clientes</span>
+                        <span className="md:hidden">Clientes</span>
                     </Button>
-                    <Button onClick={() => navigate('/pos')} className="bg-green-600 hover:bg-green-700 text-white">
-                        <Plus className="mr-2 h-4 w-4" /> Nova Venda (PDV)
+                    <Button onClick={() => navigate('/pos')} className="bg-green-600 hover:bg-green-700 text-white" size="sm">
+                        <Plus className="mr-0 md:mr-2 h-4 w-4" />
+                        <span className="hidden md:inline">Nova Venda (PDV)</span>
+                        <span className="md:hidden">Vender</span>
                     </Button>
                 </div>
             </div>

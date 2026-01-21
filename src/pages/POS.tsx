@@ -26,6 +26,7 @@ import { useNavigate } from "react-router-dom";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
 import { usePOS } from "@/hooks/usePOS"; // Import Hook
+import { CreateClientDialog } from "@/components/pos/CreateClientDialog";
 import { StockConsultationDialog } from "@/components/pos/StockConsultationDialog";
 import { POSProduct as Product, POSOrderItem as OrderItem } from "@/types";
 
@@ -40,6 +41,8 @@ export default function POS() {
     const { toast } = useToast();
     const { processSale, loading: processingSale } = usePOS();
 
+    // New Client Dialog State
+    const [isClientDialogOpen, setIsClientDialogOpen] = useState(false);
 
     // Data
     const [products, setProducts] = useState<Product[]>([]);
@@ -387,15 +390,20 @@ export default function POS() {
                 <div className="max-w-2xl mx-auto w-full space-y-4">
                     {/* Client & Discount */}
                     <div className="flex gap-2">
-                        <Select value={selectedClient || ''} onValueChange={setSelectedClient}>
-                            <SelectTrigger className="h-10 bg-zinc-50 flex-1">
-                                <SelectValue placeholder="Selecione o Cliente..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {/* Removed Consumers Final option as requested */}
-                                {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
+                        <div className="flex flex-1 gap-2">
+                            <Select value={selectedClient || ''} onValueChange={setSelectedClient}>
+                                <SelectTrigger className="h-10 bg-zinc-50 flex-1">
+                                    <SelectValue placeholder="Selecione o Cliente..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {/* Removed Consumers Final option as requested */}
+                                    {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                            <Button size="icon" variant="outline" className="h-10 w-10 shrink-0" onClick={() => setIsClientDialogOpen(true)} title="Novo Cliente">
+                                <Plus className="h-4 w-4" />
+                            </Button>
+                        </div>
                         <Input
                             type="number"
                             className="w-24 text-right bg-zinc-50"
@@ -431,6 +439,14 @@ export default function POS() {
                 </div>
             </div>
 
+            <CreateClientDialog
+                isOpen={isClientDialogOpen}
+                onOpenChange={setIsClientDialogOpen}
+                onClientCreated={(client) => {
+                    setClients(prev => [...prev, client].sort((a, b) => a.name.localeCompare(b.name)));
+                    setSelectedClient(client.id);
+                }}
+            />
         </div>
     );
 }
