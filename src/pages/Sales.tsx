@@ -1,9 +1,9 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Plus, ShoppingCart, TrendingUp, Edit, Trash2, Eye } from "lucide-react";
+import { Loader2, Plus, ShoppingCart, TrendingUp, Edit, Trash2, Eye, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,15 +12,46 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
 
 export default function Sales() {
     const navigate = useNavigate();
     const [sales, setSales] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState("");
 
     useEffect(() => {
         fetchSales();
     }, []);
+
+    const filteredSales = useMemo(() => {
+        if (!searchTerm) return sales;
+        const lower = searchTerm.toLowerCase();
+        return sales.filter(s =>
+            s.clients?.name?.toLowerCase().includes(lower) ||
+            String(s.total).includes(lower) ||
+            s.status?.toLowerCase().includes(lower)
+        );
+    }, [sales, searchTerm]);
+
+    const groupedSales = useMemo(() => {
+        const groups: Record<string, any[]> = {};
+        filteredSales.forEach(sale => {
+            const date = new Date(sale.created_at);
+            const today = new Date();
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+
+            let key = date.toLocaleDateString();
+            if (date.toDateString() === today.toDateString()) key = "Hoje";
+            else if (date.toDateString() === yesterday.toDateString()) key = "Ontem";
+
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(sale);
+        });
+        return groups;
+    }, [filteredSales]);
 
     async function fetchSales() {
         setLoading(true);
@@ -151,8 +182,8 @@ export default function Sales() {
         }
     };
 
-    const totalRevenue = sales.filter(s => s.status === 'completed').reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
-    const countSales = sales.filter(s => s.status === 'completed').length;
+    const totalRevenue = filteredSales.filter(s => s.status === 'completed').reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
+    const countSales = filteredSales.filter(s => s.status === 'completed').length;
 
     return (
         <div className="flex-1 p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
@@ -173,6 +204,17 @@ export default function Sales() {
                         <span className="md:hidden">Vender</span>
                     </Button>
                 </div>
+            </div>
+
+            {/* Search Bar */}
+            <div className="relative z-20">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-zinc-400" />
+                <Input
+                    className="pl-10 h-10 bg-white border-zinc-200 shadow-sm"
+                    placeholder="Buscar por cliente, valor ou status..."
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -196,95 +238,135 @@ export default function Sales() {
                 </Card>
             </div>
 
-            {/* Mobile View: Cards */}
-            <div className="md:hidden space-y-3 mb-4">
+            {/* Mobile View: Grouped Timeline */}
+            <div className="md:hidden space-y-6 mb-4">
                 {loading ? (
                     <div className="text-center py-8"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>
-                ) : sales.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">Nenhuma venda registrada.</div>
+                ) : filteredSales.length === 0 ? (
+                    <div className="text-center py-12 flex flex-col items-center opacity-50">
+                        <ShoppingCart className="h-12 w-12 text-zinc-300 mb-2" />
+                        <span className="text-zinc-500">Nenhuma venda encontrada.</span>
+                    </div>
                 ) : (
-                    sales.map(sale => (
-                        <div key={sale.id} className="bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3">
-                            <div className="flex justify-between items-start">
-                                <div>
-                                    <div className="text-xs text-zinc-500">{new Date(sale.created_at).toLocaleString()}</div>
-                                    <div className="font-bold text-zinc-900">{sale.clients?.name || 'Consumidor Final'}</div>
-                                </div>
-                                <div className="flex flex-col items-end gap-1">
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${sale.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                        sale.status === 'canceled' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
-                                        }`}>
-                                        {sale.status === 'completed' ? 'Concluída' : sale.status === 'canceled' ? 'Cancelada' : sale.status}
+                    Object.entries(groupedSales).map(([date, dailySales]) => {
+                        const dailyTotal = dailySales.filter(s => s.status === 'completed').reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
+
+                        return (
+                            <div key={date} className="relative">
+                                <div className="sticky top-0 z-10 bg-zinc-50/95 backdrop-blur-sm py-2 mb-2 border-b border-zinc-200/50 flex justify-between items-end">
+                                    <h3 className="text-sm font-bold text-zinc-700 uppercase tracking-wider">{date}</h3>
+                                    <span className="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                                        Total: R$ {dailyTotal.toFixed(2)}
                                     </span>
-                                    {sale.edit_status === 'approved' && (
-                                        <span className="text-[10px] text-green-600 font-medium">Edição OK</span>
-                                    )}
+                                </div>
+
+                                <div className="pl-4 space-y-3 border-l-2 border-zinc-200 ml-2">
+                                    {dailySales.map(sale => (
+                                        <div key={sale.id} className="relative bg-white p-4 rounded-xl shadow-sm border border-zinc-100 flex flex-col gap-3 group active:scale-[0.98] transition-all">
+                                            {/* Timestamp dot */}
+                                            <div className="absolute -left-[21px] top-6 h-3 w-3 rounded-full bg-zinc-300 border-2 border-zinc-50 group-hover:bg-blue-500 transition-colors" />
+
+                                            <div className="flex justify-between items-start">
+                                                <div className="flex gap-3">
+                                                    <Avatar className="h-10 w-10 border border-zinc-100 bg-zinc-50">
+                                                        <AvatarFallback className="text-zinc-600 font-bold text-xs bg-zinc-100">
+                                                            {sale.clients?.name?.substring(0, 2).toUpperCase() || 'CF'}
+                                                        </AvatarFallback>
+                                                    </Avatar>
+                                                    <div>
+                                                        <div className="text-[10px] text-zinc-400 font-medium">
+                                                            {new Date(sale.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                        </div>
+                                                        <div className="font-bold text-zinc-900 leading-tight">
+                                                            {sale.clients?.name || 'Consumidor Final'}
+                                                        </div>
+                                                        <div className="text-xs text-zinc-500 mt-0.5 max-w-[140px] truncate">
+                                                            {sale.sale_items?.map((i: any) => i.products?.name).join(', ') || 'Venda Rápida'}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex flex-col items-end gap-1">
+                                                    <Badge
+                                                        variant="secondary"
+                                                        className={cn("text-[10px] font-bold px-2 h-5 flex items-center gap-1",
+                                                            sale.status === 'completed' ? 'bg-green-100/50 text-green-700 hover:bg-green-100' :
+                                                                sale.status === 'canceled' ? 'bg-red-100/50 text-red-700 hover:bg-red-100' : 'bg-amber-100/50 text-amber-700 hover:bg-amber-100'
+                                                        )}
+                                                    >
+                                                        {sale.status === 'completed' ? 'Concluída' : sale.status}
+                                                    </Badge>
+
+                                                    <div className="font-bold text-green-600 text-base">
+                                                        R$ {Number(sale.total).toFixed(2)}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Actions Footer */}
+                                            <div className="flex justify-between items-center pt-2 mt-1 border-t border-zinc-50">
+                                                <div className="flex gap-2">
+                                                    <Badge variant="outline" className="text-[10px] h-5 border-zinc-200 text-zinc-500">
+                                                        {sale.payment_method === 'money' ? 'Dinheiro' : sale.payment_method}
+                                                    </Badge>
+                                                    <Badge variant="outline" className="text-[10px] h-5 border-blue-100 text-blue-600 bg-blue-50/30">
+                                                        {sale.stock_locations?.slug?.includes('danilo') ? 'Danilo' : 'Adriel'}
+                                                    </Badge>
+                                                </div>
+
+                                                <div className="flex gap-1">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-full"
+                                                        onClick={() => {
+                                                            setSelectedViewSale(sale);
+                                                            setViewSaleItems(sale.sale_items || []);
+                                                            setIsViewOpen(true);
+                                                        }}
+                                                    >
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
+
+                                                    {(isAdmin || (currentUser && sale.user_id === currentUser.id)) && !(sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received') && (
+                                                        <>
+                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-full" onClick={() => handleEditClick(sale)}>
+                                                                <Edit className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-8 w-8 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-full"
+                                                                onClick={async () => {
+                                                                    if (!confirm('Excluir venda?')) return;
+                                                                    const reason = prompt("Motivo:");
+                                                                    if (!reason) return;
+
+                                                                    setLoading(true);
+                                                                    try {
+                                                                        const { error } = await supabase.rpc('delete_sale_secure', { p_sale_id: sale.id, p_reason: reason });
+                                                                        if (error) throw error;
+                                                                        toast({ title: "Excluída!" });
+                                                                        fetchSales();
+                                                                    } catch (e: any) {
+                                                                        alert('Erro: ' + e.message);
+                                                                    } finally {
+                                                                        setLoading(false);
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </Button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
-
-                            <div className="flex gap-2 flex-wrap">
-                                <Badge variant="outline" className="text-xs capitalize">{sale.payment_method === 'money' ? 'Dinheiro' : sale.payment_method}</Badge>
-                                <Badge variant="secondary" className={`text-xs ${sale.stock_locations?.slug === 'stock-danilo' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
-                                    {sale.stock_locations?.name || `Estoque ${sale.stock_source}`}
-                                </Badge>
-                            </div>
-
-                            <div className="flex justify-between items-center pt-3 border-t mt-1">
-                                <div className="font-bold text-lg text-green-600">R$ {Number(sale.total).toFixed(2)}</div>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 text-zinc-500 hover:text-blue-500"
-                                    onClick={() => {
-                                        setSelectedViewSale(sale);
-                                        setViewSaleItems(sale.sale_items || []);
-                                        setIsViewOpen(true);
-                                    }}
-                                >
-                                    <Eye className="h-4 w-4" />
-                                </Button>
-
-                                {(isAdmin || (currentUser && sale.user_id === currentUser.id)) && !(sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received') && (
-                                    <>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500 bg-blue-50" onClick={() => handleEditClick(sale)}>
-                                            <Edit className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 text-red-500 bg-red-50"
-                                            onClick={async () => {
-                                                if (!confirm('Tem certeza que deseja EXCLUIR permanentemente? O estoque será devolvido.')) return;
-                                                const reason = prompt("Digite o motivo da exclusão para auditoria:");
-                                                if (!reason) return;
-
-                                                setLoading(true);
-                                                try {
-                                                    const { error } = await supabase.rpc('delete_sale_secure', {
-                                                        p_sale_id: sale.id,
-                                                        p_reason: reason
-                                                    });
-
-                                                    if (error) throw error;
-
-                                                    toast({ title: "Venda excluída e estoque estornado!" });
-                                                    fetchSales();
-
-                                                } catch (e: any) {
-                                                    alert('Erro: ' + e.message);
-                                                } finally {
-                                                    setLoading(false);
-                                                }
-                                            }}
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                    </>
-                                )}
-
-                            </div>
-                        </div>
-                    ))
+                        )
+                    })
                 )}
             </div>
 
