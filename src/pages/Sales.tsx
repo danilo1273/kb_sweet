@@ -3,7 +3,7 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Plus, ShoppingCart, TrendingUp, Edit, Trash2, Eye, Search } from "lucide-react";
+import { Loader2, Plus, ShoppingCart, TrendingUp, Edit, Trash2, Eye, Search, ChevronDown, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,17 @@ export default function Sales() {
     const [sales, setSales] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+    const toggleGroup = (date: string) => {
+        const newSet = new Set(expandedGroups);
+        if (newSet.has(date)) {
+            newSet.delete(date);
+        } else {
+            newSet.add(date);
+        }
+        setExpandedGroups(newSet);
+    };
 
     useEffect(() => {
         fetchSales();
