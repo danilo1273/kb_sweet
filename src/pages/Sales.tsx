@@ -287,15 +287,22 @@ export default function Sales() {
                                                 </div>
 
                                                 <div className="flex flex-col items-end gap-1">
-                                                    <Badge
-                                                        variant="secondary"
-                                                        className={cn("text-[10px] font-bold px-2 h-5 flex items-center gap-1",
-                                                            sale.status === 'completed' ? 'bg-green-100/50 text-green-700 hover:bg-green-100' :
-                                                                sale.status === 'canceled' ? 'bg-red-100/50 text-red-700 hover:bg-red-100' : 'bg-amber-100/50 text-amber-700 hover:bg-amber-100'
+                                                    <div className="flex items-center gap-1">
+                                                        {(sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received') && (
+                                                            <Badge className="bg-green-600 hover:bg-green-700 text-white text-[10px] h-5 px-1.5 flex items-center gap-0.5">
+                                                                <span className="text-[9px]">✔</span>
+                                                            </Badge>
                                                         )}
-                                                    >
-                                                        {sale.status === 'completed' ? 'Concluída' : sale.status}
-                                                    </Badge>
+                                                        <Badge
+                                                            variant="secondary"
+                                                            className={cn("text-[10px] font-bold px-2 h-5 flex items-center gap-1",
+                                                                sale.status === 'completed' ? 'bg-green-100/50 text-green-700 hover:bg-green-100' :
+                                                                    sale.status === 'canceled' ? 'bg-red-100/50 text-red-700 hover:bg-red-100' : 'bg-amber-100/50 text-amber-700 hover:bg-amber-100'
+                                                            )}
+                                                        >
+                                                            {sale.status === 'completed' ? 'Concluída' : sale.status}
+                                                        </Badge>
+                                                    </div>
 
                                                     <div className="font-bold text-green-600 text-base">
                                                         R$ {Number(sale.total).toFixed(2)}
