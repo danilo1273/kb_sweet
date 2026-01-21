@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageCircle } from "lucide-react";
 import { WhatsAppChargeDialog, ChargeItem } from "@/components/financial/WhatsAppChargeDialog";
+import { cn } from "@/lib/utils";
 
 interface FinancialMovement {
     id: string;
@@ -237,9 +238,9 @@ export default function Clients() {
             </div>
 
             {/* Mobile View: Cards */}
-            <div className="md:hidden space-y-3 mb-4">
+            <div className="md:hidden space-y-4 mb-20">
                 {loading ? (
-                    <div className="text-center py-8"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>
+                    <div className="text-center py-8"><Loader2 className="h-6 w-6 animate-spin mx-auto text-zinc-400" /></div>
                 ) : filteredClients.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">Nenhum cliente encontrado.</div>
                 ) : (
@@ -247,51 +248,67 @@ export default function Clients() {
                         const { totalBought, pending } = getSummary(client.financial_movements || []);
 
                         return (
-                            <div key={client.id} className="bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3">
+                            <div key={client.id} className="bg-white p-4 rounded-xl border border-zinc-100 shadow-sm flex flex-col gap-4">
+                                {/* Header: Info & Status */}
                                 <div className="flex justify-between items-start">
-                                    <div className="flex items-center gap-2">
-                                        <div className="h-8 w-8 rounded-full bg-zinc-100 flex items-center justify-center">
-                                            <User className="h-4 w-4 text-zinc-500" />
+                                    <div className="flex items-center gap-3">
+                                        <div className="h-10 w-10 rounded-full bg-zinc-100 flex items-center justify-center border border-zinc-200">
+                                            <User className="h-5 w-5 text-zinc-400" />
                                         </div>
                                         <div>
-                                            <div className="flex items-center gap-2">
-                                                <div className="font-bold text-zinc-900">{client.name}</div>
-                                                {pending > 0 && (
-                                                    <Button
-                                                        size="sm"
-                                                        className="h-6 bg-green-600 hover:bg-green-700 text-white text-xs ml-2 px-2"
-                                                        onClick={() => handleOpenWhatsApp(client, pending)}
-                                                    >
-                                                        <MessageCircle className="h-3 w-3 mr-1" /> Cobrar
-                                                    </Button>
-                                                )}
-                                            </div>
-                                            <div className="text-xs text-zinc-500">{client.phone || '-'}</div>
+                                            <div className="font-bold text-zinc-900 leading-tight">{client.name}</div>
+                                            <div className="text-xs text-zinc-500 mt-0.5">{client.phone || '-'}</div>
                                         </div>
                                     </div>
                                     {pending > 0 ? (
-                                        <div className="text-right">
-                                            <span className="text-[10px] text-red-600 block">Pendente</span>
-                                            <Badge variant="destructive" className="bg-red-50 text-red-700 hover:bg-red-100 border-red-200">R$ {pending.toFixed(2)}</Badge>
-                                        </div>
+                                        <Badge variant="destructive" className="bg-red-50 text-red-600 hover:bg-red-100 border-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                                            Pendente
+                                        </Badge>
                                     ) : (
-                                        <Badge variant="secondary" className="bg-green-50 text-green-700">Em dia</Badge>
+                                        <Badge variant="secondary" className="bg-green-50 text-green-600 hover:bg-green-100 border-green-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                                            Em dia
+                                        </Badge>
                                     )}
                                 </div>
-                                <div className="flex justify-between items-center bg-zinc-50 p-2 rounded text-sm">
-                                    <span className="text-zinc-500">Total Comprado</span>
-                                    <span className="font-bold">R$ {totalBought.toFixed(2)}</span>
+
+                                {/* Stats Grid */}
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="bg-zinc-50 p-3 rounded-lg border border-zinc-100">
+                                        <span className="text-[10px] text-zinc-400 font-medium uppercase tracking-wider block mb-1">Total Comprado</span>
+                                        <span className="font-bold text-zinc-700 text-sm block">R$ {totalBought.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                    </div>
+                                    <div className={cn("p-3 rounded-lg border", pending > 0 ? "bg-red-50/50 border-red-100" : "bg-zinc-50 border-zinc-100")}>
+                                        <span className={cn("text-[10px] font-medium uppercase tracking-wider block mb-1", pending > 0 ? "text-red-400" : "text-zinc-400")}>Em Aberto</span>
+                                        <span className={cn("font-bold text-sm block", pending > 0 ? "text-red-600" : "text-zinc-700")}>
+                                            {pending > 0 ? `R$ ${pending.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "-"}
+                                        </span>
+                                    </div>
                                 </div>
-                                <div className="flex justify-end gap-2 pt-2 border-t">
-                                    <Button variant="outline" size="sm" onClick={() => { setCurrentClient(client); setIsDetailsOpen(true); }} className="h-8 text-xs">
-                                        <Eye className="h-3 w-3 mr-1" /> Ver
-                                    </Button>
-                                    <Button variant="outline" size="sm" onClick={() => { setCurrentClient(client); setIsDialogOpen(true); }} className="h-8 text-xs">
-                                        <Edit className="h-3 w-3 mr-1" /> Editar
-                                    </Button>
-                                    <Button variant="ghost" size="sm" onClick={() => handleDelete(client)} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
+
+                                {/* Actions */}
+                                <div className="flex items-center gap-2 pt-2">
+                                    {pending > 0 && (
+                                        <Button
+                                            size="sm"
+                                            className="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium text-xs h-9 shadow-sm" // Increased height to h-9
+                                            onClick={() => handleOpenWhatsApp(client, pending)}
+                                        >
+                                            <MessageCircle className="h-4 w-4 mr-1.5" />
+                                            Cobrar WhatsApp
+                                        </Button>
+                                    )}
+
+                                    <div className="flex gap-1 ml-auto">
+                                        <Button variant="ghost" size="icon" onClick={() => { setCurrentClient(client); setIsDetailsOpen(true); }} className="h-9 w-9 text-zinc-500 hover:text-blue-600 hover:bg-blue-50">
+                                            <Eye className="h-4 w-4" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" onClick={() => { setCurrentClient(client); setIsDialogOpen(true); }} className="h-9 w-9 text-zinc-500 hover:text-amber-600 hover:bg-amber-50">
+                                            <Edit className="h-4 w-4" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" onClick={() => handleDelete(client)} className="h-9 w-9 text-zinc-400 hover:text-red-600 hover:bg-red-50">
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
                                 </div>
                             </div>
                         );

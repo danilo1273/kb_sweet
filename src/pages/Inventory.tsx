@@ -378,6 +378,7 @@ export default function Inventory() {
             const productionPromise = supabase
                 .from('production_order_items')
                 .select(`
+                    *,
                     production_orders!inner(
                         id, closed_at, status, products(name),
                         profiles: user_id(full_name)
@@ -416,19 +417,24 @@ export default function Inventory() {
                 .limit(20);
 
             // 5. Fetch Adjustments
-            const adjustmentsPromise = supabase
-                .from('stock_adjustments')
-                .select('*, profiles:user_id(full_name)')
-                .eq('ingredient_id', ingredient.id)
-                .order('created_at', { ascending: false })
-                .limit(10);
+            let adjustmentsPromise;
+            if (ingredient.isProduct) {
+                adjustmentsPromise = supabase
+                    .from('product_stock_adjustments')
+                    .select('*')
+                    .eq('product_id', ingredient.id)
+                    .order('created_at', { ascending: false })
+                    .limit(10);
+            } else {
+                adjustmentsPromise = supabase
+                    .from('stock_adjustments')
+                    .select('*')
+                    .eq('ingredient_id', ingredient.id)
+                    .order('created_at', { ascending: false })
+                    .limit(10);
+            }
 
-            // 6. Fetch Product Adjustments (New Table?) - If using product_stocks, we might have adjustments on products too?
-            // Assuming stock_adjustments is currently only for ingredients or mixed? 
-            // In 20260119_product_adjustments.sql, we use the specific RPC but maybe not a table?
-            // Actually, stock_adjustments table usually had 'ingredient_id'.
-            // If we are tracking Product adjustments, we might need to check if that table handles it (nullable ingredient_id, plus product_id?)
-            // For now, let's stick to valid queries.
+            // ... (Skipping 6)
 
             const [purchasesRes, productionRes, productionOutputRes, adjustmentsRes, salesRes] = await Promise.all([
                 purchasesPromise,
@@ -446,9 +452,15 @@ export default function Inventory() {
             // ... Process Purchases ...
             let purchaseItems: UnifiedHistoryItem[] = [];
             const userIds = new Set<string>();
+
             purchasesRes.data?.forEach((r: any) => {
                 if (r.purchase_orders?.created_by) userIds.add(r.purchase_orders.created_by);
             });
+            // Collect IDs from Adjustments too
+            adjustmentsRes.data?.forEach((a: any) => {
+                if (a.user_id) userIds.add(a.user_id);
+            });
+
             let profileMap = new Map<string, string>();
             if (userIds.size > 0) {
                 const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', Array.from(userIds));
@@ -472,6 +484,8 @@ export default function Inventory() {
                     link_id: po.id
                 };
             });
+
+            // ... (Production Usage & Output & Sales - Unchanged) ...
 
             // 4. Process Production Usage
             const productionUsageItems: UnifiedHistoryItem[] = (productionRes.data || []).map((item: any) => {
@@ -513,7 +527,7 @@ export default function Inventory() {
                     description: 'Produção Finalizada',
                     quantity: Number(order.actual_quantity || order.quantity || 0),
                     unit: ingredient.unit || 'un',
-                    total_value: 0, // Could calculate if we had cost info here
+                    total_value: 0,
                     user_name: userName,
                     link_id: order.id
                 };
@@ -543,27 +557,28 @@ export default function Inventory() {
 
             // 6. Process Adjustments
             const adjustmentItems: UnifiedHistoryItem[] = (adjustmentsRes.data || []).map((adj: any) => {
-                let userName = 'Sistema';
-                if (adj.profiles) {
-                    if (Array.isArray(adj.profiles)) userName = adj.profiles[0]?.full_name;
-                    else userName = (adj.profiles as any).full_name;
-                }
+                const userName = profileMap.get(adj.user_id) || 'Sistema';
 
-                // If type is 'found' (sobra), allow positive? Normally adjustment shows diff.
-                // quantity_diff is the signed change.
-                const descMap: any = { 'found': 'Sobra de Estoque', 'loss': 'Quebra/Perda', 'adjustment': 'Ajuste Manual' };
+                // Map type to description prefix
+                const typeDescMap: any = {
+                    'found': 'Sobra (Inventário)',
+                    'loss': 'Quebra/Perda',
+                    'adjustment': 'Ajuste Manual'
+                };
+
+                // Calculate estimated value of movement
+                const qtyDiff = Math.abs(Number(adj.quantity_diff));
+                const unitCost = Number(ingredient.average_cost || ingredient.cost || 0);
+                const moveValue = qtyDiff * unitCost;
 
                 return {
                     id: adj.id,
                     date: adj.created_at,
-                    type: adj.quantity_diff >= 0 ? 'purchase' : 'usage', // Reuse visual types for color (green/red) or add new 'adjustment' type supported by UI?
-                    // Let's stick to usage=red (out), purchase=green (in).
-                    // Actually, if we use 'purchase' type it might show supplier fields which are missing.
-                    // Let's patch the type definition or map to existing.
-                    description: `${descMap[adj.type] || 'Ajuste'}: ${adj.reason || '-'}(${adj.stock_owner})`,
-                    quantity: Math.abs(adj.quantity_diff),
+                    type: adj.quantity_diff >= 0 ? 'purchase' : 'usage', // Purchase = Green (In), Usage = Red (Out)
+                    description: `${typeDescMap[adj.type] || 'Ajuste'}: ${adj.reason || '-'}${adj.stock_owner ? ` (${adj.stock_owner})` : ''}`,
+                    quantity: qtyDiff,
                     unit: ingredient.unit || 'un',
-                    total_value: 0, // No monetary value stored usually, or we could estimate? Keep 0 for now.
+                    total_value: moveValue,
                     user_name: userName
                 };
             });

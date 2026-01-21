@@ -93,14 +93,28 @@ BEGIN
                 v_qty_to_deduct := v_item_record.quantity_used + v_item_record.waste_quantity;
 
                 -- Generic Conversion Logic
-                IF (v_usage_unit IN ('g', 'ml')) AND (v_stock_unit NOT IN ('kg', 'l', 'g', 'ml')) THEN
-                    IF v_unit_weight > 0 THEN
-                        v_qty_to_deduct := v_qty_to_deduct / v_unit_weight;
+                -- Unified Conversion Logic
+                IF v_usage_unit IN ('g', 'ml') THEN
+                    IF v_stock_unit IN ('kg', 'l') THEN
+                        v_qty_to_deduct := v_qty_to_deduct / 1000.0;
+                    ELSIF v_stock_unit NOT IN ('g', 'ml') AND v_stock_unit != v_usage_unit THEN
+                         -- Stock is 'un', 'cx', etc.
+                         IF v_unit_weight > 0 THEN
+                             v_qty_to_deduct := v_qty_to_deduct / v_unit_weight;
+                         END IF;
                     END IF;
-                ELSIF (v_stock_unit IN ('kg', 'l')) AND (v_usage_unit IN ('g', 'ml')) THEN
-                    v_qty_to_deduct := v_qty_to_deduct / 1000.0;
-                ELSIF (v_stock_unit IN ('g', 'ml')) AND (v_usage_unit IN ('kg', 'l')) THEN
-                    v_qty_to_deduct := v_qty_to_deduct * 1000.0;
+                ELSIF v_usage_unit = 'un' THEN
+                    IF v_stock_unit IN ('kg', 'l') THEN
+                         -- Convert Unit -> Grams -> KG
+                         v_qty_to_deduct := (v_qty_to_deduct * v_unit_weight) / 1000.0;
+                    ELSIF v_stock_unit IN ('g', 'ml') THEN
+                         -- Convert Unit -> Grams
+                         v_qty_to_deduct := v_qty_to_deduct * v_unit_weight;
+                    END IF;
+                ELSIF v_usage_unit IN ('kg', 'l') THEN
+                     IF v_stock_unit IN ('g', 'ml') THEN
+                         v_qty_to_deduct := v_qty_to_deduct * 1000.0;
+                     END IF;
                 END IF;
 
                 -- DEDUCT DYNAMIC STOCK (INGREDIENT)
@@ -256,15 +270,29 @@ BEGIN
                         v_usage_unit := lower(v_item.unit);
                         v_qty_to_restore := v_total_used;
                         
-                        if (v_stock_unit = 'un' or v_stock_unit = 'saco' or v_stock_unit = 'cx') and (v_usage_unit = 'g' or v_usage_unit = 'ml') then
-                           if r_ingredient.unit_weight > 0 then
-                               v_qty_to_restore := v_total_used / r_ingredient.unit_weight;
-                           end if;
-                        elsif (v_stock_unit = 'kg' and v_usage_unit = 'g') or (v_stock_unit = 'l' and v_usage_unit = 'ml') then
-                            v_qty_to_restore := v_total_used / 1000;
-                        elsif (v_stock_unit = 'g' and v_usage_unit = 'kg') or (v_stock_unit = 'ml' and v_usage_unit = 'l') then
-                            v_qty_to_restore := v_total_used * 1000;
-                        end if;
+                        -- Unified Conversion Logic
+                        IF v_usage_unit IN ('g', 'ml') THEN
+                            IF v_stock_unit IN ('kg', 'l') THEN
+                                v_qty_to_restore := v_qty_to_restore / 1000.0;
+                            ELSIF v_stock_unit NOT IN ('g', 'ml') AND v_stock_unit != v_usage_unit THEN
+                                 -- Stock is 'un', 'cx', etc.
+                                 IF r_ingredient.unit_weight > 0 THEN
+                                     v_qty_to_restore := v_qty_to_restore / r_ingredient.unit_weight;
+                                 END IF;
+                            END IF;
+                        ELSIF v_usage_unit = 'un' THEN
+                            IF v_stock_unit IN ('kg', 'l') THEN
+                                 -- Convert Unit -> Grams -> KG
+                                 v_qty_to_restore := (v_qty_to_restore * r_ingredient.unit_weight) / 1000.0;
+                            ELSIF v_stock_unit IN ('g', 'ml') THEN
+                                 -- Convert Unit -> Grams
+                                 v_qty_to_restore := v_qty_to_restore * r_ingredient.unit_weight;
+                            END IF;
+                        ELSIF v_usage_unit IN ('kg', 'l') THEN
+                             IF v_stock_unit IN ('g', 'ml') THEN
+                                 v_qty_to_restore := v_qty_to_restore * 1000.0;
+                             END IF;
+                        END IF;
                         
                         -- Revert Dynamic (INGREDIENT)
                         UPDATE product_stocks 
@@ -373,13 +401,29 @@ BEGIN
                         v_stock_unit := lower(r_ingredient.unit);
                         v_usage_unit := lower(v_item.unit);
                         v_qty_to_restore := v_total_used;
-                        if (v_stock_unit = 'un' or v_stock_unit = 'saco' or v_stock_unit = 'cx') and (v_usage_unit = 'g' or v_usage_unit = 'ml') then
-                           if r_ingredient.unit_weight > 0 then v_qty_to_restore := v_total_used / r_ingredient.unit_weight; end if;
-                        elsif (v_stock_unit = 'kg' and v_usage_unit = 'g') or (v_stock_unit = 'l' and v_usage_unit = 'ml') then
-                            v_qty_to_restore := v_total_used / 1000;
-                        elsif (v_stock_unit = 'g' and v_usage_unit = 'kg') or (v_stock_unit = 'ml' and v_usage_unit = 'l') then
-                            v_qty_to_restore := v_total_used * 1000;
-                        end if;
+                        -- Unified Conversion Logic
+                        IF v_usage_unit IN ('g', 'ml') THEN
+                            IF v_stock_unit IN ('kg', 'l') THEN
+                                v_qty_to_restore := v_qty_to_restore / 1000.0;
+                            ELSIF v_stock_unit NOT IN ('g', 'ml') AND v_stock_unit != v_usage_unit THEN
+                                 -- Stock is 'un', 'cx', etc.
+                                 IF r_ingredient.unit_weight > 0 THEN
+                                     v_qty_to_restore := v_qty_to_restore / r_ingredient.unit_weight;
+                                 END IF;
+                            END IF;
+                        ELSIF v_usage_unit = 'un' THEN
+                            IF v_stock_unit IN ('kg', 'l') THEN
+                                 -- Convert Unit -> Grams -> KG
+                                 v_qty_to_restore := (v_qty_to_restore * r_ingredient.unit_weight) / 1000.0;
+                            ELSIF v_stock_unit IN ('g', 'ml') THEN
+                                 -- Convert Unit -> Grams
+                                 v_qty_to_restore := v_qty_to_restore * r_ingredient.unit_weight;
+                            END IF;
+                        ELSIF v_usage_unit IN ('kg', 'l') THEN
+                             IF v_stock_unit IN ('g', 'ml') THEN
+                                 v_qty_to_restore := v_qty_to_restore * 1000.0;
+                             END IF;
+                        END IF;
                         
                         -- Dynamic (INGREDIENT)
                         UPDATE product_stocks SET quantity = quantity + v_qty_to_restore 
