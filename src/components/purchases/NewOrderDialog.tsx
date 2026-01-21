@@ -181,9 +181,9 @@ export function NewOrderDialog({
                             )}
                         </div>
 
-                        <div className="grid grid-cols-12 gap-2 items-end">
-                            <div className="space-y-1 col-span-3">
-                                <Label className="text-[10px]">Produto</Label>
+                        <div className="grid grid-cols-2 md:grid-cols-12 gap-3 md:gap-2 items-end">
+                            <div className="space-y-1 col-span-2 md:col-span-3">
+                                <Label className="text-xs md:text-[10px]">Produto</Label>
                                 <div className="flex gap-1">
                                     <Select value={draftItem.ingredient_id || 'custom'} onValueChange={(val) => {
                                         if (val === 'custom') setDraftItem({ ...draftItem, ingredient_id: undefined, item_name: '' });
@@ -192,45 +192,45 @@ export function NewOrderDialog({
                                             setDraftItem({ ...draftItem, ingredient_id: val, item_name: i?.name || '', unit: i?.unit || 'un' });
                                         }
                                     }}>
-                                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                        <SelectTrigger className="h-9 md:h-8"><SelectValue /></SelectTrigger>
                                         <SelectContent><SelectItem value="custom">Escolha o produto</SelectItem>{ingredients.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
                                     </Select>
-                                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={onNewProduct}><Plus className="h-3 w-3" /></Button>
+                                    <Button size="icon" variant="ghost" className="h-9 w-9 md:h-8 md:w-8" onClick={onNewProduct}><Plus className="h-4 w-4 md:h-3 md:w-3" /></Button>
                                 </div>
                             </div>
-                            <div className="space-y-1 col-span-2">
-                                <Label className="text-[10px]">Qtd</Label>
+                            <div className="space-y-1 col-span-1 md:col-span-2">
+                                <Label className="text-xs md:text-[10px]">Qtd</Label>
                                 <div className="flex items-center gap-1">
-                                    <Input className="h-8" type="number" value={draftItem.quantity || ''} onChange={e => onQtyChange(Number(e.target.value))} />
+                                    <Input className="h-9 md:h-8" type="number" value={draftItem.quantity || ''} onChange={e => onQtyChange(Number(e.target.value))} />
                                     <span className="text-xs text-zinc-500 font-medium w-6">{draftItem.unit}</span>
                                 </div>
                             </div>
-                            <div className="space-y-1 col-span-2">
-                                <Label className="text-[10px]">Vlr. Unit R$</Label>
-                                <Input className="h-8" type="number" value={unitCost || ''} onChange={e => onUnitCostChange(Number(e.target.value))} />
+                            <div className="space-y-1 col-span-1 md:col-span-2">
+                                <Label className="text-xs md:text-[10px]">Vlr. Unit R$</Label>
+                                <Input className="h-9 md:h-8" type="number" value={unitCost || ''} onChange={e => onUnitCostChange(Number(e.target.value))} />
                             </div>
-                            <div className="space-y-1 col-span-2">
-                                <Label className="text-[10px]">Total R$</Label>
-                                <Input className="h-8" type="number" value={draftItem.cost || ''} onChange={e => onTotalCostChange(Number(e.target.value))} />
+                            <div className="space-y-1 col-span-1 md:col-span-2">
+                                <Label className="text-xs md:text-[10px]">Total R$</Label>
+                                <Input className="h-9 md:h-8" type="number" value={draftItem.cost || ''} onChange={e => onTotalCostChange(Number(e.target.value))} />
                             </div>
-                            <div className="space-y-1 col-span-2">
-                                <Label className="text-[10px]">Destino</Label>
+                            <div className="space-y-1 col-span-1 md:col-span-2">
+                                <Label className="text-xs md:text-[10px]">Destino</Label>
                                 <Select value={draftItem.destination} onValueChange={(val: any) => setDraftItem({ ...draftItem, destination: val })}>
-                                    <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                    <SelectTrigger className="h-9 md:h-8"><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="danilo">Danilo</SelectItem>
                                         <SelectItem value="adriel">Adriel</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <div className="space-y-1 col-span-1">
+                            <div className="space-y-1 col-span-2 md:col-span-1 pt-2 md:pt-0">
                                 <Button
                                     onClick={handleAddItem}
-                                    className={`h-8 w-full ${editIndex >= 0 ? 'bg-amber-600 hover:bg-amber-700' : ''}`}
+                                    className={`h-9 md:h-8 w-full ${editIndex >= 0 ? 'bg-amber-600 hover:bg-amber-700' : ''}`}
                                     variant={editIndex >= 0 ? 'default' : 'secondary'}
                                     title={editIndex >= 0 ? "Atualizar" : "Adicionar"}
                                 >
-                                    {editIndex >= 0 ? <Save className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                                    {editIndex >= 0 ? <span className="flex items-center gap-2"><Save className="h-3 w-3" /> <span className="md:hidden">Salvar Edição</span></span> : <span className="flex items-center gap-2"><Plus className="h-3 w-3" /> <span className="md:hidden">Adicionar Item</span></span>}
                                 </Button>
                             </div>
                         </div>
