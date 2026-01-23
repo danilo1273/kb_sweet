@@ -5,10 +5,107 @@ import { useNavigate } from 'react-router-dom';
 import { useBanking, BankAccountWithBalance } from '@/hooks/useBanking';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-// ... imports
-import { ChevronDown, ChevronUp } from "lucide-react"; // Add these to imports
+import { Plus, Building2, ChevronLeft, Calendar as CalendarIcon, ArrowUpCircle, ArrowDownCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-// ... existing code ...
+import { FinancialMovement } from '@/types';
+
+export default function Banking() {
+    const { accounts, fetchAccounts, createAccount, addTransaction, fetchStatement, loading } = useBanking();
+    const [selectedAccount, setSelectedAccount] = useState<BankAccountWithBalance | null>(null);
+
+    useEffect(() => {
+        fetchAccounts();
+    }, [fetchAccounts]);
+
+    return (
+        <div className="p-6 space-y-6">
+            {!selectedAccount ? (
+                <BankSelection accounts={accounts} onSelect={setSelectedAccount} onCreate={createAccount} />
+            ) : (
+                <BankStatement
+                    account={selectedAccount}
+                    onBack={() => { setSelectedAccount(null); fetchAccounts(); }}
+                    fetchStatement={fetchStatement}
+                    onAddTransaction={async (type, val, desc, cat, date) => {
+                        await addTransaction(selectedAccount.id, type, val, desc, cat, date);
+                    }}
+                    loading={loading}
+                />
+            )}
+        </div>
+    );
+}
+
+function BankSelection({ accounts, onSelect, onCreate }: { accounts: BankAccountWithBalance[], onSelect: (a: BankAccountWithBalance) => void, onCreate: any }) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [newName, setNewName] = useState("");
+    const [newInitial, setNewInitial] = useState("0");
+
+    const handleCreate = async () => {
+        await onCreate(newName, Number(newInitial));
+        setIsOpen(false);
+        setNewName("");
+        setNewInitial("0");
+    };
+
+    return (
+        <>
+            <div className="flex justify-between items-center mb-6">
+                <div>
+                    <h2 className="text-3xl font-bold tracking-tight">Contas Bancárias</h2>
+                    <p className="text-zinc-500">Gerencie seus saldos e extratos.</p>
+                </div>
+                <Button onClick={() => setIsOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" /> Nova Conta
+                </Button>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {accounts.map(acc => (
+                    <Card key={acc.id} className="hover:shadow-lg transition-all cursor-pointer border-l-4 border-l-indigo-500" onClick={() => onSelect(acc)}>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">
+                                {acc.name}
+                            </CardTitle>
+                            <Building2 className="h-4 w-4 text-zinc-500" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">
+                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(acc.calculated_balance)}
+                            </div>
+                            <p className="text-xs text-zinc-500">Saldo Atual</p>
+                        </CardContent>
+                    </Card>
+                ))}
+            </div>
+
+            <Dialog open={isOpen} onOpenChange={setIsOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Nova Conta Bancária</DialogTitle>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                        <div className="grid gap-2">
+                            <Label>Nome do Banco/Conta</Label>
+                            <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ex: Nubank, Caixa..." />
+                        </div>
+                        <div className="grid gap-2">
+                            <Label>Saldo Inicial (R$)</Label>
+                            <Input type="number" value={newInitial} onChange={e => setNewInitial(e.target.value)} />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button onClick={handleCreate}>Criar Conta</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
+    );
+}
 
 function BankStatement({ account, onBack, fetchStatement, onAddTransaction, loading }: {
     account: BankAccountWithBalance,
@@ -100,6 +197,18 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
         setDescription(""); setAmount(""); setCategory("Tarifa Bancária");
     };
 
+    // Safety helper for dates
+    const safeDate = (dateStr: string | null | undefined): Date => {
+        try {
+            if (!dateStr) return new Date();
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return new Date();
+            return d;
+        } catch {
+            return new Date();
+        }
+    };
+
     const periodLabel = new Date(year, month, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
     // --- GROUPING LOGIC ---
@@ -107,77 +216,86 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
     // 2. Then Group the results by Date
 
     const { dailyGroups, sortedDailyKeys } = (() => {
-        const batchGrouped: any[] = [];
-        const purchaseOrderGroups: Record<string, any> = {};
-        const salesDateGroups: Record<string, any> = {};
+        try {
+            const batchGrouped: any[] = [];
+            const purchaseOrderGroups: Record<string, any> = {};
+            const salesDateGroups: Record<string, any> = {};
 
-        // Sort by date desc first
-        const sortedRaw = [...movements].sort((a, b) => {
-            return new Date(b.payment_date || b.created_at).getTime() - new Date(a.payment_date || a.created_at).getTime();
-        });
+            // Sort by date desc first
+            const sortedRaw = [...movements].sort((a, b) => {
+                const dA = safeDate(a.payment_date || a.created_at).getTime();
+                const dB = safeDate(b.payment_date || b.created_at).getTime();
+                return dB - dA;
+            });
 
-        sortedRaw.forEach((m: any) => {
-            // Group Purchases
-            if (m.order_id) {
-                if (!purchaseOrderGroups[m.order_id]) {
-                    const group = {
-                        ...m,
-                        isGroup: true,
-                        groupType: 'purchase',
-                        items: [m],
-                        totalAmount: Number(m.amount),
-                        description: `Lote: ${m.order_nickname || 'Compra #' + m.order_id.toString().slice(0, 4)}`
-                    };
-                    purchaseOrderGroups[m.order_id] = group;
-                    batchGrouped.push(group);
-                } else {
-                    purchaseOrderGroups[m.order_id].items.push(m);
-                    purchaseOrderGroups[m.order_id].totalAmount += Number(m.amount);
+            sortedRaw.forEach((m: any) => {
+                // Safety check for m
+                if (!m) return;
+
+                // Group Purchases
+                if (m.order_id) {
+                    if (!purchaseOrderGroups[m.order_id]) {
+                        const group = {
+                            ...m,
+                            isGroup: true,
+                            groupType: 'purchase',
+                            items: [m],
+                            totalAmount: Number(m.amount) || 0,
+                            description: `Lote: ${m.order_nickname || 'Compra #' + (m.order_id?.toString().slice(0, 4) || '???')}`
+                        };
+                        purchaseOrderGroups[m.order_id] = group;
+                        batchGrouped.push(group);
+                    } else {
+                        purchaseOrderGroups[m.order_id].items.push(m);
+                        purchaseOrderGroups[m.order_id].totalAmount += (Number(m.amount) || 0);
+                    }
+                    return;
                 }
-                return;
-            }
 
-            // Group Sales PDV (Keep strict grouping by exact second/batch or just same day sales?)
-            // User requested "Group by days" generally.
-            // Let's keep specific sales ungrouped if they are individual, but group "Venda PDV" generic strings?
-            // Actually, keep the virtual grouping for "Venda PDV" batch if it exists.
-            if (m.related_sale_id && m.description?.startsWith('Venda PDV')) { // Assuming we still want to group these?
-                const dateKey = new Date(m.payment_date || m.created_at).toISOString().split('T')[0];
-                if (!salesDateGroups[dateKey]) {
-                    const group = {
-                        ...m,
-                        id: `sales-group-${dateKey}`,
-                        isGroup: true,
-                        groupType: 'sales',
-                        items: [m],
-                        totalAmount: Number(m.amount),
-                        description: `Lote: Vendas PDV (${new Date(dateKey).toLocaleDateString('pt-BR')})`,
-                        payment_date: m.payment_date || m.created_at
-                    };
-                    salesDateGroups[dateKey] = group;
-                    batchGrouped.push(group);
-                } else {
-                    salesDateGroups[dateKey].items.push(m);
-                    salesDateGroups[dateKey].totalAmount += Number(m.amount);
+                // Group Sales PDV
+                if (m.related_sale_id && m.description?.startsWith('Venda PDV')) {
+                    const d = safeDate(m.payment_date || m.created_at);
+                    const dateKey = d.toISOString().split('T')[0];
+
+                    if (!salesDateGroups[dateKey]) {
+                        const group = {
+                            ...m,
+                            id: `sales-group-${dateKey}`,
+                            isGroup: true,
+                            groupType: 'sales',
+                            items: [m],
+                            totalAmount: Number(m.amount) || 0,
+                            description: `Lote: Vendas PDV (${d.toLocaleDateString('pt-BR')})`,
+                            payment_date: m.payment_date || m.created_at
+                        };
+                        salesDateGroups[dateKey] = group;
+                        batchGrouped.push(group);
+                    } else {
+                        salesDateGroups[dateKey].items.push(m);
+                        salesDateGroups[dateKey].totalAmount += (Number(m.amount) || 0);
+                    }
+                    return;
                 }
-                return;
-            }
 
-            batchGrouped.push(m);
-        });
+                batchGrouped.push(m);
+            });
 
-        // Now Group by Day
-        const dailyGroups: Record<string, any[]> = {};
-        batchGrouped.forEach(item => {
-            const dateVal = new Date(item.payment_date || item.created_at);
-            const dateKey = dateVal.toISOString().split('T')[0]; // YYYY-MM-DD
-            if (!dailyGroups[dateKey]) dailyGroups[dateKey] = [];
-            dailyGroups[dateKey].push(item);
-        });
+            // Now Group by Day
+            const dailyGroups: Record<string, any[]> = {};
+            batchGrouped.forEach(item => {
+                const dateVal = safeDate(item.payment_date || item.created_at);
+                const dateKey = dateVal.toISOString().split('T')[0]; // YYYY-MM-DD
+                if (!dailyGroups[dateKey]) dailyGroups[dateKey] = [];
+                dailyGroups[dateKey].push(item);
+            });
 
-        const sortedDailyKeys = Object.keys(dailyGroups).sort((a, b) => b.localeCompare(a)); // Newest date first
+            const sortedDailyKeys = Object.keys(dailyGroups).sort((a, b) => b.localeCompare(a)); // Newest date first
 
-        return { dailyGroups, sortedDailyKeys };
+            return { dailyGroups, sortedDailyKeys };
+        } catch (err) {
+            console.error("Group Logic Crash:", err);
+            return { dailyGroups: {}, sortedDailyKeys: [] };
+        }
     })();
 
     const toggleDay = (dateKey: string) => {
