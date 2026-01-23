@@ -351,7 +351,7 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
                     ) : (
                         sortedDailyKeys.map(dateKey => {
                             const items = dailyGroups[dateKey];
-                            const isExpanded = expandedDays[dateKey] ?? true; // Default open
+                            const isExpanded = expandedDays[dateKey] ?? false; // Default closed (except explicitly opened)
 
                             // Day Totals
                             const dayTotal = items.reduce((acc: number, m: any) => {
