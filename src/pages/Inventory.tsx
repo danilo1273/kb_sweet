@@ -604,14 +604,14 @@ export default function Inventory() {
 
     return (
         <div className="flex-1 p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <h2 className="text-3xl font-bold tracking-tight">Estoque de Ingredientes</h2>
-                <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => navigate('/stock-history')}>
+                <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
+                    <Button variant="outline" onClick={() => navigate('/stock-history')} className="w-full md:w-auto">
                         <History className="mr-2 h-4 w-4" /> Histórico Global
                     </Button>
                     {isAdmin && (
-                        <Button variant="outline" onClick={() => setIsAuditOpen(true)} className="text-blue-700 bg-blue-50 border-blue-200">
+                        <Button variant="outline" onClick={() => setIsAuditOpen(true)} className="text-blue-700 bg-blue-50 border-blue-200 w-full md:w-auto">
                             <ClipboardCheck className="mr-2 h-4 w-4" /> Realizar Inventário
                         </Button>
                     )}
