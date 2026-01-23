@@ -68,39 +68,45 @@ export default function POS() {
     }, []);
 
     async function loadData() {
-        // Fetch Locations
-        const { data: locData } = await supabase.from('stock_locations').select('id, name, slug').order('created_at');
-        if (locData) {
-            setStockLocations(locData);
-            // Default to Danilo or first one
-            const def = locData.find(l => l.slug === 'stock-danilo') || locData[0];
-            if (def && !stockSource) setStockSource(def.id);
-            // If stockSource is already set (legacy 'danilo' string?), we should map it if possible, 
-            // but for now let's reset to valid ID if current value is definitely invalid UUID.
-            // Actually, we'll handle the type change of stockSource below.
+        try {
+            // Fetch Locations
+            const { data: locData } = await supabase.from('stock_locations').select('id, name, slug').order('created_at');
+            if (locData) {
+                setStockLocations(locData);
+                // Default to Danilo or first one
+                const def = locData.find(l => l.slug === 'stock-danilo') || locData[0];
+                if (def && !stockSource) setStockSource(def.id);
+            }
+
+            const { data: prodData, error: prodError } = await supabase.from('products')
+                .select(`
+                    *, 
+                    cost_danilo,
+                    cost_adriel, 
+                    product_stocks (
+                        quantity,
+                        location_id,
+                        average_cost
+                    )
+                `)
+                .neq('type', 'intermediate') // Optimize: Don't load ingredients if POS doesn't sell them
+                .order('name');
+
+            if (prodError) throw prodError;
+
+            const { data: clientData } = await supabase.from('clients').select('id, name').order('name');
+            setProducts(prodData || []);
+            setClients(clientData || []);
+        } catch (error) {
+            console.error("Failed to load POS data:", error);
+            toast({ variant: 'destructive', title: "Erro ao carregar dados", description: "Tente recarregar a página." });
         }
-
-        const { data: prodData } = await supabase.from('products')
-            .select(`
-                *, 
-                cost_danilo,
-                cost_adriel, 
-                product_stocks (
-                    quantity,
-                    location_id,
-                    average_cost
-                )
-            `)
-            .order('name');
-
-        const { data: clientData } = await supabase.from('clients').select('id, name').order('name');
-        setProducts(prodData || []);
-        setClients(clientData || []);
     }
 
     const filteredProducts = products.filter(p => {
         if (!searchTerm) return false;
-        return p.name.toLowerCase().includes(searchTerm.toLowerCase());
+        const name = p.name || '';
+        return name.toLowerCase().includes(searchTerm.toLowerCase());
     });
 
     // --- Actions ---
