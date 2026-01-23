@@ -5,108 +5,10 @@ import { useNavigate } from 'react-router-dom';
 import { useBanking, BankAccountWithBalance } from '@/hooks/useBanking';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Plus, Building2, ChevronLeft, Calendar as CalendarIcon, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+// ... imports
+import { ChevronDown, ChevronUp } from "lucide-react"; // Add these to imports
 
-import { FinancialMovement } from '@/types';
-
-export default function Banking() {
-    const { accounts, fetchAccounts, createAccount, addTransaction, fetchStatement, loading } = useBanking();
-    const [selectedAccount, setSelectedAccount] = useState<BankAccountWithBalance | null>(null);
-
-    useEffect(() => {
-        fetchAccounts();
-    }, [fetchAccounts]);
-
-    return (
-        <div className="p-6 space-y-6">
-            {!selectedAccount ? (
-                <BankSelection accounts={accounts} onSelect={setSelectedAccount} onCreate={createAccount} />
-            ) : (
-                <BankStatement
-                    account={selectedAccount}
-                    onBack={() => { setSelectedAccount(null); fetchAccounts(); }}
-                    fetchStatement={fetchStatement}
-                    onAddTransaction={async (type, val, desc, cat, date) => {
-                        await addTransaction(selectedAccount.id, type, val, desc, cat, date);
-                        // Refresh logic handled inside component usually or trigger refetch
-                    }}
-                    loading={loading}
-                />
-            )}
-        </div>
-    );
-}
-
-function BankSelection({ accounts, onSelect, onCreate }: { accounts: BankAccountWithBalance[], onSelect: (a: BankAccountWithBalance) => void, onCreate: any }) {
-    const [isOpen, setIsOpen] = useState(false);
-    const [newName, setNewName] = useState("");
-    const [newInitial, setNewInitial] = useState("0");
-
-    const handleCreate = async () => {
-        await onCreate(newName, Number(newInitial));
-        setIsOpen(false);
-        setNewName("");
-        setNewInitial("0");
-    };
-
-    return (
-        <>
-            <div className="flex justify-between items-center mb-6">
-                <div>
-                    <h2 className="text-3xl font-bold tracking-tight">Contas Bancárias</h2>
-                    <p className="text-zinc-500">Gerencie seus saldos e extratos.</p>
-                </div>
-                <Button onClick={() => setIsOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" /> Nova Conta
-                </Button>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {accounts.map(acc => (
-                    <Card key={acc.id} className="hover:shadow-lg transition-all cursor-pointer border-l-4 border-l-indigo-500" onClick={() => onSelect(acc)}>
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium">
-                                {acc.name}
-                            </CardTitle>
-                            <Building2 className="h-4 w-4 text-zinc-500" />
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-2xl font-bold">
-                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(acc.calculated_balance)}
-                            </div>
-                            <p className="text-xs text-zinc-500">Saldo Atual</p>
-                        </CardContent>
-                    </Card>
-                ))}
-            </div>
-
-            <Dialog open={isOpen} onOpenChange={setIsOpen}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Nova Conta Bancária</DialogTitle>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                        <div className="grid gap-2">
-                            <Label>Nome do Banco/Conta</Label>
-                            <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ex: Nubank, Caixa..." />
-                        </div>
-                        <div className="grid gap-2">
-                            <Label>Saldo Inicial (R$)</Label>
-                            <Input type="number" value={newInitial} onChange={e => setNewInitial(e.target.value)} />
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button onClick={handleCreate}>Criar Conta</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-        </>
-    );
-}
+// ... existing code ...
 
 function BankStatement({ account, onBack, fetchStatement, onAddTransaction, loading }: {
     account: BankAccountWithBalance,
@@ -125,6 +27,9 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
     const [selectedBatch, setSelectedBatch] = useState<any>(null);
     const [isBatchOpen, setIsBatchOpen] = useState(false);
 
+    // Expanded Days State (for mobile grouping)
+    const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
+
     // Manual Entry State
     const [type, setType] = useState<'income' | 'expense'>('expense');
     const [amount, setAmount] = useState("");
@@ -133,52 +38,55 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
     const load = async () => {
-        const start = new Date(year, month, 1).toISOString();
-        const end = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
-        const data = await fetchStatement(account.id, start, end);
+        try {
+            const start = new Date(year, month, 1).toISOString();
+            const end = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
+            const data = await fetchStatement(account.id, start, end);
 
-        // Calculate Running Balance? 
-        // Note: Ideally we need the balance at start of month.
-        // For simplified MVP, we might just show transactions. 
-        // Or we calculate backwards from current balance? 
-        // Or we assume `account.calculated_balance` is TODAY.
-        // It's tricky to show historical running balance without a snapshot system.
-        // Let's just list transactions for now.
-        // Enrich with Sales Data (Client Name + Products)
-        const saleIds = data?.map((m: any) => m.related_sale_id).filter(Boolean) || [];
+            // Enrich with Sales Data (Client Name + Products)
+            const saleIds = data?.map((m: any) => m.related_sale_id).filter(Boolean) || [];
 
-        let enrichedData = data || [];
+            let enrichedData = data || [];
 
-        if (saleIds.length > 0) {
-            const { data: sales } = await supabase
-                .from('sales')
-                .select('id, client_id, clients(name), sale_items(quantity, products(name))')
-                .in('id', saleIds);
+            if (saleIds.length > 0) {
+                const { data: sales } = await supabase
+                    .from('sales')
+                    .select('id, client_id, clients(name), sale_items(quantity, products(name))')
+                    .in('id', saleIds);
 
-            if (sales) {
-                enrichedData = enrichedData.map((m: any) => {
-                    if (m.related_sale_id) {
-                        const sale = sales.find((s: any) => s.id === m.related_sale_id);
-                        if (sale) {
-                            const clientName = (sale.clients as any)?.name || 'Consumidor Final';
-                            const itemsSummary = (sale.sale_items as any[])?.map((i: any) => {
-                                const prodName = i.products?.name || 'Item';
-                                return `${i.quantity}x ${prodName}`;
-                            }).join(', ');
+                if (sales) {
+                    enrichedData = enrichedData.map((m: any) => {
+                        if (m.related_sale_id) {
+                            const sale = sales.find((s: any) => s.id === m.related_sale_id);
+                            if (sale) {
+                                const clientName = (sale.clients as any)?.name || 'Consumidor Final';
+                                const itemsSummary = (sale.sale_items as any[])?.map((i: any) => {
+                                    const prodName = i.products?.name || 'Item';
+                                    return `${i.quantity}x ${prodName}`;
+                                }).join(', ');
 
-                            const desc = `${clientName} - ${itemsSummary || 'Sem itens'}`;
-                            return {
-                                ...m,
-                                description: desc.length > 60 ? desc.substring(0, 60) + '...' : desc
-                            };
+                                const desc = `${clientName} - ${itemsSummary || 'Sem itens'}`;
+                                return {
+                                    ...m,
+                                    description: desc.length > 60 ? desc.substring(0, 60) + '...' : desc
+                                };
+                            }
                         }
-                    }
-                    return m;
-                });
+                        return m;
+                    });
+                }
             }
-        }
 
-        setMovements(enrichedData);
+            setMovements(enrichedData);
+
+            // Auto expand today
+            const todayKey = new Date().toISOString().split('T')[0];
+            setExpandedDays(prev => ({ ...prev, [todayKey]: true }));
+
+        } catch (err) {
+            console.error("Error loading statement:", err);
+            // Optionally toast error
+        }
     };
 
     useEffect(() => { load(); }, [month, year, account.id]);
@@ -194,20 +102,22 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
 
     const periodLabel = new Date(year, month, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
-    // Sorting: Newest first
-    const sortedMovements = [...movements].sort((a, b) => {
-        const da = new Date(a.payment_date || a.created_at).getTime();
-        const db = new Date(b.payment_date || b.created_at).getTime();
-        return db - da;
-    });
+    // --- GROUPING LOGIC ---
+    // 1. Group by Batch first (same as before)
+    // 2. Then Group the results by Date
 
-    const groupedMovements = (() => {
-        const grouped: any[] = [];
+    const { dailyGroups, sortedDailyKeys } = (() => {
+        const batchGrouped: any[] = [];
         const purchaseOrderGroups: Record<string, any> = {};
         const salesDateGroups: Record<string, any> = {};
 
-        sortedMovements.forEach((m: any) => {
-            // Group Purchases by Order ID (existing logic)
+        // Sort by date desc first
+        const sortedRaw = [...movements].sort((a, b) => {
+            return new Date(b.payment_date || b.created_at).getTime() - new Date(a.payment_date || a.created_at).getTime();
+        });
+
+        sortedRaw.forEach((m: any) => {
+            // Group Purchases
             if (m.order_id) {
                 if (!purchaseOrderGroups[m.order_id]) {
                     const group = {
@@ -216,10 +126,10 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
                         groupType: 'purchase',
                         items: [m],
                         totalAmount: Number(m.amount),
-                        description: `Lote: ${m.order_nickname || 'Compra'}`
+                        description: `Lote: ${m.order_nickname || 'Compra #' + m.order_id.toString().slice(0, 4)}`
                     };
                     purchaseOrderGroups[m.order_id] = group;
-                    grouped.push(group);
+                    batchGrouped.push(group);
                 } else {
                     purchaseOrderGroups[m.order_id].items.push(m);
                     purchaseOrderGroups[m.order_id].totalAmount += Number(m.amount);
@@ -227,22 +137,25 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
                 return;
             }
 
-            // Group "Venda PDV" / Sales by Date
-            if (m.related_sale_id || m.description?.startsWith('Venda PDV')) {
+            // Group Sales PDV (Keep strict grouping by exact second/batch or just same day sales?)
+            // User requested "Group by days" generally.
+            // Let's keep specific sales ungrouped if they are individual, but group "Venda PDV" generic strings?
+            // Actually, keep the virtual grouping for "Venda PDV" batch if it exists.
+            if (m.related_sale_id && m.description?.startsWith('Venda PDV')) { // Assuming we still want to group these?
                 const dateKey = new Date(m.payment_date || m.created_at).toISOString().split('T')[0];
                 if (!salesDateGroups[dateKey]) {
                     const group = {
                         ...m,
-                        id: `sales-group-${dateKey}`, // virtual ID
+                        id: `sales-group-${dateKey}`,
                         isGroup: true,
                         groupType: 'sales',
                         items: [m],
                         totalAmount: Number(m.amount),
                         description: `Lote: Vendas PDV (${new Date(dateKey).toLocaleDateString('pt-BR')})`,
-                        payment_date: m.payment_date || m.created_at // Keep date for sorting/display
+                        payment_date: m.payment_date || m.created_at
                     };
                     salesDateGroups[dateKey] = group;
-                    grouped.push(group);
+                    batchGrouped.push(group);
                 } else {
                     salesDateGroups[dateKey].items.push(m);
                     salesDateGroups[dateKey].totalAmount += Number(m.amount);
@@ -250,167 +163,157 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
                 return;
             }
 
-            // Standalone items
-            grouped.push(m);
+            batchGrouped.push(m);
         });
 
-        // Re-sort grouped items because grouping might have messed order slightly if not careful
-        // (Though pushing in order usually preserves it, but date grouping might need care)
-        return grouped.sort((a, b) => {
-            const da = new Date(a.payment_date || a.created_at).getTime();
-            const db = new Date(b.payment_date || b.created_at).getTime();
-            return db - da;
+        // Now Group by Day
+        const dailyGroups: Record<string, any[]> = {};
+        batchGrouped.forEach(item => {
+            const dateVal = new Date(item.payment_date || item.created_at);
+            const dateKey = dateVal.toISOString().split('T')[0]; // YYYY-MM-DD
+            if (!dailyGroups[dateKey]) dailyGroups[dateKey] = [];
+            dailyGroups[dateKey].push(item);
         });
+
+        const sortedDailyKeys = Object.keys(dailyGroups).sort((a, b) => b.localeCompare(a)); // Newest date first
+
+        return { dailyGroups, sortedDailyKeys };
     })();
 
+    const toggleDay = (dateKey: string) => {
+        setExpandedDays(prev => ({ ...prev, [dateKey]: !prev[dateKey] }));
+    };
+
     return (
-        <div className="space-y-6">
-            <div className="flex items-center gap-4">
-                <Button variant="ghost" size="icon" onClick={onBack}>
-                    <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <div>
-                    <h2 className="text-2xl font-bold">{account.name}</h2>
-                    <p className="text-zinc-500">Saldo Atual: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(account.calculated_balance)}</p>
+        <div className="space-y-4 md:space-y-6 pb-20 md:pb-0">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                    <Button variant="ghost" size="icon" onClick={onBack} className="-ml-2">
+                        <ChevronLeft className="h-5 w-5" />
+                    </Button>
+                    <div>
+                        <h2 className="text-xl md:text-2xl font-bold line-clamp-1">{account.name}</h2>
+                        <p className="text-zinc-500 text-sm">
+                            Saldo: <span className="font-semibold text-zinc-900">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(account.calculated_balance)}</span>
+                        </p>
+                    </div>
                 </div>
             </div>
 
-            <div className="flex justify-between items-center bg-white p-4 rounded-lg border shadow-sm">
-                <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => {
+            {/* Actions Bar */}
+            <div className="flex flex-col md:flex-row gap-3 justify-between items-center bg-white p-3 md:p-4 rounded-lg border shadow-sm sticky top-0 md:relative z-10">
+                <div className="flex w-full md:w-auto justify-between items-center gap-2">
+                    <Button variant="outline" size="icon" onClick={() => {
                         if (month === 0) { setMonth(11); setYear(y => y - 1); } else { setMonth(m => m - 1); }
-                    }}>Previous</Button>
-                    <div className="flex items-center gap-2 font-medium w-40 justify-center capitalize">
-                        <CalendarIcon className="h-4 w-4" /> {periodLabel}
+                    }}><ChevronLeft className="h-4 w-4" /></Button>
+
+                    <div className="flex items-center gap-2 font-medium capitalize text-sm md:text-base">
+                        <CalendarIcon className="h-4 w-4 text-zinc-400" /> {periodLabel}
                     </div>
-                    <Button variant="outline" size="sm" onClick={() => {
+
+                    <Button variant="outline" size="icon" onClick={() => {
                         if (month === 11) { setMonth(0); setYear(y => y + 1); } else { setMonth(m => m + 1); }
-                    }}>Next</Button>
+                    }}> <div className="rotate-180"><ChevronLeft className="h-4 w-4" /></div> </Button>
                 </div>
 
-                <Button onClick={() => setIsAddOpen(true)}>
+                <Button className="w-full md:w-auto" onClick={() => setIsAddOpen(true)}>
                     <Plus className="mr-2 h-4 w-4" /> Novo Lançamento
                 </Button>
             </div>
 
-            <Card>
-                <CardContent className="p-0">
-                    <div className="relative w-full overflow-auto">
-                        {/* Desktop Table View */}
-                        <div className="hidden md:block">
-                            <table className="w-full caption-bottom text-sm text-left">
-                                <thead className="[&_tr]:border-b">
-                                    <tr className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted">
-                                        <th className="h-12 px-4 align-middle font-medium text-muted-foreground w-[100px]">Data</th>
-                                        <th className="h-12 px-4 align-middle font-medium text-muted-foreground">Descrição</th>
-                                        <th className="h-12 px-4 align-middle font-medium text-muted-foreground text-right">Valor</th>
-                                        <th className="h-12 px-4 align-middle font-medium text-muted-foreground w-[50px]">Tipo</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="[&_tr:last-child]:border-0">
-                                    {groupedMovements.length === 0 ? (
-                                        <tr><td colSpan={4} className="p-8 text-center text-zinc-500">Nenhum lançamento neste período.</td></tr>
-                                    ) : (
-                                        groupedMovements.map((m: any) => {
-                                            const isGroup = m.isGroup;
-                                            const dateStr = new Date(m.payment_date || m.created_at).toLocaleDateString('pt-BR');
-                                            const amountVal = isGroup ? m.totalAmount : Number(m.amount);
-                                            const key = isGroup ? 'group-' + m.order_id : m.id;
+            {/* Content List */}
+            <Card className="border-none shadow-none bg-transparent">
+                <CardContent className="p-0 space-y-4">
 
-                                            return isGroup ? (
-                                                <tr key={key} className="border-b transition-colors hover:bg-muted/50 bg-slate-50/50">
-                                                    <td className="p-4 align-middle font-medium">{dateStr}</td>
-                                                    <td className="p-4 align-middle">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-semibold text-slate-700">{m.description}</span>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="sm"
-                                                                className="h-6 text-xs text-blue-600 hover:text-blue-800"
-                                                                onClick={() => {
-                                                                    if (m.groupType === 'purchase') {
-                                                                        // navigate(`/purchases?openOrder=${m.order_id}`) // Old behavior
-                                                                        setSelectedBatch(m);
-                                                                        setIsBatchOpen(true);
-                                                                    } else {
-                                                                        setSelectedBatch(m);
-                                                                        setIsBatchOpen(true);
-                                                                    }
-                                                                }}
-                                                            >
-                                                                (Visualizar)
-                                                            </Button>
-                                                        </div>
-                                                        <div className="text-xs text-slate-500 pl-1">
-                                                            {m.items.length} itens agrupados
-                                                        </div>
-                                                    </td>
-                                                    <td className={`p-4 align-middle text-right font-bold ${m.groupType === 'sales' ? 'text-green-600' : 'text-red-600'}`}>
-                                                        {m.groupType === 'sales' ? '+ ' : '- '}
-                                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amountVal)}
-                                                    </td>
-                                                    <td className="p-4 align-middle">
-                                                        {m.groupType === 'sales' ? <ArrowUpCircle className="h-4 w-4 text-green-500" /> : <ArrowDownCircle className="h-4 w-4 text-red-500" />}
-                                                    </td>
-                                                </tr>
-                                            ) : (
-                                                <tr key={key} className="border-b transition-colors hover:bg-muted/50">
-                                                    <td className="p-4 align-middle">{dateStr}</td>
-                                                    <td className="p-4 align-middle">{m.description}</td>
-                                                    <td className={`p-4 align-middle text-right font-medium ${m.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                                                        {m.type === 'expense' ? '- ' : '+ '}
-                                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(m.amount))}
-                                                    </td>
-                                                    <td className="p-4 align-middle">
-                                                        {m.type === 'income' ? <ArrowUpCircle className="h-4 w-4 text-green-500" /> : <ArrowDownCircle className="h-4 w-4 text-red-500" />}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })
-                                    )}
-                                </tbody>
-                            </table>
+                    {sortedDailyKeys.length === 0 ? (
+                        <div className="p-10 text-center text-zinc-500 bg-white rounded-lg border border-dashed">
+                            Nenhum lançamento neste período.
                         </div>
+                    ) : (
+                        sortedDailyKeys.map(dateKey => {
+                            const items = dailyGroups[dateKey];
+                            const isExpanded = expandedDays[dateKey] ?? true; // Default open
 
-                        {/* Mobile Card View */}
-                        <div className="md:hidden space-y-0 divide-y">
-                            {groupedMovements.length === 0 ? (
-                                <div className="p-8 text-center text-zinc-500 text-sm">Nenhum lançamento neste período.</div>
-                            ) : (
-                                groupedMovements.map((m: any) => {
-                                    const isGroup = m.isGroup;
-                                    const key = isGroup ? 'group-m-' + m.order_id : m.id;
-                                    const amountVal = isGroup ? m.totalAmount : Number(m.amount);
+                            // Day Totals
+                            const dayTotal = items.reduce((acc: number, m: any) => {
+                                const val = m.isGroup
+                                    ? (m.groupType === 'sales' ? m.totalAmount : -m.totalAmount) // Sales +, Purchase -
+                                    : (m.type === 'income' ? Number(m.amount) : -Number(m.amount));
+                                return acc + val;
+                            }, 0);
 
-                                    return (
-                                        <div key={key} className={`p-4 flex justify-between items-center ${isGroup ? 'bg-slate-50' : 'bg-white'}`}>
-                                            <div className="flex flex-col gap-1">
-                                                <div className="font-medium text-zinc-900 line-clamp-1">
-                                                    {isGroup ? `Lote: ${m.order_nickname || 'Sem Nome'}` : m.description}
-                                                </div>
-                                                <div className="text-xs text-zinc-500 flex flex-col gap-0.5">
-                                                    <span className="capitalize">{new Date(m.payment_date || m.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</span>
-                                                    {isGroup && (
-                                                        <div className="flex items-center gap-1">
-                                                            <span>{m.items.length} itens</span>
-                                                            <span className="text-blue-600 font-bold" onClick={() => navigate(`/purchases?openOrder=${m.order_id}`)}>(Ver)</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            <div className="flex flex-col items-end gap-1">
-                                                <div className={`font-bold flex items-center gap-1 ${m.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                                                    {(m.type === 'expense' || isGroup) ? '- ' : '+ '}
-                                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amountVal)}
-                                                </div>
-                                                {m.type === 'income' && !isGroup ? <ArrowUpCircle className="h-3 w-3 text-green-500" /> : <ArrowDownCircle className="h-3 w-3 text-red-500" />}
-                                            </div>
+                            return (
+                                <div key={dateKey} className="bg-white rounded-lg border shadow-sm overflow-hidden">
+                                    {/* Date Header */}
+                                    <div
+                                        className="flex items-center justify-between p-3 bg-zinc-50/80 cursor-pointer hover:bg-zinc-100 transition-colors"
+                                        onClick={() => toggleDay(dateKey)}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            {isExpanded ? <ChevronDown className="h-4 w-4 text-zinc-400" /> : <ChevronLeft className="h-4 w-4 text-zinc-400 rotate-180" />}
+                                            <span className="font-semibold text-zinc-700 capitalize">
+                                                {new Date(dateKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}
+                                            </span>
+                                            <span className="text-xs text-zinc-400 font-normal">({items.length} mov)</span>
                                         </div>
-                                    );
-                                })
-                            )}
-                        </div>
-                    </div>
+                                        <span className={`text-sm font-bold ${dayTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            {dayTotal > 0 ? '+' : ''}{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(dayTotal)}
+                                        </span>
+                                    </div>
+
+                                    {/* Items List */}
+                                    {isExpanded && (
+                                        <div className="divide-y divide-zinc-100">
+                                            {items.map((m: any, idx: number) => {
+                                                const isGroup = m.isGroup;
+                                                const amountVal = isGroup ? m.totalAmount : Number(m.amount);
+                                                const description = isGroup ? (m.order_nickname || m.description) : m.description;
+
+                                                return (
+                                                    <div key={idx} className="p-3 md:p-4 flex justify-between items-start hover:bg-zinc-50 transition-colors">
+                                                        <div className="flex flex-col gap-1 overflow-hidden">
+                                                            <div className="font-medium text-zinc-800 text-sm md:text-base line-clamp-1">
+                                                                {description === 'Sem Nome' ? `Lote #${m.order_id?.slice(0, 5)}` : description}
+                                                            </div>
+                                                            <div className="text-xs text-zinc-500">
+                                                                {isGroup && (
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="bg-zinc-100 px-1.5 py-0.5 rounded text-zinc-600">{m.items.length} itens</span>
+                                                                        <span
+                                                                            className="text-blue-600 font-semibold cursor-pointer hover:underline"
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                setSelectedBatch(m);
+                                                                                setIsBatchOpen(true);
+                                                                            }}
+                                                                        >
+                                                                            Ver detalhes
+                                                                        </span>
+                                                                    </div>
+                                                                )}
+                                                                {!isGroup && (
+                                                                    <span className="capitalize">{m.category || 'Geral'}</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex flex-col items-end shrink-0 pl-2">
+                                                            <span className={`font-bold text-sm md:text-base ${(m.type === 'expense' || (isGroup && m.groupType === 'purchase')) ? 'text-red-600' : 'text-green-600'
+                                                                }`}>
+                                                                {(m.type === 'expense' || (isGroup && m.groupType === 'purchase')) ? '- ' : '+ '}
+                                                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Math.abs(amountVal))}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })
+                    )}
                 </CardContent>
             </Card>
 
@@ -419,6 +322,7 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
                     <DialogHeader>
                         <DialogTitle>Novo Lançamento Manual</DialogTitle>
                     </DialogHeader>
+                    {/* ... Same Add Form ... */}
                     <div className="grid gap-4 py-4">
                         <div className="grid grid-cols-2 gap-4">
                             <div className="grid gap-2">
@@ -476,7 +380,7 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
                     {selectedBatch && (
                         <div className="space-y-4">
                             <div className="flex justify-between items-center bg-slate-50 p-3 rounded">
-                                <span className="font-bold">{selectedBatch.description}</span>
+                                <span className="font-bold">{selectedBatch.description === 'Sem Nome' ? `Lote #${selectedBatch.order_id?.slice(0, 5)}` : selectedBatch.description}</span>
                                 <span className="font-mono">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedBatch.totalAmount)}</span>
                             </div>
                             <table className="w-full text-sm">
