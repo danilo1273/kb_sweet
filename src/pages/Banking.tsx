@@ -1,5 +1,6 @@
 
 import { useEffect, useState } from 'react';
+import { supabase } from '@/supabaseClient';
 import { useNavigate } from 'react-router-dom';
 import { useBanking, BankAccountWithBalance } from '@/hooks/useBanking';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -120,6 +121,10 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
     const [movements, setMovements] = useState<FinancialMovement[]>([]);
     const [isAddOpen, setIsAddOpen] = useState(false);
 
+    // Batch Visualization State
+    const [selectedBatch, setSelectedBatch] = useState<any>(null);
+    const [isBatchOpen, setIsBatchOpen] = useState(false);
+
     // Manual Entry State
     const [type, setType] = useState<'income' | 'expense'>('expense');
     const [amount, setAmount] = useState("");
@@ -139,7 +144,41 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
         // Or we assume `account.calculated_balance` is TODAY.
         // It's tricky to show historical running balance without a snapshot system.
         // Let's just list transactions for now.
-        setMovements(data || []);
+        // Enrich with Sales Data (Client Name + Products)
+        const saleIds = data?.map((m: any) => m.related_sale_id).filter(Boolean) || [];
+
+        let enrichedData = data || [];
+
+        if (saleIds.length > 0) {
+            const { data: sales } = await supabase
+                .from('sales')
+                .select('id, client_id, clients(name), sale_items(quantity, products(name))')
+                .in('id', saleIds);
+
+            if (sales) {
+                enrichedData = enrichedData.map((m: any) => {
+                    if (m.related_sale_id) {
+                        const sale = sales.find((s: any) => s.id === m.related_sale_id);
+                        if (sale) {
+                            const clientName = (sale.clients as any)?.name || 'Consumidor Final';
+                            const itemsSummary = (sale.sale_items as any[])?.map((i: any) => {
+                                const prodName = i.products?.name || 'Item';
+                                return `${i.quantity}x ${prodName}`;
+                            }).join(', ');
+
+                            const desc = `${clientName} - ${itemsSummary || 'Sem itens'}`;
+                            return {
+                                ...m,
+                                description: desc.length > 60 ? desc.substring(0, 60) + '...' : desc
+                            };
+                        }
+                    }
+                    return m;
+                });
+            }
+        }
+
+        setMovements(enrichedData);
     };
 
     useEffect(() => { load(); }, [month, year, account.id]);
@@ -155,30 +194,73 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
 
     const periodLabel = new Date(year, month, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
+    // Sorting: Newest first
+    const sortedMovements = [...movements].sort((a, b) => {
+        const da = new Date(a.payment_date || a.created_at).getTime();
+        const db = new Date(b.payment_date || b.created_at).getTime();
+        return db - da;
+    });
+
     const groupedMovements = (() => {
         const grouped: any[] = [];
-        const orderGroups: Record<string, any> = {};
+        const purchaseOrderGroups: Record<string, any> = {};
+        const salesDateGroups: Record<string, any> = {};
 
-        movements.forEach((m: any) => {
+        sortedMovements.forEach((m: any) => {
+            // Group Purchases by Order ID (existing logic)
             if (m.order_id) {
-                if (!orderGroups[m.order_id]) {
+                if (!purchaseOrderGroups[m.order_id]) {
                     const group = {
                         ...m,
                         isGroup: true,
+                        groupType: 'purchase',
                         items: [m],
-                        totalAmount: Number(m.amount)
+                        totalAmount: Number(m.amount),
+                        description: `Lote: ${m.order_nickname || 'Compra'}`
                     };
-                    orderGroups[m.order_id] = group;
+                    purchaseOrderGroups[m.order_id] = group;
                     grouped.push(group);
                 } else {
-                    orderGroups[m.order_id].items.push(m);
-                    orderGroups[m.order_id].totalAmount += Number(m.amount);
+                    purchaseOrderGroups[m.order_id].items.push(m);
+                    purchaseOrderGroups[m.order_id].totalAmount += Number(m.amount);
                 }
-            } else {
-                grouped.push(m);
+                return;
             }
+
+            // Group "Venda PDV" / Sales by Date
+            if (m.related_sale_id || m.description?.startsWith('Venda PDV')) {
+                const dateKey = new Date(m.payment_date || m.created_at).toISOString().split('T')[0];
+                if (!salesDateGroups[dateKey]) {
+                    const group = {
+                        ...m,
+                        id: `sales-group-${dateKey}`, // virtual ID
+                        isGroup: true,
+                        groupType: 'sales',
+                        items: [m],
+                        totalAmount: Number(m.amount),
+                        description: `Lote: Vendas PDV (${new Date(dateKey).toLocaleDateString('pt-BR')})`,
+                        payment_date: m.payment_date || m.created_at // Keep date for sorting/display
+                    };
+                    salesDateGroups[dateKey] = group;
+                    grouped.push(group);
+                } else {
+                    salesDateGroups[dateKey].items.push(m);
+                    salesDateGroups[dateKey].totalAmount += Number(m.amount);
+                }
+                return;
+            }
+
+            // Standalone items
+            grouped.push(m);
         });
-        return grouped;
+
+        // Re-sort grouped items because grouping might have messed order slightly if not careful
+        // (Though pushing in order usually preserves it, but date grouping might need care)
+        return grouped.sort((a, b) => {
+            const da = new Date(a.payment_date || a.created_at).getTime();
+            const db = new Date(b.payment_date || b.created_at).getTime();
+            return db - da;
+        });
     })();
 
     return (
@@ -240,25 +322,35 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
                                                     <td className="p-4 align-middle font-medium">{dateStr}</td>
                                                     <td className="p-4 align-middle">
                                                         <div className="flex items-center gap-2">
-                                                            <span className="font-semibold text-slate-700">Lote: {m.order_nickname || 'Sem Nome'}</span>
+                                                            <span className="font-semibold text-slate-700">{m.description}</span>
                                                             <Button
                                                                 variant="ghost"
                                                                 size="sm"
                                                                 className="h-6 text-xs text-blue-600 hover:text-blue-800"
-                                                                onClick={() => navigate(`/purchases?openOrder=${m.order_id}`)}
+                                                                onClick={() => {
+                                                                    if (m.groupType === 'purchase') {
+                                                                        // navigate(`/purchases?openOrder=${m.order_id}`) // Old behavior
+                                                                        setSelectedBatch(m);
+                                                                        setIsBatchOpen(true);
+                                                                    } else {
+                                                                        setSelectedBatch(m);
+                                                                        setIsBatchOpen(true);
+                                                                    }
+                                                                }}
                                                             >
-                                                                (Abrir Visualização)
+                                                                (Visualizar)
                                                             </Button>
                                                         </div>
                                                         <div className="text-xs text-slate-500 pl-1">
                                                             {m.items.length} itens agrupados
                                                         </div>
                                                     </td>
-                                                    <td className="p-4 align-middle text-right font-bold text-red-600">
-                                                        - {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amountVal)}
+                                                    <td className={`p-4 align-middle text-right font-bold ${m.groupType === 'sales' ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {m.groupType === 'sales' ? '+ ' : '- '}
+                                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amountVal)}
                                                     </td>
                                                     <td className="p-4 align-middle">
-                                                        <ArrowDownCircle className="h-4 w-4 text-red-500" />
+                                                        {m.groupType === 'sales' ? <ArrowUpCircle className="h-4 w-4 text-green-500" /> : <ArrowDownCircle className="h-4 w-4 text-red-500" />}
                                                     </td>
                                                 </tr>
                                             ) : (
@@ -373,6 +465,40 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
                     <DialogFooter>
                         <Button onClick={handleSave}>Salvar Lançamento</Button>
                     </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isBatchOpen} onOpenChange={setIsBatchOpen}>
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-auto">
+                    <DialogHeader>
+                        <DialogTitle>Detalhes do Lote</DialogTitle>
+                    </DialogHeader>
+                    {selectedBatch && (
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-center bg-slate-50 p-3 rounded">
+                                <span className="font-bold">{selectedBatch.description}</span>
+                                <span className="font-mono">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedBatch.totalAmount)}</span>
+                            </div>
+                            <table className="w-full text-sm">
+                                <thead className="text-xs text-zinc-500 uppercase bg-zinc-50">
+                                    <tr>
+                                        <th className="p-2 text-left">Data</th>
+                                        <th className="p-2 text-left">Descrição</th>
+                                        <th className="p-2 text-right">Valor</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {selectedBatch.items.map((item: any, idx: number) => (
+                                        <tr key={idx} className="border-b">
+                                            <td className="p-2">{new Date(item.payment_date || item.created_at).toLocaleDateString('pt-BR')}</td>
+                                            <td className="p-2">{item.description}</td>
+                                            <td className="p-2 text-right">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(item.amount))}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </DialogContent>
             </Dialog>
         </div>

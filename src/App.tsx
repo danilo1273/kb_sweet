@@ -1,5 +1,5 @@
 import { useEffect, useState, Suspense, lazy } from 'react';
-import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { supabase } from '@/supabaseClient';
 import { Toaster } from '@/components/ui/toaster';
 import Login from '@/pages/Login';
@@ -121,11 +121,24 @@ function App() {
     );
 }
 
+import { useUserRole } from '@/hooks/useUserRole';
+
 function ProtectedLayout({ session }: { session: Session | null }) {
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const { isAdmin, loading } = useUserRole();
+    const location = useLocation();
 
     if (!session) {
         return <Navigate to="/login" />;
+    }
+
+    if (loading) return null; // Or a spinner
+
+    // Client-side route protection
+    const adminRoutes = ['/admin', '/admin/settings', '/admin/registers', '/audit'];
+    if (adminRoutes.some(route => location.pathname.startsWith(route)) && !isAdmin) {
+        // Redirect non-admins trying to access admin pages
+        return <Navigate to="/dashboard" replace />;
     }
 
     return (

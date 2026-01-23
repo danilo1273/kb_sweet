@@ -2,7 +2,7 @@ export interface Company {
     id: string;
     name: string;
     status: 'active' | 'suspended';
-    plan: 'basic' | 'pro' | 'enterprise';
+    plan: 'plan_i' | 'plan_ii';
     created_at: string;
     logo_url?: string;
 }

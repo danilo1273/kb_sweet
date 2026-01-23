@@ -21,6 +21,7 @@ import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { APP_VERSION } from '@/version';
 import { useEffect, useState } from "react";
+import { useUserRole } from "@/hooks/useUserRole";
 
 interface SidebarProps {
     isOpen?: boolean;
@@ -29,31 +30,20 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
     const location = useLocation();
-    const [roles, setRoles] = useState<string[]>([]);
-
+    const { roles, loading: rolesLoading, companyPlan } = useUserRole();
     const [companyLogo, setCompanyLogo] = useState<string | null>(null);
 
     useEffect(() => {
-        getRoles();
+        fetchCompanyLogo();
     }, []);
 
-    async function getRoles() {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-            const { data } = await supabase.from('profiles').select('role, roles, company_id').eq('id', user.id).single();
-            let userRoles: string[] = [];
-            if (data?.roles && Array.isArray(data.roles)) {
-                userRoles = data.roles;
-            } else if (data?.role) {
-                userRoles = [data.role];
-            }
-            setRoles(userRoles);
-
+    async function fetchCompanyLogo() {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+            const { data } = await supabase.from('profiles').select('company_id').eq('id', session.user.id).single();
             if (data?.company_id) {
                 const { data: company } = await supabase.from('companies').select('logo_url').eq('id', data.company_id).single();
-                if (company?.logo_url) {
-                    setCompanyLogo(company.logo_url);
-                }
+                setCompanyLogo(company?.logo_url || null);
             }
         }
     }
@@ -82,6 +72,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     ];
 
     const navItems = allNavItems.filter(item => {
+        // Plan Restrictions
+        if (item.name === "Receitas" && companyPlan !== 'plan_ii') return false;
+
         if (item.roles.length === 0) return true;
         // Allow super_admin to access everything
         if (roles.includes('super_admin')) return true;

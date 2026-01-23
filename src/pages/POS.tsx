@@ -212,6 +212,35 @@ export default function POS() {
             return;
         }
 
+        // Validate Stock
+        const stockErrors: string[] = [];
+        orderItems.forEach(item => {
+            // Find dynamic stock for the selected source
+            const stockEntry = item.product.product_stocks?.find((s: any) => s.location_id === stockSource);
+            const available = stockEntry ? stockEntry.quantity : 0;
+
+            if (item.quantity > available) {
+                stockErrors.push(`${item.product.name} (Solicitado: ${item.quantity} / Disp: ${available})`);
+            }
+        });
+
+        if (stockErrors.length > 0) {
+            toast({
+                variant: "destructive",
+                title: "Estoque Insuficiente",
+                description: (
+                    <div className="mt-2 flex flex-col gap-1 text-xs">
+                        {stockErrors.map((err, i) => (
+                            <span key={i}>{err}</span>
+                        ))}
+                        <span className="mt-2 font-bold">A venda não pode ser concluída com estoque negativo.</span>
+                    </div>
+                ),
+                duration: 5000
+            });
+            return;
+        }
+
         // Inject effective resolve cost snapshot
         const itemsWithCost = orderItems.map(item => ({
             ...item,

@@ -307,19 +307,20 @@ export default function Dashboard() {
                     });
 
                     // B. Sales by Seller (Margin)
-                    const sellerStats: Record<string, { revenue: number, cost: number, count: number }> = {};
+                    const sellerStats: Record<string, { revenue: number, cost: number, count: number, pending: number, received_month: number }> = {};
 
+                    // 1. Process Sales Data for Revenue & Cost
                     salesData.forEach((sale: any) => {
                         const sellerName = sale.profiles?.full_name?.split(' ')[0] || 'Desconhecido';
 
                         if (!sellerStats[sellerName]) {
-                            sellerStats[sellerName] = { revenue: 0, cost: 0, count: 0 };
+                            sellerStats[sellerName] = { revenue: 0, cost: 0, count: 0, pending: 0, received_month: 0 };
                         }
 
                         sellerStats[sellerName].count += 1;
                         sellerStats[sellerName].revenue += Number(sale.total);
 
-                        // Calculate Cost for this Sale
+                        // Calculate Cost
                         let saleCost = 0;
                         if (sale.sale_items && Array.isArray(sale.sale_items)) {
                             sale.sale_items.forEach((item: any) => {
@@ -331,13 +332,45 @@ export default function Dashboard() {
                         sellerStats[sellerName].cost += saleCost;
                     });
 
+                    // 2. Process Financial Movements for Pending & Received
+                    const allMovements = financialRes.data || [];
+
+                    // Creates a map of Sale ID -> Seller Name for quick lookup
+                    const saleSellerMap: Record<string, string> = {};
+                    salesData.forEach((s: any) => {
+                        saleSellerMap[s.id] = s.profiles?.full_name?.split(' ')[0] || 'Desconhecido';
+                    });
+
+                    allMovements.forEach((mov: any) => {
+                        if (mov.related_sale_id && mov.type === 'income') {
+                            const sellerName = saleSellerMap[mov.related_sale_id] || 'Desconhecido';
+
+                            // Ensure seller exists in stats (might have no sales loaded if date range differs, but usually safe)
+                            if (!sellerStats[sellerName]) {
+                                sellerStats[sellerName] = { revenue: 0, cost: 0, count: 0, pending: 0, received_month: 0 };
+                            }
+
+                            if (mov.status === 'pending') {
+                                sellerStats[sellerName].pending += Number(mov.amount);
+                            } else if (mov.status === 'paid') {
+                                const paymentDate = new Date(mov.payment_date);
+                                const now = new Date();
+                                if (paymentDate.getMonth() === now.getMonth() && paymentDate.getFullYear() === now.getFullYear()) {
+                                    sellerStats[sellerName].received_month += Number(mov.amount);
+                                }
+                            }
+                        }
+                    });
+
                     const sellerPerformanceData = Object.entries(sellerStats).map(([name, stats]) => ({
                         name,
                         revenue: stats.revenue,
                         cost: stats.cost,
                         margin: stats.revenue - stats.cost,
                         marginPercent: stats.revenue > 0 ? ((stats.revenue - stats.cost) / stats.revenue) * 100 : 0,
-                        count: stats.count
+                        count: stats.count,
+                        pending: stats.pending,
+                        received_month: stats.received_month
                     })).sort((a, b) => b.revenue - a.revenue);
 
 
@@ -718,30 +751,33 @@ export default function Dashboard() {
                                     <div className="text-center text-zinc-400 py-10">Sem vendas recentes</div>
                                 ) : (
                                     (notifications as any[]).map((seller, i) => (
-                                        <div key={i} className="flex flex-col gap-1 p-3 bg-zinc-50 rounded-lg border border-zinc-100">
-                                            <div className="flex justify-between items-center">
-                                                <span className="font-bold text-zinc-800">{seller.name}</span>
+                                        <div key={i} className="flex flex-col gap-2 p-3 bg-zinc-50 rounded-lg border border-zinc-100">
+                                            <div className="flex justify-between items-center pb-2 border-b border-zinc-100">
+                                                <span className="font-bold text-zinc-800 text-lg">{seller.name}</span>
                                                 <Badge variant="outline" className="text-blue-600 bg-blue-50 border-blue-100">
                                                     {seller.count} vendas
                                                 </Badge>
                                             </div>
-                                            <div className="flex justify-between items-center mt-1 text-sm">
-                                                <span className="text-zinc-500">Vendido:</span>
-                                                <span className="font-medium">R$ {seller.revenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+
+                                            <div className="grid grid-cols-2 gap-2 text-sm">
+                                                <div className="flex flex-col">
+                                                    <span className="text-xs text-zinc-500">Vendido</span>
+                                                    <span className="font-semibold text-zinc-700">R$ {seller.revenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                </div>
+                                                <div className="flex flex-col text-right">
+                                                    <span className="text-xs text-zinc-500">A Receber</span>
+                                                    <span className="font-bold text-amber-600">R$ {seller.pending.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                </div>
                                             </div>
-                                            <div className="flex justify-between items-center text-sm">
-                                                <span className="text-zinc-500">Custo:</span>
-                                                <span className="text-red-400">R$ {seller.cost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                            </div>
-                                            <div className="mt-2 pt-2 border-t flex justify-between items-center">
-                                                <span className="text-xs font-bold text-green-700 uppercase">Margem</span>
-                                                <div className="text-right">
-                                                    <span className="font-bold text-green-600 text-lg">
-                                                        {seller.marginPercent.toFixed(1)}%
-                                                    </span>
-                                                    <span className="ml-2 text-xs text-green-500">
-                                                        (R$ {seller.margin.toLocaleString('pt-BR', { maximumFractionDigits: 0 })})
-                                                    </span>
+
+                                            <div className="grid grid-cols-2 gap-2 text-sm">
+                                                <div className="flex flex-col">
+                                                    <span className="text-xs text-zinc-500">Recebido (Mês)</span>
+                                                    <span className="font-bold text-emerald-600">R$ {seller.received_month.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                </div>
+                                                <div className="flex flex-col text-right">
+                                                    <span className="text-xs text-zinc-500">Lucro</span>
+                                                    <span className="font-bold text-green-600">R$ {seller.margin.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} <span className="text-xs text-green-500 font-medium">({seller.marginPercent.toFixed(1)}%)</span></span>
                                                 </div>
                                             </div>
                                         </div>

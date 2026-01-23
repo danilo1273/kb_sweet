@@ -25,7 +25,7 @@ export default function AdminCompanies() {
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [createLoading, setCreateLoading] = useState(false);
     const [newName, setNewName] = useState("");
-    const [newPlan, setNewPlan] = useState<"basic" | "pro" | "enterprise">("basic");
+    const [newPlan, setNewPlan] = useState<"plan_i" | "plan_ii">("plan_i");
     const [newStatus, setNewStatus] = useState<"active" | "suspended">("active");
 
     // Users Management State
@@ -92,7 +92,7 @@ export default function AdminCompanies() {
         } else {
             toast({ title: "Empresa criada com sucesso!" });
             setNewName("");
-            setNewPlan("basic");
+            setNewPlan("plan_i");
             setIsCreateOpen(false);
             fetchCompanies();
         }
@@ -281,9 +281,8 @@ export default function AdminCompanies() {
                                         <SelectValue placeholder="Selecione um plano" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="basic">Básico</SelectItem>
-                                        <SelectItem value="pro">Profissional</SelectItem>
-                                        <SelectItem value="enterprise">Enterprise</SelectItem>
+                                        <SelectItem value="plan_i">Plano I (Básico)</SelectItem>
+                                        <SelectItem value="plan_ii">Plano II (Completo)</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>

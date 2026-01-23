@@ -3,7 +3,10 @@ import { supabase } from "@/supabaseClient";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, CheckCircle, ArrowDownCircle, RotateCcw, Trash2, Filter, ChevronDown, ChevronUp, Layers, Calculator, TrendingUp, TrendingDown, Building2, MessageCircle } from "lucide-react";
+import { Loader2, CheckCircle, ArrowDownCircle, RotateCcw, Trash2, ChevronDown, Layers, TrendingUp, TrendingDown, Building2, MessageCircle, ChevronsUpDown, Check } from "lucide-react";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -12,7 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { FinancialMovement, BatchGroup } from "@/types";
-import { calculateTotalPending, calculateTotalPaid } from "@/lib/financialUtils";
 import { PaymentConfirmationDialog } from "@/components/financial/PaymentConfirmationDialog";
 import { WhatsAppChargeDialog, ChargeItem } from "@/components/financial/WhatsAppChargeDialog";
 
@@ -37,7 +39,9 @@ export default function Financial() {
 
     // Expansion & Selection
     const [expandedBatches, setExpandedBatches] = useState<Record<string, boolean>>({});
-    const [selectedBatches, setSelectedBatches] = useState<Record<string, boolean>>({});
+    const [selectedMovements, setSelectedMovements] = useState<Record<string, boolean>>({});
+    // Helper to check if a batch is fully selected, partially selected, or none.
+    // derived state can be calculated in render.
 
     // Payment Dialog State
     const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
@@ -62,6 +66,9 @@ export default function Financial() {
         items: [],
         pixKey: ''
     });
+
+    // Combobox State
+    const [openBuyer, setOpenBuyer] = useState(false);
 
     const { toast } = useToast();
 
@@ -344,18 +351,19 @@ export default function Financial() {
                 toast({ title: "Pagamento registrado!" });
 
             } else if (paymentDialogData.mode === 'batch') {
-                const selectedIds = Object.keys(selectedBatches).filter(id => selectedBatches[id]);
+                const selectedIds = Object.keys(selectedMovements).filter(id => selectedMovements[id]);
                 const idsToPay: string[] = [];
 
-                selectedIds.forEach(batchId => {
-                    const batch = batches.find(b => b.order_id === batchId);
-                    if (batch) {
-                        batch.movements.forEach(m => {
-                            const matchesTab = activeTab === 'payable' ? m.type === 'expense' : m.type === 'income';
-                            if (m.status === 'pending' && matchesTab) {
-                                idsToPay.push(m.id);
-                            }
-                        });
+                // Use flattened look up or just logic
+                const allMovements = batches.flatMap(b => b.movements);
+
+                selectedIds.forEach(id => {
+                    const m = allMovements.find(mov => mov.id === id);
+                    if (m) {
+                        const matchesTab = activeTab === 'payable' ? m.type === 'expense' : m.type === 'income';
+                        if (m.status === 'pending' && matchesTab) {
+                            idsToPay.push(m.id);
+                        }
                     }
                 });
 
@@ -368,8 +376,9 @@ export default function Financial() {
                     });
 
                     if (error) throw error;
+                    if (error) throw error;
                     toast({ title: "Pagamento em lote realizado!" });
-                    setSelectedBatches({});
+                    setSelectedMovements({});
                 }
             }
             fetchMovements();
@@ -426,25 +435,30 @@ export default function Financial() {
         // But for this "Security Analysis" task, ensuring 'Pay' is atomic is most critical.
         // Let's implement batch reverse via client loop to secure RPC to be consistent.
 
-        const selectedIds = Object.keys(selectedBatches).filter(id => selectedBatches[id]);
+        // But for this "Security Analysis" task, ensuring 'Pay' is atomic is most critical.
+        // Let's implement batch reverse via client loop to secure RPC to be consistent.
+
+        const selectedIds = Object.keys(selectedMovements).filter(id => selectedMovements[id]);
         if (selectedIds.length === 0) return;
 
         const isPay = action === 'pay';
 
         if (isPay) {
-            // Already handled in handlePaymentConfirm via Dialog
+            // Calculate totals from selected movements
             let count = 0;
             let total = 0;
-            selectedIds.forEach(batchId => {
-                const batch = batches.find(b => b.order_id === batchId);
-                if (batch) {
-                    batch.movements.forEach(m => {
-                        const matchesTab = activeTab === 'payable' ? m.type === 'expense' : m.type === 'income';
-                        if (m.status === 'pending' && matchesTab) {
-                            count++;
-                            total += m.amount;
-                        }
-                    });
+
+            // We need to look up movement details. Best way is to flatten batches or find in movements list.
+            const allMovements = batches.flatMap(b => b.movements);
+
+            selectedIds.forEach(id => {
+                const m = allMovements.find(mov => mov.id === id);
+                if (m) {
+                    const matchesTab = activeTab === 'payable' ? m.type === 'expense' : m.type === 'income';
+                    if (m.status === 'pending' && matchesTab) {
+                        count++;
+                        total += m.amount;
+                    }
                 }
             });
 
@@ -464,28 +478,28 @@ export default function Financial() {
         }
 
         // Reverse Batch
-        if (!confirm(`Confirma o ESTORNO de todos os itens BAIXADOS nos ${selectedIds.length} lotes?`)) return;
+        if (!confirm(`Confirma o ESTORNO de ${selectedIds.length} itens selecionados?`)) return;
 
         setLoading(true);
         try {
             const { data: { user } } = await supabase.auth.getUser();
 
             const idsToReverse: string[] = [];
-            selectedIds.forEach(batchId => {
-                const batch = batches.find(b => b.order_id === batchId);
-                if (batch) {
-                    batch.movements.forEach(m => {
-                        const matchesTab = activeTab === 'payable' ? m.type === 'expense' : m.type === 'income';
-                        if (m.status === 'paid' && matchesTab) {
-                            idsToReverse.push(m.id);
-                        }
-                    });
+            // We need to look up movement details.
+            const allMovements = batches.flatMap(b => b.movements);
+
+            selectedIds.forEach(id => {
+                const m = allMovements.find(mov => mov.id === id);
+                if (m) {
+                    const matchesTab = activeTab === 'payable' ? m.type === 'expense' : m.type === 'income';
+                    if (m.status === 'paid' && matchesTab) {
+                        idsToReverse.push(m.id);
+                    }
                 }
             });
 
             if (idsToReverse.length === 0) {
                 toast({ title: "Nenhum item pago elegível." });
-                setLoading(false);
                 return;
             }
 
@@ -499,7 +513,7 @@ export default function Financial() {
             }
 
             toast({ title: "Estorno em lote concluído!" });
-            setSelectedBatches({});
+            setSelectedMovements({});
             fetchMovements();
         } catch (e: any) {
             toast({ variant: 'destructive', title: "Erro na ação em lote", description: e.message });
@@ -553,17 +567,31 @@ export default function Financial() {
     const currentType = activeTab === 'payable' ? 'expense' : 'income';
     const filteredBatches = getFilteredBatches(currentType);
 
+    useEffect(() => {
+        // Reset selection when filters change to prevent accidental bulk actions
+        setSelectedMovements({});
+    }, [activeTab, filterBuyer, filterSupplier, filterStatus, startDate, endDate]);
+
     // Totals for Cards
     const totalPending = filteredBatches.reduce((acc, b) => acc + b.visual_total_pending, 0);
     const totalPaid = filteredBatches.reduce((acc, b) => acc + b.visual_total_paid, 0);
 
     // Selection Totals
-    const selectedBatchesList = filteredBatches.filter(b => selectedBatches[b.order_id]);
-    const selectionTotalPending = selectedBatchesList.reduce((acc, b) => acc + b.visual_total_pending, 0);
-    const selectionTotalPaid = selectedBatchesList.reduce((acc, b) => acc + b.visual_total_paid, 0);
+    // Re-calculate based on selected movements
+    const selectedMovementsList = filteredBatches.flatMap(b => b.movements).filter(m => selectedMovements[m.id]);
+    const selectionTotalPending = selectedMovementsList.reduce((acc, m) => m.status === 'pending' ? acc + Math.abs(m.amount) : acc, 0);
+    const selectionTotalPaid = selectedMovementsList.reduce((acc, m) => m.status === 'paid' ? acc + Math.abs(m.amount) : acc, 0);
 
-    const toggleBatchSelection = (id: string, checked: boolean) => {
-        setSelectedBatches(prev => ({ ...prev, [id]: checked }));
+    const toggleMovementSelection = (id: string, checked: boolean) => {
+        setSelectedMovements(prev => ({ ...prev, [id]: checked }));
+    }
+
+    const toggleBatchSelection = (batch: BatchGroup, checked: boolean) => {
+        const newSelection = { ...selectedMovements };
+        batch.movements.forEach(m => {
+            newSelection[m.id] = checked;
+        });
+        setSelectedMovements(newSelection);
     }
 
     const toggleExpand = (id: string) => {
@@ -600,10 +628,68 @@ export default function Financial() {
 
                     <div className="flex flex-col gap-1">
                         <label className="text-[10px] uppercase font-bold text-zinc-400">Comprador</label>
-                        <Select value={filterBuyer} onValueChange={setFilterBuyer}>
-                            <SelectTrigger className="w-[180px] h-9"><SelectValue placeholder="Todos" /></SelectTrigger>
-                            <SelectContent><SelectItem value="all">Todos</SelectItem>{availableBuyers.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
-                        </Select>
+                        <Popover open={openBuyer} onOpenChange={setOpenBuyer}>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    role="combobox"
+                                    aria-expanded={openBuyer}
+                                    className="w-[200px] justify-between h-9 text-sm font-normal"
+                                >
+                                    {filterBuyer === "all"
+                                        ? "Todos"
+                                        : availableBuyers.find((b) => b === filterBuyer) || filterBuyer}
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[200px] p-0">
+                                <Command>
+                                    <CommandInput placeholder="Buscar..." />
+                                    <CommandList>
+                                        <CommandEmpty>Não encontrado.</CommandEmpty>
+                                        <CommandGroup>
+                                            <CommandItem
+                                                value="all"
+                                                keywords={['todos', 'all']}
+                                                className="cursor-pointer data-[disabled]:pointer-events-auto data-[disabled]:opacity-100"
+                                                onSelect={() => {
+                                                    setFilterBuyer("all");
+                                                    setOpenBuyer(false);
+                                                }}
+                                            >
+                                                <Check
+                                                    className={cn(
+                                                        "mr-2 h-4 w-4",
+                                                        filterBuyer === "all" ? "opacity-100" : "opacity-0"
+                                                    )}
+                                                />
+                                                Todos
+                                            </CommandItem>
+                                            {availableBuyers.map((buyer, idx) => (
+                                                <CommandItem
+                                                    key={`${buyer}-${idx}`}
+                                                    value={buyer}
+                                                    keywords={[buyer]}
+                                                    className="cursor-pointer data-[disabled]:pointer-events-auto data-[disabled]:opacity-100"
+                                                    onSelect={() => {
+                                                        setFilterBuyer(filterBuyer === buyer ? "all" : buyer);
+                                                        setOpenBuyer(false);
+                                                    }}
+                                                >
+                                                    <Check
+                                                        className={cn(
+                                                            "mr-2 h-4 w-4",
+                                                            filterBuyer === buyer ? "opacity-100" : "opacity-0"
+                                                        )}
+                                                    />
+                                                    {buyer}
+                                                </CommandItem>
+                                            ))}
+                                        </CommandGroup>
+                                    </CommandList>
+                                </Command>
+                            </PopoverContent>
+                        </Popover>
                     </div>
 
                     {/* Only show Supplier filter for Payable? Or rename? */}
@@ -639,7 +725,7 @@ export default function Financial() {
                     </div>
 
                     {/* Quick Stats for Selection */}
-                    {selectedBatchesList.length > 0 && (
+                    {selectedMovementsList.length > 0 && (
                         <div className="ml-auto flex items-center gap-4 animate-in fade-in slide-in-from-right-5">
                             <div className="flex flex-col items-end">
                                 <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded text-sm font-medium border border-blue-100 shadow-sm">
@@ -647,16 +733,14 @@ export default function Financial() {
                                 </div>
                                 {/* Breakdown by Buyer */}
                                 <div className="text-[10px] text-zinc-500 mt-1 flex gap-2">
-                                    {Object.entries(selectedBatchesList.reduce((acc, batch) => {
-                                        batch.movements.forEach(m => {
-                                            const matchesTab = activeTab === 'payable' ? m.type === 'expense' : m.type === 'income';
-                                            const matchesStatus = selectionTotalPending > 0.01 ? m.status === 'pending' : m.status === 'paid';
+                                    {Object.entries(selectedMovementsList.reduce((acc, m) => {
+                                        const matchesTab = activeTab === 'payable' ? m.type === 'expense' : m.type === 'income';
+                                        const matchesStatus = selectionTotalPending > 0.01 ? m.status === 'pending' : m.status === 'paid';
 
-                                            if (matchesTab && matchesStatus) {
-                                                const buyer = m.detail_buyer || 'Outros';
-                                                acc[buyer] = (acc[buyer] || 0) + Math.abs(m.amount);
-                                            }
-                                        });
+                                        if (matchesTab && matchesStatus) {
+                                            const buyer = m.detail_buyer || 'Outros';
+                                            acc[buyer] = (acc[buyer] || 0) + Math.abs(m.amount);
+                                        }
                                         return acc;
                                     }, {} as Record<string, number>)).map(([buyer, total]) => (
                                         <span key={buyer} title={buyer} className="bg-zinc-100 px-1.5 rounded border border-zinc-200">
@@ -711,11 +795,12 @@ export default function Financial() {
                         )}
 
                         {filteredBatches.map(batch => (
-                            <Card key={batch.order_id} className={`overflow-hidden transition-all duration-200 ${selectedBatches[batch.order_id] ? 'ring-2 ring-blue-500 shadow-md' : 'hover:shadow-md'}`}>
+                            <Card key={batch.order_id} className={`overflow-hidden transition-all duration-200 ${batch.movements.some(m => selectedMovements[m.id]) ? 'ring-2 ring-blue-500 shadow-md' : 'hover:shadow-md'}`}>
                                 <div className="flex items-center p-4 bg-white border-b gap-4">
                                     <Checkbox
-                                        checked={!!selectedBatches[batch.order_id]}
-                                        onCheckedChange={(c) => toggleBatchSelection(batch.order_id, c as boolean)}
+                                        checked={batch.movements.every(m => selectedMovements[m.id])}
+                                        onCheckedChange={(c) => toggleBatchSelection(batch, c as boolean)}
+                                        className={batch.movements.some(m => selectedMovements[m.id]) && !batch.movements.every(m => selectedMovements[m.id]) ? "opacity-50" : ""}
                                     />
                                     <div className="flex-1 cursor-pointer" onClick={() => toggleExpand(batch.order_id)}>
                                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -811,6 +896,7 @@ export default function Financial() {
                                             <Table>
                                                 <TableHeader>
                                                     <TableRow className="hover:bg-transparent">
+                                                        <TableHead className="w-[30px]"></TableHead>
                                                         <TableHead className="w-[120px]">Vencimento</TableHead>
                                                         <TableHead>Descrição</TableHead>
                                                         <TableHead>Conta</TableHead>
@@ -822,6 +908,12 @@ export default function Financial() {
                                                 <TableBody>
                                                     {batch.movements.map(mov => (
                                                         <TableRow key={mov.id} className="group hover:bg-white">
+                                                            <TableCell>
+                                                                <Checkbox
+                                                                    checked={!!selectedMovements[mov.id]}
+                                                                    onCheckedChange={(c) => toggleMovementSelection(mov.id, c as boolean)}
+                                                                />
+                                                            </TableCell>
                                                             <TableCell className="text-xs font-medium text-zinc-600">
                                                                 {mov.due_date ? new Date(mov.due_date).toLocaleDateString() : '-'}
                                                             </TableCell>
@@ -880,6 +972,17 @@ export default function Financial() {
                 amount={Math.abs(paymentDialogData.amount || 0)}
                 type={paymentDialogData.mode === 'batch' ? (activeTab === 'payable' ? 'expense' : 'income') : (paymentDialogData.type as any)}
                 count={paymentDialogData.count}
+            />
+
+            <WhatsAppChargeDialog
+                isOpen={isWhatsAppDialogOpen}
+                onClose={() => setIsWhatsAppDialogOpen(false)}
+                data={{
+                    clientName: whatsAppDialogData.clientName,
+                    phone: whatsAppDialogData.phone,
+                    items: whatsAppDialogData.items,
+                    pixKey: whatsAppDialogData.pixKey
+                }}
             />
         </div>
     );
