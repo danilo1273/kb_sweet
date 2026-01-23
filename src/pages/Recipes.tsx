@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Search, Loader2, Edit, Trash2, Image as ImageIcon, X, Box, Layers, Settings, UploadCloud } from "lucide-react";
+import { useUserRole } from "@/hooks/useUserRole";
 
 interface Category {
     id: number;
@@ -61,6 +62,11 @@ export default function Recipes() {
     const [typeFilter, setTypeFilter] = useState("all");
     const [categoryFilter, setCategoryFilter] = useState("all");
     const { toast } = useToast();
+
+    // Permissions
+    const { roles } = useUserRole();
+    const canViewCosts = roles.some(r => ['admin', 'financial', 'buyer'].includes(r));
+
 
     // Dialog state
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -687,9 +693,9 @@ export default function Recipes() {
                                 </div>
                                 <div className="mt-2 text-sm text-zinc-500">
                                     <p>
-                                        Custo Unit.: R$ {(product.cost || 0).toFixed(2)} / {product.unit || 'un'}
+                                        {canViewCosts && `Custo Unit.: R$ ${(product.cost || 0).toFixed(2)} / ${product.unit || 'un'}`}
                                     </p>
-                                    {(product.batch_size || 0) > 1 && (
+                                    {(product.batch_size || 0) > 1 && canViewCosts && (
                                         <p className="text-xs text-zinc-400">
                                             Lote ({product.batch_size} {product.unit}): R$ {(product.cost && product.batch_size ? (product.cost * product.batch_size).toFixed(2) : (product.cost || 0).toFixed(2))}
                                         </p>
@@ -866,24 +872,26 @@ export default function Recipes() {
                                     </p>
                                 </div>
 
-                                <div className="p-4 bg-zinc-50 rounded border text-sm text-zinc-600 space-y-2">
-                                    <div className="flex justify-between items-center text-zinc-500">
-                                        <span>Custo Total da Receita:</span>
-                                        <span>R$ {calculatedCost.toFixed(2)}</span>
+                                {canViewCosts && (
+                                    <div className="p-4 bg-zinc-50 rounded border text-sm text-zinc-600 space-y-2">
+                                        <div className="flex justify-between items-center text-zinc-500">
+                                            <span>Custo Total da Receita:</span>
+                                            <span>R$ {calculatedCost.toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center font-bold text-blue-600 border-t pt-2 mt-2">
+                                            <span>Custo Unitário (Dinâmico):</span>
+                                            <span>R$ {(calculatedCost / (Number(currentProduct.batch_size) || 1)).toFixed(4)} / {currentProduct.unit || 'un'}</span>
+                                        </div>
+                                        <div className="flex justify-between text-xs text-zinc-400">
+                                            <span>Último Custo Salvo:</span>
+                                            <span>R$ {currentProduct.cost?.toFixed(4) || '0.00'} / {currentProduct.unit || 'un'}</span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-2">
+                                            O <strong>Custo Unitário</strong> é calculado dividindo o Custo Total pelo Rendimento ({currentProduct.batch_size || 1} {currentProduct.unit}).
+                                            Ao salvar, este valor unitário será atualizado no produto.
+                                        </p>
                                     </div>
-                                    <div className="flex justify-between items-center font-bold text-blue-600 border-t pt-2 mt-2">
-                                        <span>Custo Unitário (Dinâmico):</span>
-                                        <span>R$ {(calculatedCost / (Number(currentProduct.batch_size) || 1)).toFixed(4)} / {currentProduct.unit || 'un'}</span>
-                                    </div>
-                                    <div className="flex justify-between text-xs text-zinc-400">
-                                        <span>Último Custo Salvo:</span>
-                                        <span>R$ {currentProduct.cost?.toFixed(4) || '0.00'} / {currentProduct.unit || 'un'}</span>
-                                    </div>
-                                    <p className="text-xs text-muted-foreground mt-2">
-                                        O <strong>Custo Unitário</strong> é calculado dividindo o Custo Total pelo Rendimento ({currentProduct.batch_size || 1} {currentProduct.unit}).
-                                        Ao salvar, este valor unitário será atualizado no produto.
-                                    </p>
-                                </div>
+                                )}
                             </div>
                         </TabsContent>
 
@@ -1024,7 +1032,7 @@ export default function Recipes() {
                                                                     <TableHead>Tipo</TableHead>
                                                                     <TableHead>Item</TableHead>
                                                                     <TableHead>Qtd</TableHead>
-                                                                    <TableHead>Custo Aprox</TableHead>
+                                                                    {canViewCosts && <TableHead>Custo Aprox</TableHead>}
                                                                     <TableHead className="w-[50px]"></TableHead>
                                                                 </TableRow>
                                                             </TableHeader>
@@ -1068,7 +1076,7 @@ export default function Recipes() {
                                                                             <TableCell>{typeLabel}</TableCell>
                                                                             <TableCell className="font-medium">{name}</TableCell>
                                                                             <TableCell>{item.quantity} {item.unit}</TableCell>
-                                                                            <TableCell>R$ {cost.toFixed(2)}</TableCell>
+                                                                            {canViewCosts && <TableCell>R$ {cost.toFixed(2)}</TableCell>}
                                                                             <TableCell>
                                                                                 <div className="flex items-center justify-end gap-1">
                                                                                     <Button variant="ghost" size="icon" onClick={() => handleEditBomItem(item)} className="h-8 w-8 text-zinc-500 hover:text-blue-600">
@@ -1129,7 +1137,7 @@ export default function Recipes() {
                                                                         <Icon className={cn("h-4 w-4", iconColor)} />
                                                                         <div>
                                                                             <div className="font-medium text-sm text-zinc-900">{name}</div>
-                                                                            <div className="text-xs text-zinc-500">{item.quantity} {item.unit} • R$ {cost.toFixed(2)}</div>
+                                                                            <div className="text-xs text-zinc-500">{item.quantity} {item.unit} {canViewCosts && `• R$ ${cost.toFixed(2)}`}</div>
                                                                         </div>
                                                                     </div>
                                                                     <div className="flex items-center">

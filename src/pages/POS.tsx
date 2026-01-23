@@ -25,6 +25,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
+import { useUserRole } from "@/hooks/useUserRole";
 import { usePOS } from "@/hooks/usePOS"; // Import Hook
 import { CreateClientDialog } from "@/components/pos/CreateClientDialog";
 import { StockConsultationDialog } from "@/components/pos/StockConsultationDialog";
@@ -40,6 +41,8 @@ export default function POS() {
     const navigate = useNavigate();
     const { toast } = useToast();
     const { processSale, loading: processingSale } = usePOS();
+    const { roles } = useUserRole();
+    const canViewMargins = roles.some(r => ['admin', 'financial', 'buyer', 'seller'].includes(r));
 
     // New Client Dialog State
     const [isClientDialogOpen, setIsClientDialogOpen] = useState(false);
@@ -450,13 +453,15 @@ export default function POS() {
 
                     <div className="flex items-end justify-between">
                         <div className="text-zinc-500 text-sm">{orderItems.length} Itens</div>
-                        <div className="flex flex-col items-end mr-4">
-                            <div className="text-xs text-zinc-400 uppercase font-bold">Lucro Est.</div>
-                            <div className={cn("text-lg font-bold", estimatedProfit >= 0 ? "text-green-600" : "text-red-500")}>
-                                R$ {estimatedProfit.toFixed(2)}
-                                <span className="text-xs ml-1 opacity-70">({marginPercent.toFixed(1)}%)</span>
+                        {canViewMargins && (
+                            <div className="flex flex-col items-end mr-4">
+                                <div className="text-xs text-zinc-400 uppercase font-bold">Lucro Est.</div>
+                                <div className={cn("text-lg font-bold", estimatedProfit >= 0 ? "text-green-600" : "text-red-500")}>
+                                    R$ {estimatedProfit.toFixed(2)}
+                                    <span className="text-xs ml-1 opacity-70">({marginPercent.toFixed(1)}%)</span>
+                                </div>
                             </div>
-                        </div>
+                        )}
                         <div className="text-right border-l pl-4">
                             <div className="text-xs text-zinc-400 uppercase font-bold">Total Final</div>
                             <div className="text-2xl font-black text-zinc-900 tracking-tight">R$ {total.toFixed(2)}</div>

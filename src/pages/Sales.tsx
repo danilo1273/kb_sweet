@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/use-toast";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { useUserRole } from "@/hooks/useUserRole";
 
 export default function Sales() {
     const navigate = useNavigate();
@@ -107,6 +108,8 @@ export default function Sales() {
     const [selectedViewSale, setSelectedViewSale] = useState<any>(null);
 
     // User State for Permissions
+    const { roles } = useUserRole();
+    const canViewMargins = roles.some(r => ['admin', 'financial', 'buyer', 'seller'].includes(r));
     const [currentUser, setCurrentUser] = useState<any>(null);
     const [isAdmin, setIsAdmin] = useState(false);
 
@@ -136,26 +139,31 @@ export default function Sales() {
     }, []);
 
     const handleEditClick = async (sale: any) => {
-        // Security Rule: If sale is completed, require request/approval
-        if (sale.status === 'completed' && sale.edit_status !== 'approved') {
+        const isFinanciallyClosed = sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received';
+
+        // Security Rule: If sale is financially closed or completed (old logic), require request/approval
+        if (isFinanciallyClosed || (sale.status === 'completed' && sale.edit_status !== 'approved')) {
             if (sale.edit_status === 'requested') {
                 toast({ title: "Aguardando Aprovação", description: "A solicitação de edição já foi enviada ao financeiro." });
                 return;
             }
 
-            if (confirm("Para editar uma venda já finalizada, é necessário solicitar liberação ao financeiro. Deseja solicitar?")) {
-                const { error } = await supabase.from('sales').update({
-                    edit_status: 'requested',
-                    edit_requested_at: new Date().toISOString()
-                }).eq('id', sale.id);
+            // If it's the seller (non-admin) trying to edit a closed sale
+            if (!isAdmin) {
+                if (confirm("Essa venda já foi processada pelo financeiro. Deseja solicitar uma alteração ao setor financeiro?")) {
+                    const { error } = await supabase.from('sales').update({
+                        edit_status: 'requested',
+                        edit_requested_at: new Date().toISOString()
+                    }).eq('id', sale.id);
 
-                if (error) toast({ variant: 'destructive', title: "Erro", description: error.message });
-                else {
-                    toast({ title: "Solicitação Enviada", description: "Aguarde a liberação pelo financeiro." });
-                    fetchSales();
+                    if (error) toast({ variant: 'destructive', title: "Erro", description: error.message });
+                    else {
+                        toast({ title: "Solicitação Enviada", description: "O financeiro receberá seu pedido de alteração." });
+                        fetchSales();
+                    }
                 }
+                return;
             }
-            return;
         }
 
         setEditingSale({
@@ -354,35 +362,41 @@ export default function Sales() {
                                                             <Eye className="h-4 w-4" />
                                                         </Button>
 
-                                                        {(isAdmin || (currentUser && sale.user_id === currentUser.id)) && !(sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received') && (
+                                                        {(isAdmin || (currentUser && sale.user_id === currentUser.id)) && (
                                                             <>
                                                                 <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-full" onClick={() => handleEditClick(sale)}>
                                                                     <Edit className="h-4 w-4" />
                                                                 </Button>
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="h-8 w-8 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-full"
-                                                                    onClick={async () => {
-                                                                        if (!confirm('Excluir venda?')) return;
-                                                                        const reason = prompt("Motivo:");
-                                                                        if (!reason) return;
+                                                                {/* Only allow DELETE if NOT paid/received, even for admin (to keep audit clean, usually) OR allow Admin? Current Logic: Admin can delete even if paid? No, check says: !(isAdmin ? false : isPaid). So Admin returns false on condition "is blocked?", so Admin CAN delete. */}
+                                                                {/* Wait, logic: !(isAdmin ? false : (sale.financial...)) */}
+                                                                {/* If IsAdmin = true -> !(false) -> true -> Can see Delete. */}
+                                                                {/* If IsAdmin = false -> !isPaid -> If isPaid, !(true) -> false -> Cannot see Delete. */}
+                                                                {sale.status !== 'canceled' && !(isAdmin ? false : (sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received')) && (
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="h-8 w-8 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-full"
+                                                                        onClick={async () => {
+                                                                            if (!confirm('Tem certeza que deseja EXCLUIR permanentemente? O estoque será devolvido.')) return;
+                                                                            const reason = prompt("Motivo:");
+                                                                            if (!reason) return;
 
-                                                                        setLoading(true);
-                                                                        try {
-                                                                            const { error } = await supabase.rpc('delete_sale_secure', { p_sale_id: sale.id, p_reason: reason });
-                                                                            if (error) throw error;
-                                                                            toast({ title: "Excluída!" });
-                                                                            fetchSales();
-                                                                        } catch (e: any) {
-                                                                            alert('Erro: ' + e.message);
-                                                                        } finally {
-                                                                            setLoading(false);
-                                                                        }
-                                                                    }}
-                                                                >
-                                                                    <Trash2 className="h-4 w-4" />
-                                                                </Button>
+                                                                            setLoading(true);
+                                                                            try {
+                                                                                const { error } = await supabase.rpc('delete_sale_secure', { p_sale_id: sale.id, p_reason: reason });
+                                                                                if (error) throw error;
+                                                                                toast({ title: "Excluída!" });
+                                                                                fetchSales();
+                                                                            } catch (e: any) {
+                                                                                alert('Erro: ' + e.message);
+                                                                            } finally {
+                                                                                setLoading(false);
+                                                                            }
+                                                                        }}
+                                                                    >
+                                                                        <Trash2 className="h-4 w-4" />
+                                                                    </Button>
+                                                                )}
                                                             </>
                                                         )}
                                                     </div>
@@ -473,12 +487,12 @@ export default function Sales() {
                                                 <Eye className="h-4 w-4" />
                                             </Button>
 
-                                            {(isAdmin || (currentUser && sale.user_id === currentUser.id)) && !(sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received') && (
+                                            {(isAdmin || (currentUser && sale.user_id === currentUser.id)) && (
                                                 <>
                                                     <Button variant="ghost" size="icon" className="h-4 w-4 text-blue-500" onClick={() => handleEditClick(sale)}>
                                                         <Edit className="h-4 w-4" />
                                                     </Button>
-                                                    {sale.status !== 'canceled' && (
+                                                    {sale.status !== 'canceled' && !(isAdmin ? false : (sale.financial_movements?.[0]?.status === 'paid' || sale.financial_movements?.[0]?.status === 'received')) && (
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"
@@ -494,12 +508,9 @@ export default function Sales() {
                                                                         p_sale_id: sale.id,
                                                                         p_reason: reason
                                                                     });
-
                                                                     if (error) throw error;
-
                                                                     toast({ title: "Venda excluída e estoque estornado!" });
                                                                     fetchSales();
-
                                                                 } catch (e: any) {
                                                                     alert('Erro: ' + e.message);
                                                                 } finally {
@@ -582,7 +593,7 @@ export default function Sales() {
                                         <TableHead className="font-bold">Produto</TableHead>
                                         <TableHead className="text-right font-bold">Qtd</TableHead>
                                         <TableHead className="text-right font-bold">Preço Un.</TableHead>
-                                        <TableHead className="text-right font-bold">Custo Un.</TableHead>
+                                        {canViewMargins && <TableHead className="text-right font-bold">Custo Un.</TableHead>}
                                         <TableHead className="text-right font-bold">Total Venda</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -595,13 +606,15 @@ export default function Sales() {
                                                 <TableCell className="font-medium">{item.products?.name || 'Item Desconhecido'}</TableCell>
                                                 <TableCell className="text-right font-semibold">{item.quantity}</TableCell>
                                                 <TableCell className="text-right text-zinc-600">R$ {Number(item.unit_price).toFixed(2)}</TableCell>
-                                                <TableCell className="text-right text-zinc-400 text-xs">
-                                                    R$ {(() => {
-                                                        const currentStock = item.products?.product_stocks?.find((s: any) => s.average_cost > 0) || item.products?.product_stocks?.[0];
-                                                        const cost = Number(currentStock?.average_cost) || 0;
-                                                        return cost.toFixed(2);
-                                                    })()}
-                                                </TableCell>
+                                                {canViewMargins && (
+                                                    <TableCell className="text-right text-zinc-400 text-xs">
+                                                        R$ {(() => {
+                                                            const currentStock = item.products?.product_stocks?.find((s: any) => s.average_cost > 0) || item.products?.product_stocks?.[0];
+                                                            const cost = Number(currentStock?.average_cost) || 0;
+                                                            return cost.toFixed(2);
+                                                        })()}
+                                                    </TableCell>
+                                                )}
                                                 <TableCell className="text-right font-bold text-zinc-900">R$ {(item.quantity * item.unit_price).toFixed(2)}</TableCell>
                                             </TableRow>
                                         ))
@@ -611,35 +624,37 @@ export default function Sales() {
                         </div>
 
                         {/* Summary Cards */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {(() => {
-                                const totalSale = Number(selectedViewSale?.total || 0);
-                                const totalCost = viewSaleItems.reduce((acc, item) => {
-                                    const currentStock = item.products?.product_stocks?.find((s: any) => s.average_cost > 0) || item.products?.product_stocks?.[0];
-                                    const cost = Number(currentStock?.average_cost) || 0;
-                                    return acc + (item.quantity * cost);
-                                }, 0);
-                                const profit = totalSale - totalCost;
-                                const margin = totalSale > 0 ? (profit / totalSale) * 100 : 0;
+                        {canViewMargins && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {(() => {
+                                    const totalSale = Number(selectedViewSale?.total || 0);
+                                    const totalCost = viewSaleItems.reduce((acc, item) => {
+                                        const currentStock = item.products?.product_stocks?.find((s: any) => s.average_cost > 0) || item.products?.product_stocks?.[0];
+                                        const cost = Number(currentStock?.average_cost) || 0;
+                                        return acc + (item.quantity * cost);
+                                    }, 0);
+                                    const profit = totalSale - totalCost;
+                                    const margin = totalSale > 0 ? (profit / totalSale) * 100 : 0;
 
-                                return (
-                                    <>
-                                        <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-100 flex flex-col gap-1">
-                                            <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Custo de Mercadoria</span>
-                                            <span className="text-lg font-bold text-zinc-700">R$ {totalCost.toFixed(2)}</span>
-                                        </div>
-                                        <div className="bg-green-50/50 p-4 rounded-xl border border-green-100 flex flex-col gap-1">
-                                            <span className="text-[10px] uppercase font-bold text-green-600/70 tracking-wider">Lucro Bruto</span>
-                                            <span className="text-lg font-bold text-green-700">R$ {profit.toFixed(2)}</span>
-                                        </div>
-                                        <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex flex-col gap-1">
-                                            <span className="text-[10px] uppercase font-bold text-blue-600/70 tracking-wider">Margem de Contribuição</span>
-                                            <span className="text-lg font-bold text-blue-700">{margin.toFixed(1)}%</span>
-                                        </div>
-                                    </>
-                                );
-                            })()}
-                        </div>
+                                    return (
+                                        <>
+                                            <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-100 flex flex-col gap-1">
+                                                <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Custo de Mercadoria</span>
+                                                <span className="text-lg font-bold text-zinc-700">R$ {totalCost.toFixed(2)}</span>
+                                            </div>
+                                            <div className="bg-green-50/50 p-4 rounded-xl border border-green-100 flex flex-col gap-1">
+                                                <span className="text-[10px] uppercase font-bold text-green-600/70 tracking-wider">Lucro Bruto</span>
+                                                <span className="text-lg font-bold text-green-700">R$ {profit.toFixed(2)}</span>
+                                            </div>
+                                            <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex flex-col gap-1">
+                                                <span className="text-[10px] uppercase font-bold text-blue-600/70 tracking-wider">Margem de Contribuição</span>
+                                                <span className="text-lg font-bold text-blue-700">{margin.toFixed(1)}%</span>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
+                            </div>
+                        )}
                     </div>
                     <DialogFooter className="bg-zinc-50/50 -mx-6 -mb-6 p-4 border-t mt-2">
                         <Button variant="outline" onClick={() => setIsViewOpen(false)} className="bg-white">Fechar Detalhes</Button>

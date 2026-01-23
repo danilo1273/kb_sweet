@@ -13,6 +13,7 @@ import { Search, Loader2, Edit, Trash2, History, Settings, Plus, Package, Clipbo
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InventoryAuditDialog } from "@/components/inventory/InventoryAuditDialog";
+import { useUserRole } from "@/hooks/useUserRole";
 // import { useIngredients } from "@/hooks/useIngredients";
 import { Ingredient, Category } from "@/types";
 
@@ -58,7 +59,12 @@ export default function Inventory() {
     const [historyData, setHistoryData] = useState<UnifiedHistoryItem[]>([]);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [selectedIngName, setSelectedIngName] = useState("");
-    const [isAdmin, setIsAdmin] = useState(false);
+
+
+    // Auth State
+    const { roles } = useUserRole();
+    const isAdmin = roles.includes('admin');
+    const canViewCosts = roles.some(r => ['admin', 'financial', 'buyer'].includes(r));
 
     // Dynamic meta
     const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
@@ -79,7 +85,6 @@ export default function Inventory() {
     const [isAuditOpen, setIsAuditOpen] = useState(false);
 
     useEffect(() => {
-        checkUserRole();
         fetchIngredients();
         fetchUnits();
         fetchCategories();
@@ -166,15 +171,6 @@ export default function Inventory() {
         } else {
             toast({ title: "Unidade removida" });
             fetchUnits();
-        }
-    }
-
-    async function checkUserRole() {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-            const { data } = await supabase.from('profiles').select('roles, role').eq('id', user.id).single();
-            const roles = data?.roles || (data?.role ? [data.role] : []) || [];
-            setIsAdmin(roles.includes('admin'));
         }
     }
 
@@ -716,7 +712,7 @@ export default function Inventory() {
                                         </div>
                                     </div>
                                     <div className="w-[30%] flex justify-end gap-1">
-                                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(item)}>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(item as any)}>
                                             <Edit className="h-4 w-4 text-zinc-400" />
                                         </Button>
                                     </div>
@@ -734,22 +730,39 @@ export default function Inventory() {
                                             }
 
                                             return (
-                                                <div key={loc.id} className="bg-zinc-50 p-2 rounded border border-zinc-100">
-                                                    <div className="text-[10px] text-zinc-500 font-bold uppercase truncate" title={loc.name}>{loc.name}</div>
-                                                    <div className={cn("font-medium",
-                                                        qty <= 0 ? "text-red-600 font-bold" :
-                                                            qty <= (item.min_stock || 0) ? "text-amber-600" : "text-zinc-700"
-                                                    )}>
-                                                        {qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-[10px]">{item.unit}</span>
+                                                <div key={loc.id} className="bg-zinc-50 p-2 rounded border border-zinc-100 flex flex-col justify-between">
+                                                    <div>
+                                                        <div className="text-[10px] text-zinc-500 font-bold uppercase truncate" title={loc.name}>{loc.name}</div>
+                                                        <div className={cn("font-medium",
+                                                            qty <= 0 ? "text-red-600 font-bold" :
+                                                                qty <= (item.min_stock || 0) ? "text-amber-600" : "text-zinc-700"
+                                                        )}>
+                                                            {qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-[10px]">{item.unit}</span>
+                                                        </div>
                                                     </div>
+                                                    {canViewCosts && (
+                                                        <div className="mt-1 pt-1 border-t border-zinc-200/50">
+                                                            <div className="text-[9px] text-zinc-400">Total</div>
+                                                            <div className="text-xs font-semibold text-zinc-600">
+                                                                {((qty || 0) * (stock?.average_cost || item.cost || 0)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             );
                                         })}
                                     </div>
                                 )}
-                                <div className="flex justify-between items-center text-xs text-zinc-400 pt-1">
-                                    <span>Total: {item.type === 'expense' ? '-' : `${totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
-                                    <Button variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => openHistory(item)}>
+                                <div className="flex justify-between items-center text-xs text-zinc-400 pt-1 border-t mt-2">
+                                    <div className="flex flex-col">
+                                        <span>Qtd Total: {item.type === 'expense' ? '-' : `${totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
+                                        {canViewCosts && item.type !== 'expense' && (
+                                            <span className="text-zinc-600 font-bold">
+                                                Valor Total: {(item.stocks?.reduce((acc, s) => acc + (s.quantity * s.average_cost), 0) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <Button variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => openHistory(item as any)}>
                                         <History className="h-3 w-3 mr-1" /> Histórico
                                     </Button>
                                 </div>
