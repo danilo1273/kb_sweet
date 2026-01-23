@@ -33,9 +33,19 @@ export function PaymentConfirmationDialog({
         if (isOpen) {
             fetchAccounts();
             setDate(new Date().toISOString().split('T')[0]);
+            // setSelectedAccount(""); // Don't reset if we want persistent experience, or reset if we want clean state. 
+            // Request: "Pre-filled". Let's reset but then immediately fill from accounts if available logic is added.
+            // Actually, better to reset but allow effect below to fill it.
             setSelectedAccount("");
         }
     }, [isOpen]);
+
+    // Auto-select first account when accounts load
+    useEffect(() => {
+        if (isOpen && accounts.length > 0 && !selectedAccount) {
+            setSelectedAccount(accounts[0].id);
+        }
+    }, [accounts, isOpen, selectedAccount]);
 
     const handleConfirm = async () => {
         if (!selectedAccount || !date) return;
