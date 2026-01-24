@@ -28,6 +28,7 @@ const POS = lazy(() => import('@/pages/POS'));
 const Banking = lazy(() => import('@/pages/Banking'));
 const StockHistory = lazy(() => import('@/pages/StockHistory'));
 const AuditLogs = lazy(() => import('@/pages/AuditLogs'));
+const AdminUsers = lazy(() => import('@/pages/AdminUsers')); // Restored
 const Raffle = lazy(() => import('@/pages/Raffle'));
 const Marketing = lazy(() => import('@/pages/Marketing'));
 
@@ -92,6 +93,11 @@ function App() {
                     <Route path="/marketing" element={
                         <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
                             <Marketing />
+                        </Suspense>
+                    } />
+                    <Route path="/team" element={
+                        <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}>
+                            <AdminUsers />
                         </Suspense>
                     } />
                     {/* Old Admin Routes - Commented out to avoid conflict with new SaaS Admin

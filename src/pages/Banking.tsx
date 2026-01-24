@@ -355,9 +355,7 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
 
                             // Day Totals
                             const dayTotal = items.reduce((acc: number, m: any) => {
-                                const val = m.isGroup
-                                    ? (m.groupType === 'sales' ? m.totalAmount : -m.totalAmount) // Sales +, Purchase -
-                                    : (m.type === 'income' ? Number(m.amount) : -Number(m.amount));
+                                const val = m.isGroup ? m.totalAmount : Number(m.amount);
                                 return acc + val;
                             }, 0);
 

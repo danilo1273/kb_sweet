@@ -5,20 +5,26 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
-import { Loader2, Plus, Gift, History, Ticket, Trophy, Target, Search, Trash2 } from "lucide-react";
+import { Loader2, Plus, Gift, History, Ticket, Trophy, Target, Search, Trash2, Pencil } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import confetti from "canvas-confetti";
 
+import { useUserRole } from "@/hooks/useUserRole";
+import { AlertTriangle } from "lucide-react";
+
 export default function Raffle() {
     const { toast } = useToast();
     const [raffles, setRaffles] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const { roles } = useUserRole();
+    const isAdmin = roles.includes('admin') || roles.includes('super_admin');
 
-    // New Raffle Wizard State
+    // New/Edit Raffle State
     const [isNewRaffleOpen, setIsNewRaffleOpen] = useState(false);
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [step, setStep] = useState(1); // 1: Config, 2: Prizes, 3: Review
     const [newRaffle, setNewRaffle] = useState({
         name: "",
@@ -47,7 +53,7 @@ export default function Raffle() {
         setLoading(true);
         const { data, error } = await supabase
             .from("raffles")
-            .select("*, winner:clients(name), prizes:raffle_prizes(quantity, products(name))")
+            .select("*, winner:clients(name), prizes:raffle_prizes(product_id, quantity, unit_cost, products(name))")
             .order("created_at", { ascending: false });
 
         if (error) console.error(error);
@@ -57,24 +63,27 @@ export default function Raffle() {
 
     async function fetchProducts() {
         // Fetch finished goods from products table
-        const { data } = await supabase
+        const { data, error } = await supabase
             .from("products")
-            .select("*, product_stocks(quantity)")
+            .select("*, product_stocks(quantity, average_cost)")
             .eq('type', 'finished');
 
         // Map to flat structure and filter
         if (data) {
             const valid = data
                 .map((product: any) => {
-                    const stockQty = product.product_stocks?.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) || 0;
-                    const legacyQty = Number(product.stock_quantity) || 0;
-                    const totalQty = stockQty > 0 ? stockQty : legacyQty;
+                    // Calculate Weighted Average Cost from Stock
+                    const stocks = product.product_stocks || [];
+                    const totalStockQty = stocks.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0;
+                    const totalStockValue = stocks.reduce((acc: number, s: any) => acc + ((Number(s.quantity) || 0) * (Number(s.average_cost) || 0)), 0) || 0;
+
+                    const weightedAvgCost = totalStockQty > 0 ? (totalStockValue / totalStockQty) : (product.cost || 0);
 
                     return {
                         id: product.id,
                         name: product.name,
-                        stock: totalQty,
-                        cost: product.cost_price || 0
+                        stock: totalStockQty,
+                        cost: weightedAvgCost
                     };
                 })
                 .filter(p => p.stock > 0);
@@ -91,31 +100,53 @@ export default function Raffle() {
         setSelectedPrizes(selectedPrizes.filter(p => p.id !== id));
     };
 
-    const handleCreateRaffle = async () => {
+    const handleCreateOrUpdateRaffle = async () => {
         if (selectedPrizes.length === 0) return toast({ variant: "destructive", title: "Adicione pelo menos um prêmio!" });
 
         const totalCost = selectedPrizes.reduce((acc, curr) => acc + (curr.cost * curr.quantity), 0);
 
         try {
-            // 1. Create Raffle
-            const { data: raffleData, error: raffleError } = await supabase
-                .from("raffles")
-                .insert([{
-                    name: newRaffle.name,
-                    start_date: newRaffle.start_date,
-                    end_date: newRaffle.end_date,
-                    ticket_value: newRaffle.ticket_value,
-                    total_cost: totalCost,
-                    status: 'open'
-                }])
-                .select()
-                .single();
+            let raffleId = editingId;
 
-            if (raffleError) throw raffleError;
+            if (editingId) {
+                // UPDATE
+                const { error: updateError } = await supabase
+                    .from("raffles")
+                    .update({
+                        name: newRaffle.name,
+                        start_date: newRaffle.start_date,
+                        end_date: newRaffle.end_date,
+                        ticket_value: newRaffle.ticket_value,
+                        total_cost: totalCost
+                    })
+                    .eq('id', editingId);
 
-            // 2. Create Prizes
+                if (updateError) throw updateError;
+
+                // Replace prizes
+                await supabase.from("raffle_prizes").delete().eq("raffle_id", editingId);
+            } else {
+                // CREATE
+                const { data: raffleData, error: insertError } = await supabase
+                    .from("raffles")
+                    .insert([{
+                        name: newRaffle.name,
+                        start_date: newRaffle.start_date,
+                        end_date: newRaffle.end_date,
+                        ticket_value: newRaffle.ticket_value,
+                        total_cost: totalCost,
+                        status: 'open'
+                    }])
+                    .select()
+                    .single();
+
+                if (insertError) throw insertError;
+                raffleId = raffleData.id;
+            }
+
+            // Insert Prizes (Common)
             const prizesPayload = selectedPrizes.map(p => ({
-                raffle_id: raffleData.id,
+                raffle_id: raffleId,
                 product_id: p.id,
                 quantity: p.quantity,
                 unit_cost: p.cost
@@ -124,8 +155,11 @@ export default function Raffle() {
             const { error: prizesError } = await supabase.from("raffle_prizes").insert(prizesPayload);
             if (prizesError) throw prizesError;
 
-            toast({ title: "Sorteio Criado!", description: "Agora aguarde o período de vendas para sortear." });
+            toast({ title: editingId ? "Sorteio Atualizado!" : "Sorteio Criado!", description: "Operação realizada com sucesso." });
+
+            // Reset
             setIsNewRaffleOpen(false);
+            setEditingId(null);
             setStep(1);
             setNewRaffle({ name: "", start_date: "", end_date: "", ticket_value: 50 });
             setSelectedPrizes([]);
@@ -133,6 +167,49 @@ export default function Raffle() {
 
         } catch (e: any) {
             toast({ variant: "destructive", title: "Erro", description: e.message });
+        }
+    };
+
+    const handleEditRaffle = (raffle: any) => {
+        setEditingId(raffle.id);
+        const formatDateTime = (dateStr: string) => {
+            if (!dateStr) return "";
+            const d = new Date(dateStr);
+            // Adjust to local ISO string for input[type="datetime-local"]
+            const pad = (n: number) => n < 10 ? '0' + n : n;
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
+
+        setNewRaffle({
+            name: raffle.name,
+            start_date: formatDateTime(raffle.start_date),
+            end_date: formatDateTime(raffle.end_date),
+            ticket_value: raffle.ticket_value
+        });
+
+        // Map prizes back to selection format
+        const formattedPrizes = (raffle.prizes || []).map((p: any) => ({
+            id: p.product_id, // Important: Use product_id
+            name: p.products?.name || 'Produto',
+            cost: p.unit_cost,
+            quantity: p.quantity
+        }));
+        setSelectedPrizes(formattedPrizes);
+
+        setStep(1);
+        setIsNewRaffleOpen(true);
+        fetchProducts(); // Ensure products are loaded for step 2
+    };
+
+    const handleDeleteRaffle = async (id: string) => {
+        if (!confirm("Tem certeza que deseja excluir este sorteio? Essa ação não pode ser desfeita.")) return;
+        try {
+            const { error } = await supabase.from("raffles").delete().eq('id', id);
+            if (error) throw error;
+            toast({ title: "Sorteio Excluído" });
+            fetchRaffles();
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Erro", description: error.message });
         }
     };
 
@@ -220,6 +297,8 @@ export default function Raffle() {
 
     const commitWinner = async (winner: any) => {
         try {
+            const { data: { user } } = await supabase.auth.getUser();
+
             // 1. Update Raffle Winner
             await supabase.from("raffles").update({
                 winner_client_id: winner.client_id,
@@ -227,14 +306,14 @@ export default function Raffle() {
                 status: 'completed'
             }).eq('id', activeDrawRaffle.id);
 
-            // 2. Deduct Stock (Using a new RPC would be ideal, but let's loop for now if small scale, or use a simple query)
-            // We need to deduct the prizes from product_stocks
-            // It's safer to use a backend function, but I'll write logic here for now, verifying plan called for backend logic?
-            // "Backend: Lógica de baixa de estoque para brindes". Yes.
-            // I should call an RPC here. I'll define it next.
-            // For now, assume it exists: supabase.rpc('finalize_raffle', { raffle_id: ... })
-            const { error } = await supabase.rpc('finalize_raffle_stock', { p_raffle_id: activeDrawRaffle.id });
-            if (error) throw error;
+            // 2. Deduct Stock using new RPC
+            if (user) {
+                const { error } = await supabase.rpc('finalize_raffle_stock', {
+                    p_raffle_id: activeDrawRaffle.id,
+                    p_user_id: user.id
+                });
+                if (error) throw error;
+            }
 
             toast({ title: "Sorteio Finalizado!", description: "Estoque baixado com sucesso." });
             fetchRaffles();
@@ -245,6 +324,27 @@ export default function Raffle() {
         }
     };
 
+    const handleRevert = async (raffleId: string) => {
+        if (!confirm("Tem certeza que deseja estornar este sorteio? O estoque será devolvido e o ganhador removido.")) return;
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const { error } = await supabase.rpc('revert_raffle_stock', {
+                p_raffle_id: raffleId,
+                p_user_id: user.id
+            });
+
+            if (error) throw error;
+
+            toast({ title: "Sorteio estornado", description: "O estoque foi devolvido com sucesso." });
+            fetchRaffles();
+        } catch (e: any) {
+            toast({ variant: 'destructive', title: "Erro ao estornar", description: e.message });
+        }
+    };
+
     return (
         <div className="flex-1 p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
             <div className="flex items-center justify-between">
@@ -252,7 +352,7 @@ export default function Raffle() {
                     <h2 className="text-3xl font-bold tracking-tight">Sorteador</h2>
                     <p className="text-zinc-500">Engaje clientes com sorteios baseados em compras.</p>
                 </div>
-                <Button onClick={() => { setIsNewRaffleOpen(true); fetchProducts(); }} className="bg-purple-600 hover:bg-purple-700 text-white">
+                <Button onClick={() => { setIsNewRaffleOpen(true); setEditingId(null); setNewRaffle({ name: "", start_date: "", end_date: "", ticket_value: 50 }); setSelectedPrizes([]); setStep(1); fetchProducts(); }} className="bg-purple-600 hover:bg-purple-700 text-white">
                     <Plus className="mr-2 h-4 w-4" /> Novo Sorteio
                 </Button>
             </div>
@@ -269,12 +369,20 @@ export default function Raffle() {
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {raffles.filter(r => r.status !== 'completed').map(raffle => (
-                                <Card key={raffle.id} className="border-purple-100 shadow-sm relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 p-2 opacity-10">
+                                <Card key={raffle.id} className="border-purple-100 shadow-sm relative overflow-visible group">
+                                    <div className="absolute top-2 right-2 flex gap-1 z-20">
+                                        <Button size="icon" variant="ghost" className="h-8 w-8 text-zinc-400 hover:text-purple-600 hover:bg-white/80" onClick={() => handleEditRaffle(raffle)}>
+                                            <Pencil className="h-4 w-4" />
+                                        </Button>
+                                        <Button size="icon" variant="ghost" className="h-8 w-8 text-zinc-400 hover:text-red-600 hover:bg-white/80" onClick={() => handleDeleteRaffle(raffle.id)}>
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                    <div className="absolute top-0 right-0 p-2 opacity-10 pointer-events-none">
                                         <Gift className="h-24 w-24 text-purple-600" />
                                     </div>
                                     <CardHeader>
-                                        <CardTitle>{raffle.name}</CardTitle>
+                                        <CardTitle className="pr-16 truncate" title={raffle.name}>{raffle.name}</CardTitle>
                                         <CardDescription>
                                             De {new Date(raffle.start_date).toLocaleDateString()} até {new Date(raffle.end_date).toLocaleDateString()}
                                         </CardDescription>
@@ -313,11 +421,12 @@ export default function Raffle() {
                                     <TableHead>Prêmios</TableHead>
                                     <TableHead>Custo Gerencial</TableHead>
                                     <TableHead>Status</TableHead>
+                                    {isAdmin && <TableHead className="text-right">Ações</TableHead>}
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {raffles.filter(r => r.status === 'completed').length === 0 ? (
-                                    <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Nenhum histórico.</TableCell></TableRow>
+                                    <TableRow><TableCell colSpan={isAdmin ? 7 : 6} className="text-center py-8 text-muted-foreground">Nenhum histórico.</TableCell></TableRow>
                                 ) : (
                                     raffles.filter(r => r.status === 'completed').map(raffle => (
                                         <TableRow key={raffle.id}>
@@ -331,6 +440,13 @@ export default function Raffle() {
                                             </TableCell>
                                             <TableCell>R$ {Number(raffle.total_cost).toFixed(2)}</TableCell>
                                             <TableCell><Badge variant="outline" className="bg-green-50 text-green-700">Concluído</Badge></TableCell>
+                                            {isAdmin && (
+                                                <TableCell className="text-right">
+                                                    <Button variant="ghost" size="sm" onClick={() => handleRevert(raffle.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
+                                                        <AlertTriangle className="h-4 w-4 mr-1" /> Estornar
+                                                    </Button>
+                                                </TableCell>
+                                            )}
                                         </TableRow>
                                     ))
                                 )}
@@ -344,7 +460,7 @@ export default function Raffle() {
             <Dialog open={isNewRaffleOpen} onOpenChange={setIsNewRaffleOpen}>
                 <DialogContent className="max-w-2xl">
                     <DialogHeader>
-                        <DialogTitle>Novo Sorteio - Passo {step}/2</DialogTitle>
+                        <DialogTitle>{editingId ? "Editar Sorteio" : "Novo Sorteio"} - Passo {step}/2</DialogTitle>
                         <DialogDescription>{step === 1 ? 'Configurações Básicas' : 'Escolha os Prêmios do Estoque'}</DialogDescription>
                     </DialogHeader>
 
@@ -438,28 +554,44 @@ export default function Raffle() {
                                 setStep(2);
                             }}>Próximo</Button>
                         ) : (
-                            <Button onClick={handleCreateRaffle} className="bg-purple-600 hover:bg-purple-700">Criar Sorteio</Button>
+                            <Button onClick={handleCreateOrUpdateRaffle} className="bg-purple-600 hover:bg-purple-700 text-white">
+                                {editingId ? "Salvar Alterações" : "Criar Sorteio"}
+                            </Button>
                         )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
 
             {/* DRAW DIALOG */}
+
             <Dialog open={isDrawOpen} onOpenChange={setIsDrawOpen}>
                 <DialogContent className="sm:max-w-md text-center">
                     <DialogHeader>
                         <DialogTitle className="text-center text-2xl font-bold text-purple-700">
-                            {winningTicket ? "TEMOS UM GANHADOR!" : "Sorteando..."}
+                            {winningTicket ? "TEMOS UM GANHADOR!" : "Participantes do Sorteio"}
                         </DialogTitle>
                     </DialogHeader>
 
-                    <div className="py-8 flex flex-col items-center justify-center space-y-4">
-                        <div className={`text-6xl font-black transition-all duration-100 ${isAnimating ? 'blur-sm scale-90 opacity-70' : 'scale-110 text-purple-600'}`}>
-                            {winningTicket?.ticket_number || "---"}
-                        </div>
-                        <div className="text-xl font-medium text-zinc-700 h-8">
-                            {winningTicket?.client_name || "Embaralhando..."}
-                        </div>
+                    <div className="py-4 flex flex-col items-center justify-center space-y-4">
+                        {winningTicket ? (
+                            <>
+                                <div className={`text-6xl font-black transition-all duration-100 ${isAnimating ? 'blur-sm scale-90 opacity-70' : 'scale-110 text-purple-600'}`}>
+                                    {winningTicket?.ticket_number || "---"}
+                                </div>
+                                <div className="text-xl font-medium text-zinc-700 h-8">
+                                    {winningTicket?.client_name || "Embaralhando..."}
+                                </div>
+                            </>
+                        ) : (
+                            <div className="w-full max-h-[300px] overflow-y-auto border rounded-md p-2 bg-zinc-50 space-y-1">
+                                {drawCandidates.map((ticket: any) => (
+                                    <div key={ticket.ticket_number} className="flex justify-between items-center text-sm p-2 bg-white rounded shadow-sm border">
+                                        <span className="font-bold text-purple-600">#{ticket.ticket_number}</span>
+                                        <span className="text-zinc-700 truncate max-w-[200px]">{ticket.client_name}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                         <div className="text-sm text-zinc-400">Total de Cupons: {drawCandidates.length}</div>
                     </div>
 
@@ -469,8 +601,8 @@ export default function Raffle() {
                                 <Target className="mr-2 h-6 w-6 animate-pulse" /> SORTEAR AGORA
                             </Button>
                         )}
-                        {winningTicket && !isAnimating && (
-                            <Button variant="outline" onClick={() => setIsDrawOpen(false)}>Fechar</Button>
+                        {(winningTicket || (!winningTicket && !isAnimating)) && (
+                            <Button variant="outline" onClick={() => setIsDrawOpen(false)}>{winningTicket ? "Fechar" : "Cancelar"}</Button>
                         )}
                     </DialogFooter>
                 </DialogContent>

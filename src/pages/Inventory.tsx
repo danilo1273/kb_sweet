@@ -219,16 +219,18 @@ export default function Inventory() {
             console.error(prodError);
         }
 
-        const mapStocks = (item: any) => {
+        const mapStocks = (item: any, ignoreLegacy = false) => {
             const stocks = item.product_stocks || [];
-            // Backward compatibility
             const stockDanilo = stocks.find((s: any) => s.location?.slug === 'stock-danilo');
             const stockAdriel = stocks.find((s: any) => s.location?.slug === 'stock-adriel');
+
+            const sDanilo = stockDanilo ? stockDanilo.quantity : (ignoreLegacy ? 0 : (item.stock_danilo || 0));
+            const sAdriel = stockAdriel ? stockAdriel.quantity : (ignoreLegacy ? 0 : (item.stock_adriel || 0));
 
             return {
                 ...item,
                 type: item.type || 'stock',
-                isProduct: false,
+                isProduct: ignoreLegacy, // Logic inferred: ignoreLegacy is true for Products
                 stocks: stocks.map((s: any) => ({
                     location_id: s.location?.id,
                     location_name: s.location?.name,
@@ -236,17 +238,17 @@ export default function Inventory() {
                     quantity: s.quantity,
                     average_cost: s.average_cost
                 })),
-                stock_danilo: stockDanilo ? stockDanilo.quantity : (item.stock_danilo || 0),
-                stock_adriel: stockAdriel ? stockAdriel.quantity : (item.stock_adriel || 0),
-                cost_danilo: stockDanilo ? stockDanilo.average_cost : (item.cost_danilo || 0),
-                cost_adriel: stockAdriel ? stockAdriel.average_cost : (item.cost_adriel || 0),
+                stock_danilo: sDanilo,
+                stock_adriel: sAdriel,
+                cost_danilo: stockDanilo ? stockDanilo.average_cost : (ignoreLegacy ? 0 : (item.cost_danilo || 0)),
+                cost_adriel: stockAdriel ? stockAdriel.average_cost : (ignoreLegacy ? 0 : (item.cost_adriel || 0)),
             };
         };
 
         const mappedIngredients: InventoryItem[] = (ingData || []).map(mapStocks);
 
         const mappedProducts: InventoryItem[] = (prodData || []).map((p: any) => ({
-            ...mapStocks(p),
+            ...mapStocks(p, true),
             id: p.id,
             name: p.name,
             category: p.category || 'Produtos',

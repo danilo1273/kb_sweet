@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/ui/use-toast";
-import { Loader2, Plus, Trash2, Edit } from "lucide-react";
+import { Loader2, Plus, Trash2, Edit, Upload } from "lucide-react";
 import {
     Dialog,
     DialogContent,
@@ -29,6 +29,7 @@ export default function CompanySettings() {
     // Edit Company State
     const [companyName, setCompanyName] = useState("");
     const [companyLogo, setCompanyLogo] = useState("");
+    const [uploading, setUploading] = useState(false);
 
     // Stock Location State
     const [isLocationDialogOpen, setIsLocationDialogOpen] = useState(false);
@@ -38,6 +39,43 @@ export default function CompanySettings() {
     useEffect(() => {
         fetchData();
     }, []);
+
+    async function handleLogoUpload(event: React.ChangeEvent<HTMLInputElement>) {
+        if (!event.target.files || event.target.files.length === 0) {
+            return;
+        }
+
+        try {
+            setUploading(true);
+            const file = event.target.files[0];
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${company?.id}-${Date.now()}.${fileExt}`;
+            const filePath = `${fileName}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from('company-logos')
+                .upload(filePath, file);
+
+            if (uploadError) {
+                throw uploadError;
+            }
+
+            const { data } = supabase.storage
+                .from('company-logos')
+                .getPublicUrl(filePath);
+
+            setCompanyLogo(data.publicUrl);
+            toast({ title: "Imagem carregada", description: "Clique em Salvar Alterações para confirmar." });
+        } catch (error: any) {
+            toast({
+                title: "Erro no upload",
+                description: error.message,
+                variant: "destructive"
+            });
+        } finally {
+            setUploading(false);
+        }
+    }
 
     async function fetchData() {
         try {
@@ -184,18 +222,36 @@ export default function CompanySettings() {
                                 />
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor="logo">URL do Logo</Label>
-                                <Input
-                                    id="logo"
-                                    value={companyLogo}
-                                    onChange={(e) => setCompanyLogo(e.target.value)}
-                                    placeholder="https://..."
-                                />
-                                {companyLogo && (
-                                    <div className="mt-2 border rounded p-2 w-fit">
-                                        <img src={companyLogo} alt="Preview" className="h-16 object-contain" />
+                                <Label htmlFor="logo">Logo da Empresa</Label>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex-1">
+                                        <div className="relative">
+                                            <Input
+                                                id="logo"
+                                                type="file"
+                                                accept="image/*"
+                                                onChange={handleLogoUpload}
+                                                disabled={uploading}
+                                                className="cursor-pointer"
+                                            />
+                                            {uploading && (
+                                                <div className="absolute inset-0 flex items-center justify-center bg-white/80">
+                                                    <Loader2 className="h-4 w-4 animate-spin text-purple-600" />
+                                                </div>
+                                            )}
+                                        </div>
+                                        <p className="text-[10px] text-zinc-500 mt-1">Recomendado: PNG ou JPG, fundo transparente.</p>
                                     </div>
-                                )}
+                                    {companyLogo ? (
+                                        <div className="h-16 w-16 border rounded flex items-center justify-center p-1 bg-zinc-50 relative group">
+                                            <img src={companyLogo} alt="Logo" className="max-h-full max-w-full object-contain" />
+                                        </div>
+                                    ) : (
+                                        <div className="h-16 w-16 border border-dashed rounded flex items-center justify-center text-zinc-300">
+                                            <Upload className="h-6 w-6" />
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <Button onClick={handleUpdateCompany} className="mt-4">Salvar Alterações</Button>
                         </CardContent>

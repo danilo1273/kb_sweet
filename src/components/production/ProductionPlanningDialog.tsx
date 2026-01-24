@@ -10,6 +10,7 @@ import { supabase } from "@/supabaseClient";
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { POSProduct } from "@/types";
+import { cn } from "@/lib/utils";
 
 // Define minimal shape for existing order to avoid circular dependencies if reusing Types
 interface MinimalOrder {
@@ -24,6 +25,7 @@ interface ProductionPlanningDialogProps {
     onOrderCreated: () => void;
     existingOrder?: MinimalOrder | null;
     openOrders?: MinimalOrder[]; // List of all open orders for batch analysis
+    availableProducts: any[]; // Passed from parent (filtered)
 }
 
 interface AnalysisItem {
@@ -37,13 +39,14 @@ interface AnalysisItem {
     status: 'ok' | 'buy' | 'produce';
 }
 
-export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, existingOrder, openOrders = [] }: ProductionPlanningDialogProps) {
+export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, existingOrder, openOrders = [], availableProducts = [] }: ProductionPlanningDialogProps) {
     const { toast } = useToast();
     const [step, setStep] = useState<'input' | 'analysis'>('input');
     const [loading, setLoading] = useState(false);
 
     // Input State
-    const [products, setProducts] = useState<POSProduct[]>([]);
+    // products coming from prop 'availableProducts'
+    const [prodFilter, setProdFilter] = useState("");
     const [selectedProductId, setSelectedProductId] = useState("");
     const [quantity, setQuantity] = useState(1);
     const [stockSource, setStockSource] = useState<'danilo' | 'adriel'>('danilo');
@@ -57,7 +60,7 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
 
     useEffect(() => {
         if (isOpen) {
-            fetchProducts();
+            // fetchProducts(); // Removed internal fetch
             setAnalysisItems([]);
             setBatchAnalysisItems([]);
 
@@ -78,17 +81,12 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
 
     // Trigger simulation once products are loaded if existingOrder is present
     useEffect(() => {
-        if (isOpen && existingOrder && products.length > 0 && !loading && analysisItems.length === 0) {
+        if (isOpen && existingOrder && availableProducts.length > 0 && !loading && analysisItems.length === 0) {
             handleSimulate(existingOrder.product_id, existingOrder.quantity, existingOrder.stock_source || 'danilo');
         }
-    }, [isOpen, existingOrder, products]);
+    }, [isOpen, existingOrder, availableProducts]);
 
-    async function fetchProducts() {
-        const { data } = await supabase.from('products')
-            .select('*')
-            .order('name');
-        if (data) setProducts(data);
-    }
+    // Removed async function fetchProducts
 
     async function handleSimulate(manualProdId?: string, manualQty?: number, manualSource?: 'danilo' | 'adriel') {
         const pId = manualProdId || selectedProductId;
@@ -99,7 +97,7 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
         setLoading(true);
         try {
             // 1. Get Product Info (Batch Size)
-            const product = products.find(p => p.id === pId);
+            const product = availableProducts.find(p => p.id === pId);
             const batchSize = (product as any)?.batch_size || 1;
 
             // 2. Fetch BOM
@@ -127,13 +125,30 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
             let productsMap = new Map();
 
             if (ingIds.length > 0) {
-                const { data: ings } = await supabase.from('ingredients').select('*').in('id', ingIds);
-                ings?.forEach(i => ingredientsMap.set(i.id, i));
+                const { data: ings } = await supabase
+                    .from('ingredients')
+                    .select('*, product_stocks(quantity, stock_locations(slug))')
+                    .in('id', ingIds);
+
+                ings?.forEach((i: any) => {
+                    const sDanilo = i.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-danilo')?.quantity || 0;
+                    const sAdriel = i.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-adriel')?.quantity || 0;
+                    // Overwrite legacy with computed
+                    ingredientsMap.set(i.id, { ...i, stock_danilo: sDanilo, stock_adriel: sAdriel });
+                });
             }
 
             if (prodIds.length > 0) {
-                const { data: prods } = await supabase.from('products').select('*').in('id', prodIds);
-                prods?.forEach(p => productsMap.set(p.id, p));
+                const { data: prods } = await supabase
+                    .from('products')
+                    .select('*, product_stocks(quantity, stock_locations(slug))')
+                    .in('id', prodIds);
+
+                prods?.forEach((p: any) => {
+                    const sDanilo = p.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-danilo')?.quantity || 0;
+                    const sAdriel = p.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-adriel')?.quantity || 0;
+                    productsMap.set(p.id, { ...p, stock_danilo: sDanilo, stock_adriel: sAdriel });
+                });
             }
 
             // 5. Build Analysis
@@ -264,15 +279,31 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
             let productsMap = new Map();
 
             if (ingIds.length > 0) {
-                const { data: ings } = await supabase.from('ingredients').select('*').in('id', ingIds);
-                ings?.forEach(i => ingredientsMap.set(i.id, i));
+                const { data: ings } = await supabase
+                    .from('ingredients')
+                    .select('*, product_stocks(quantity, stock_locations(slug))')
+                    .in('id', ingIds);
+
+                ings?.forEach((i: any) => {
+                    const sDanilo = i.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-danilo')?.quantity || 0;
+                    const sAdriel = i.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-adriel')?.quantity || 0;
+                    ingredientsMap.set(i.id, { ...i, stock_danilo: sDanilo, stock_adriel: sAdriel });
+                });
             }
 
             // Map for products (both main products and intermediate products)
             const allProductIdsToFetch = Array.from(new Set([...productIds, ...childProdIds]));
             if (allProductIdsToFetch.length > 0) {
-                const { data: prods } = await supabase.from('products').select('*').in('id', allProductIdsToFetch);
-                prods?.forEach(p => productsMap.set(p.id, p));
+                const { data: prods } = await supabase
+                    .from('products')
+                    .select('*, product_stocks(quantity, stock_locations(slug))')
+                    .in('id', allProductIdsToFetch);
+
+                prods?.forEach((p: any) => {
+                    const sDanilo = p.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-danilo')?.quantity || 0;
+                    const sAdriel = p.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-adriel')?.quantity || 0;
+                    productsMap.set(p.id, { ...p, stock_danilo: sDanilo, stock_adriel: sAdriel });
+                });
             }
 
             // 5. Aggregate Requirements by Stock Source
@@ -289,7 +320,7 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
 
                 const product = productsMap.get(order.product_id) as any;
                 // Fallback to fetchProducts state if not in map (should be in map due to step 4)
-                const fallbackProd = (products.find(p => p.id === order.product_id) as any);
+                const fallbackProd = (availableProducts.find(p => p.id === order.product_id) as any);
                 const batchSize = product?.batch_size || fallbackProd?.batch_size || 1;
 
                 const ratio = order.quantity / Number(batchSize);
@@ -543,16 +574,24 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                                 <TabsContent value="single" className="mt-0">
                                     {step === 'input' ? (
                                         <div className="space-y-6 max-w-lg mx-auto mt-8">
-                                            <div className="space-y-2">
+                                            <div className="space-y-2 flex flex-col">
                                                 <label className="text-sm font-medium">Produto a Produzir</label>
+                                                <Input
+                                                    placeholder="Filtrar produto..."
+                                                    value={prodFilter}
+                                                    onChange={(e) => setProdFilter(e.target.value)}
+                                                    className="mb-2"
+                                                />
                                                 <Select value={selectedProductId} onValueChange={setSelectedProductId}>
                                                     <SelectTrigger>
-                                                        <SelectValue placeholder="Selecione um produto..." />
+                                                        <SelectValue placeholder="Selecione..." />
                                                     </SelectTrigger>
-                                                    <SelectContent>
-                                                        {products.map(p => (
-                                                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                                                        ))}
+                                                    <SelectContent className="max-h-[300px]">
+                                                        {availableProducts
+                                                            .filter(p => p.name.toLowerCase().includes(prodFilter.toLowerCase()))
+                                                            .map(p => (
+                                                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                                                            ))}
                                                     </SelectContent>
                                                 </Select>
                                             </div>
@@ -563,7 +602,7 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                                                         Quantidade
                                                         {selectedProductId && (
                                                             <span className="ml-1 text-zinc-500 font-normal">
-                                                                ({products.find(p => p.id === selectedProductId)?.unit || 'un'})
+                                                                ({availableProducts.find(p => p.id === selectedProductId)?.unit || 'un'})
                                                             </span>
                                                         )}
                                                     </label>

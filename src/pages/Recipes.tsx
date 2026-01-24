@@ -10,8 +10,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Search, Loader2, Edit, Trash2, Image as ImageIcon, X, Box, Layers, Settings, UploadCloud } from "lucide-react";
+import { Plus, Search, Loader2, Edit, Trash2, Image as ImageIcon, X, Box, Layers, Settings, UploadCloud, BookOpen } from "lucide-react";
 import { useUserRole } from "@/hooks/useUserRole";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Category {
     id: number;
@@ -32,6 +34,9 @@ interface Product {
     unit?: string;
     stock_danilo?: number;
     stock_adriel?: number;
+    created_by?: string; // Legacy/Primary
+    allowed_users?: string[]; // Multi-user
+    product_stocks?: { quantity: number; location_id?: string; }[];
 }
 
 interface Ingredient {
@@ -96,11 +101,20 @@ export default function Recipes() {
     // Image Upload State
     const [uploading, setUploading] = useState(false);
 
+    // Admin: Users List for "Created By" assignment
+    const [allUsers, setAllUsers] = useState<any[]>([]);
+
     useEffect(() => {
         fetchProducts();
         fetchResources();
         fetchCategories();
-    }, []);
+        fetchUsers(); // Fetch users regardless of role to resolve names in UI
+    }, [roles]);
+
+    async function fetchUsers() {
+        const { data } = await supabase.from('profiles').select('id, full_name, email').order('full_name');
+        if (data) setAllUsers(data);
+    }
 
     async function fetchCategories() {
         // Fetch categories appropriate for products/recipes ONLY
@@ -144,7 +158,7 @@ export default function Recipes() {
 
             // 1. Fetch ALL products and ingredients
             const { data: allProducts, error: pErr } = await supabase.from('products').select('*');
-            const { data: allIngredients, error: iErr } = await supabase.from('ingredients').select('*');
+            const { data: allIngredients, error: iErr } = await supabase.from('ingredients').select('*, product_stocks(quantity, average_cost)');
 
             if (pErr || iErr) {
                 console.error("Error fetching data for recalc", pErr, iErr);
@@ -184,7 +198,13 @@ export default function Recipes() {
                     if (item.ingredient_id) {
                         const ing: any = ingMap.get(item.ingredient_id);
                         if (ing) {
-                            const unitBaseCost = ing.cost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0);
+                            // Calculate Weighted Average Cost from Stock for the Ingredient
+                            const iStocks = ing.product_stocks || [];
+                            const iTotalQty = iStocks.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0);
+                            const iTotalVal = iStocks.reduce((acc: number, s: any) => acc + ((Number(s.quantity) || 0) * (Number(s.average_cost) || 0)), 0);
+                            const weightedCost = iTotalQty > 0 ? iTotalVal / iTotalQty : (ing.cost || 0);
+
+                            const unitBaseCost = weightedCost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0); // Fallback to legacy if 0
                             if (ing.unit_weight && unitBaseCost) {
                                 let qty = item.quantity;
                                 if (['kg', 'l'].includes(item.unit)) qty *= 1000;
@@ -266,13 +286,30 @@ export default function Recipes() {
 
     async function fetchProducts() {
         setLoading(true);
-        const { data, error } = await supabase.from('products').select('*').order('name');
-        if (error) {
-            toast({ variant: "destructive", title: "Erro ao carregar receitas", description: error.message });
-        } else {
-            setProducts(data || []);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+
+            let query = supabase
+                .from('products')
+                .select('*, product_stocks(quantity)')
+                .order('name');
+
+            // Permission Filter
+            // Reverted to strict Admin/SuperAdmin check to avoid showing private recipes to Financial/Buyer roles
+            if (!roles.includes('admin') && !roles.includes('super_admin')) {
+                // Basic user: Only see their own or public
+                query = query.or(`allowed_users.cs.{${user?.id}},allowed_users.is.null,created_by.eq.${user?.id},created_by.is.null`);
+            }
+
+            const { data: prods, error } = await query;
+            if (error) throw error;
+
+            if (prods) setProducts(prods as any);
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Erro ao carregar", description: error.message });
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     }
 
     async function fetchResources() {
@@ -308,36 +345,58 @@ export default function Recipes() {
     async function handleSave() {
         setIsSaving(true);
         try {
+            const { data: { user } } = await supabase.auth.getUser();
             if (!currentProduct.name) throw new Error("Nome é obrigatório");
+
+            // Duplicate Check
+            const nameExists = products.some(p =>
+                p.name.trim().toLowerCase() === currentProduct.name?.trim().toLowerCase() &&
+                p.id !== currentProduct.id
+            );
+            if (nameExists) throw new Error("Já existe um produto com este nome.");
 
             const payload = {
                 name: currentProduct.name,
                 category: currentProduct.category || 'Geral',
                 price: Number(currentProduct.price || 0),
                 // Use calculated cost if available (dynamic), otherwise fallback to manual entry/saved
-                // Correctly calculate Unit Cost = Total / BatchSize
                 cost: calculatedCost > 0
                     ? (calculatedCost / (Number(currentProduct.batch_size) || 1))
                     : Number(currentProduct.cost || 0),
                 image_url: currentProduct.image_url,
                 type: currentProduct.type || 'finished',
                 batch_size: Number(currentProduct.batch_size || 1),
-                unit: currentProduct.unit || 'un'
+                unit: currentProduct.unit || 'un',
+                // Persist allowed_users
+                allowed_users: currentProduct.allowed_users,
+                // Ensure legacy created_by is set if allowed_users has entries (take first) or keep existing
+                created_by: (currentProduct.allowed_users && currentProduct.allowed_users.length > 0)
+                    ? currentProduct.allowed_users[0]
+                    : (currentProduct.created_by || user?.id)
             };
+
+            // Auto-add creator if regular user
+            if (!roles.includes('admin') && !roles.includes('super_admin')) {
+                if (!payload.allowed_users) payload.allowed_users = [];
+                if (user?.id && !payload.allowed_users.includes(user.id)) {
+                    payload.allowed_users.push(user.id);
+                }
+            }
 
             if (currentProduct.id) {
                 const { error } = await supabase.from('products').update(payload).eq('id', currentProduct.id);
                 if (error) throw error;
                 toast({ title: "Produto atualizado!" });
             } else {
-                const { error } = await supabase.from('products').insert([payload]);
+                // Attach creator on insert
+                const insertPayload = { ...payload, created_by: user?.id };
+                const { error } = await supabase.from('products').insert([insertPayload]);
                 if (error) throw error;
                 toast({ title: "Produto criado!" });
             }
 
             setIsDialogOpen(false);
             fetchProducts();
-            // Refresh intermediates list as we might have created one
             fetchResources();
         } catch (error: any) {
             toast({ variant: "destructive", title: "Erro ao salvar", description: error.message });
@@ -645,65 +704,107 @@ export default function Recipes() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {loading ? (
-                    <div className="col-span-3 flex justify-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>
+                    <div className="col-span-1 md:col-span-2 lg:col-span-3 flex justify-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>
                 ) : filteredProducts.length === 0 ? (
-                    <div className="col-span-3 text-center text-zinc-500 py-10">Nenhum produto cadastrado.</div>
+                    <div className="col-span-1 md:col-span-2 lg:col-span-3 text-center text-zinc-500 py-10">Nenhum produto cadastrado.</div>
                 ) : (
-                    filteredProducts.map((product) => (
-                        <div key={product.id} className="group relative bg-white border border-zinc-200 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                            <div className="absolute top-2 right-2 z-10">
-                                {product.type === 'intermediate' && (
-                                    <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-200">
-                                        BASE / INTERM.
+                    // Grouping Logic
+                    Object.entries(filteredProducts.reduce((acc, product) => {
+                        const cat = product.category || 'Sem Categoria';
+                        if (!acc[cat]) acc[cat] = [];
+                        acc[cat].push(product);
+                        return acc;
+                    }, {} as Record<string, Product[]>))
+                        .sort((a, b) => a[0].localeCompare(b[0])) // Sort categories A-Z
+                        .map(([category, items]) => (
+                            <div key={category} className="col-span-1 md:col-span-2 lg:col-span-3 space-y-4 mb-6">
+                                <div className="flex items-center gap-2 border-b border-zinc-200 pb-2">
+                                    <span className="bg-purple-100 text-purple-700 p-1.5 rounded-md">
+                                        <BookOpen className="h-4 w-4" />
                                     </span>
-                                )}
-                            </div>
+                                    <h3 className="text-xl font-bold text-zinc-800">{category}</h3>
+                                    <span className="text-xs font-semibold text-zinc-500 bg-zinc-100 px-2 py-0.5 rounded-full ml-auto">
+                                        {items.length} itens
+                                    </span>
+                                </div>
 
-                            <div className="aspect-video bg-zinc-100 flex items-center justify-center relative overflow-hidden">
-                                {product.image_url ? (
-                                    <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
-                                ) : (
-                                    <ImageIcon className="h-10 w-10 text-zinc-300" />
-                                )}
-                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                    <Button variant="secondary" size="sm" onClick={() => openEdit(product)}>
-                                        <Edit className="h-4 w-4 mr-2" /> Editar
-                                    </Button>
-                                    <Button variant="destructive" size="sm" onClick={() => handleDelete(product.id)}>
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            </div>
-                            <div className="p-4">
-                                <div className="flex justify-between items-start mb-2">
-                                    <div>
-                                        <h3 className="font-semibold text-lg text-zinc-900">{product.name}</h3>
-                                        <div className="flex gap-2 mt-1">
-                                            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600">
-                                                {product.category || 'Geral'}
-                                            </span>
-                                            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">
-                                                Estoque: {product.stock_danilo || 0} {product.unit || 'un'}
-                                            </span>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {items.map((product) => (
+                                        <div key={product.id} className="group relative bg-white border border-zinc-200 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                                            <div className="absolute top-2 right-2 z-10">
+                                                {product.type === 'intermediate' && (
+                                                    <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-200">
+                                                        BASE
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            <div className="h-32 bg-zinc-100 flex items-center justify-center relative overflow-hidden">
+                                                {product.image_url ? (
+                                                    <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <ImageIcon className="h-8 w-8 text-zinc-300" />
+                                                )}
+                                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                                    <Button variant="secondary" size="sm" onClick={() => openEdit(product)} className="h-7 text-xs">
+                                                        <Edit className="h-3 w-3 mr-1" /> Editar
+                                                    </Button>
+                                                    <Button variant="destructive" size="sm" onClick={() => handleDelete(product.id)} className="h-7 w-7 p-0">
+                                                        <Trash2 className="h-3 w-3" />
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                            <div className="p-3">
+                                                <div className="flex justify-between items-start mb-1">
+                                                    <div className="flex-1 min-w-0 mr-2">
+                                                        <h3 className="font-semibold text-sm text-zinc-900 truncate" title={product.name}>{product.name}</h3>
+                                                        <div className="flex gap-1 mt-1 flex-wrap">
+                                                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-600">
+                                                                {product.category || 'Geral'}
+                                                            </span>
+                                                            <span className={cn("text-[10px] font-medium px-1.5 py-0.5 rounded-full",
+                                                                (product.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0) > 0
+                                                                    ? "bg-blue-50 text-blue-600"
+                                                                    : "bg-red-50 text-red-600")}>
+                                                                {/* Display SUM of stock */}
+                                                                {(product.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0)} {product.unit || 'un'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    {product.type === 'finished' && (
+                                                        <span className="font-bold text-green-600 text-sm whitespace-nowrap">R$ {product.price.toFixed(2)}</span>
+                                                    )}
+                                                </div>
+
+                                                <div className="mt-2 pt-2 border-t border-zinc-100 text-[10px] text-zinc-400 flex justify-between items-center">
+                                                    <span>
+                                                        {canViewCosts && `Custo: R$ ${(product.cost || 0).toFixed(2)}`}
+                                                    </span>
+
+                                                    {/* Owner Display - Show Names */}
+                                                    <div className="flex items-center gap-1 max-w-[60%] justify-end truncate">
+                                                        {product.allowed_users && product.allowed_users.length > 0 ? (
+                                                            <span className="text-purple-600 font-medium truncate"
+                                                                title={`Donos: ${product.allowed_users.map(uid => allUsers.find(u => u.id === uid)?.full_name || 'Usuário').join(', ')}`}>
+                                                                {product.allowed_users.map(uid => allUsers.find(u => u.id === uid)?.full_name?.split(' ')[0] || 'User').join(', ')}
+                                                            </span>
+                                                        ) : product.created_by ? (
+                                                            <span className="text-zinc-500 font-medium truncate" title="Criado por (Legado)">
+                                                                {allUsers.find(u => u.id === product.created_by)?.full_name?.split(' ')[0] || 'Criador'}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-zinc-400 flex items-center gap-0.5">
+                                                                <BookOpen className="h-3 w-3" /> Pública
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                    {product.type === 'finished' && (
-                                        <span className="font-bold text-green-600">R$ {product.price.toFixed(2)}</span>
-                                    )}
-                                </div>
-                                <div className="mt-2 text-sm text-zinc-500">
-                                    <p>
-                                        {canViewCosts && `Custo Unit.: R$ ${(product.cost || 0).toFixed(2)} / ${product.unit || 'un'}`}
-                                    </p>
-                                    {(product.batch_size || 0) > 1 && canViewCosts && (
-                                        <p className="text-xs text-zinc-400">
-                                            Lote ({product.batch_size} {product.unit}): R$ {(product.cost && product.batch_size ? (product.cost * product.batch_size).toFixed(2) : (product.cost || 0).toFixed(2))}
-                                        </p>
-                                    )}
+                                    ))}
                                 </div>
                             </div>
-                        </div>
-                    ))
+                        ))
                 )}
             </div>
 
@@ -719,16 +820,51 @@ export default function Recipes() {
                         </TabsList>
 
                         <TabsContent value="basic">
-                            <div className="grid gap-4 py-4">
-                                <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-4 py-4">
+
+                                {/* 1. Name - Full Width */}
+                                <div className="space-y-2">
+                                    <Label htmlFor="name">Nome do Produto</Label>
+                                    <Input
+                                        id="name"
+                                        value={currentProduct.name || ''}
+                                        onChange={(e) => setCurrentProduct({ ...currentProduct, name: e.target.value })}
+                                        className="text-lg font-medium"
+                                    />
+                                </div>
+
+                                {/* 2. Category & Type */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
-                                        <Label htmlFor="name">Nome do Produto</Label>
-                                        <Input
-                                            id="name"
-                                            value={currentProduct.name || ''}
-                                            onChange={(e) => setCurrentProduct({ ...currentProduct, name: e.target.value })}
-                                        />
+                                        <div className="flex items-center justify-between">
+                                            <Label htmlFor="category">Categoria</Label>
+                                            <Button variant="ghost" size="sm" onClick={() => setIsManageCategoriesOpen(true)} className="h-6 w-6 p-0" title="Gerenciar Categorias">
+                                                <Settings className="h-3 w-3 text-zinc-500" />
+                                            </Button>
+                                        </div>
+                                        <Select
+                                            value={currentProduct.category}
+                                            onValueChange={(val) => setCurrentProduct({ ...currentProduct, category: val })}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Selecione..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {availableCategories.length === 0 ? (
+                                                    <>
+                                                        <SelectItem value="Bolos">Bolos</SelectItem>
+                                                        <SelectItem value="Doces">Doces</SelectItem>
+                                                        <SelectItem value="Salgados">Salgados</SelectItem>
+                                                    </>
+                                                ) : (
+                                                    availableCategories.map(c => (
+                                                        <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                                                    ))
+                                                )}
+                                            </SelectContent>
+                                        </Select>
                                     </div>
+
                                     <div className="space-y-2">
                                         <Label>Tipo de Produto</Label>
                                         <Select
@@ -747,37 +883,8 @@ export default function Recipes() {
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <Label htmlFor="category">Categoria</Label>
-                                            <Button variant="ghost" size="sm" onClick={() => setIsManageCategoriesOpen(true)} className="h-6 w-6 p-0" title="Gerenciar Categorias">
-                                                <Settings className="h-3 w-3 text-zinc-500" />
-                                            </Button>
-                                        </div>
-                                        <Select
-                                            value={currentProduct.category}
-                                            onValueChange={(val) => setCurrentProduct({ ...currentProduct, category: val })}
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Selecione..." />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {/* Combine hardcoded expected categories with dynamic ones to ensure defaults exist if DB is empty, or just use DB */}
-                                                {availableCategories.length === 0 ? (
-                                                    <>
-                                                        <SelectItem value="Bolos">Bolos</SelectItem>
-                                                        <SelectItem value="Doces">Doces</SelectItem>
-                                                        <SelectItem value="Salgados">Salgados</SelectItem>
-                                                    </>
-                                                ) : (
-                                                    availableCategories.map(c => (
-                                                        <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
-                                                    ))
-                                                )}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
+                                {/* 3. Price & Batch Size */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label htmlFor="price">Preço de Venda (R$)</Label>
                                         <Input
@@ -789,19 +896,52 @@ export default function Recipes() {
                                             onChange={(e) => setCurrentProduct({ ...currentProduct, price: Number(e.target.value) })}
                                         />
                                     </div>
+
+                                    <div className="space-y-2">
+                                        <Label htmlFor="batch_size">Rendimento da Receita</Label>
+                                        <div className="flex gap-2">
+                                            <Input
+                                                id="batch_size"
+                                                type="number"
+                                                min="0.1"
+                                                step="0.1"
+                                                className="flex-1"
+                                                value={currentProduct.batch_size || 1}
+                                                onChange={(e) => setCurrentProduct({ ...currentProduct, batch_size: Number(e.target.value) })}
+                                                placeholder="1"
+                                            />
+                                            <Select
+                                                value={currentProduct.unit || 'un'}
+                                                onValueChange={(val) => setCurrentProduct({ ...currentProduct, unit: val })}
+                                            >
+                                                <SelectTrigger className="w-[100px]">
+                                                    <SelectValue placeholder="Un" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="un">un</SelectItem>
+                                                    <SelectItem value="g">g</SelectItem>
+                                                    <SelectItem value="kg">kg</SelectItem>
+                                                    <SelectItem value="ml">ml</SelectItem>
+                                                    <SelectItem value="l">l</SelectItem>
+                                                    <SelectItem value="cx">cx</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
                                 </div>
 
-                                <div className="space-y-2">
+                                {/* 4. Image Section */}
+                                <div className="space-y-2 border-t pt-4">
                                     <Label>Imagem do Produto</Label>
-                                    <div className="flex flex-col gap-3">
+                                    <div className="flex flex-col md:flex-row gap-4 items-start">
                                         {currentProduct.image_url && (
-                                            <div className="relative aspect-video w-full max-w-[200px] rounded-lg overflow-hidden border bg-zinc-100 mx-auto">
+                                            <div className="relative h-24 w-24 rounded-lg overflow-hidden border bg-zinc-100 shrink-0">
                                                 <img src={currentProduct.image_url} alt="Preview" className="w-full h-full object-cover" />
                                                 <Button
                                                     type="button"
                                                     variant="destructive"
                                                     size="icon"
-                                                    className="absolute top-2 right-2 h-6 w-6"
+                                                    className="absolute top-1 right-1 h-5 w-5"
                                                     onClick={() => setCurrentProduct({ ...currentProduct, image_url: '' })}
                                                 >
                                                     <X className="h-3 w-3" />
@@ -809,68 +949,83 @@ export default function Recipes() {
                                             </div>
                                         )}
 
-                                        <div className="flex items-center gap-2">
-                                            <Input
-                                                id="image-upload"
-                                                type="file"
-                                                accept="image/*"
-                                                className="hidden"
-                                                onChange={handleImageUpload}
-                                                disabled={uploading}
-                                            />
-                                            <Label
-                                                htmlFor="image-upload"
-                                                className={cn(
-                                                    "flex-1 flex items-center justify-center gap-2 h-10 px-4 py-2 border rounded-md cursor-pointer hover:bg-zinc-50 transition-colors border-dashed border-zinc-300",
-                                                    uploading && "opacity-50 cursor-not-allowed"
-                                                )}
-                                            >
-                                                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                                                {uploading ? "Enviando..." : (currentProduct.image_url ? "Trocar Imagem" : "Carregar Imagem")}
-                                            </Label>
-
-                                            {/* Fallback Text Input Toggle could go here if needed, but keeping it simple */}
+                                        <div className="flex-1 w-full">
+                                            <div className="flex items-center gap-2">
+                                                <Input
+                                                    id="image-upload"
+                                                    type="file"
+                                                    accept="image/*"
+                                                    className="hidden"
+                                                    onChange={handleImageUpload}
+                                                    disabled={uploading}
+                                                />
+                                                <Label
+                                                    htmlFor="image-upload"
+                                                    className={cn(
+                                                        "flex-1 flex items-center justify-center gap-2 h-10 px-4 py-2 border rounded-md cursor-pointer hover:bg-zinc-50 transition-colors border-dashed border-zinc-300 w-full",
+                                                        uploading && "opacity-50 cursor-not-allowed"
+                                                    )}
+                                                >
+                                                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                                                    {uploading ? "Enviando..." : (currentProduct.image_url ? "Trocar Imagem" : "Carregar Imagem")}
+                                                </Label>
+                                            </div>
+                                            <p className="text-[10px] text-zinc-500 mt-1 ml-1">
+                                                JPG ou PNG. Máx 2MB.
+                                            </p>
                                         </div>
-                                        <p className="text-[10px] text-zinc-500 text-center">
-                                            {currentProduct.image_url ? "Imagem carregada via Supabase Storage" : "Clique para selecionar uma imagem"}
+                                    </div>
+                                </div>
+
+                                {/* Admin Only: Multi-User Owner Assignment */}
+                                {(roles.includes('admin') || roles.includes('super_admin')) && (
+                                    <div className="space-y-2 pt-4 border-t mt-4">
+                                        <div className="flex justify-between items-center">
+                                            <Label htmlFor="allowed_users" className="text-purple-700 font-bold">Donos da Receita (Admin)</Label>
+                                            <span className="text-[10px] text-zinc-500 bg-zinc-100 px-2 rounded-full">
+                                                {currentProduct.allowed_users?.length || 0} selecionado(s)
+                                            </span>
+                                        </div>
+
+                                        <div className="border border-purple-100 rounded-md p-2 bg-purple-50/30">
+                                            <ScrollArea className="h-[120px] w-full pr-4">
+                                                <div className="space-y-2">
+                                                    {allUsers.map((u) => {
+                                                        const isSelected = currentProduct.allowed_users?.includes(u.id);
+                                                        return (
+                                                            <div key={u.id} className="flex items-center space-x-2 p-1 hover:bg-white rounded transition-colors">
+                                                                <Checkbox
+                                                                    id={`user-${u.id}`}
+                                                                    checked={isSelected}
+                                                                    onCheckedChange={(checked) => {
+                                                                        const current = currentProduct.allowed_users || [];
+                                                                        let next = [];
+                                                                        if (checked) {
+                                                                            next = [...current, u.id];
+                                                                        } else {
+                                                                            next = current.filter(id => id !== u.id);
+                                                                        }
+                                                                        setCurrentProduct({ ...currentProduct, allowed_users: next });
+                                                                    }}
+                                                                />
+                                                                <label
+                                                                    htmlFor={`user-${u.id}`}
+                                                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer w-full"
+                                                                >
+                                                                    {u.full_name || u.email || 'Usuário sem nome'}
+                                                                </label>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </ScrollArea>
+                                        </div>
+                                        <p className="text-[10px] text-zinc-500">
+                                            Se nenhum usuário for selecionado, a receita será <span className="font-bold text-amber-600">PÚBLICA</span> (visível para todos).
+                                            Se selecionar 1 ou mais, apenas eles (e admins) verão.
                                         </p>
                                     </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <Label htmlFor="batch_size">Rendimento Total da Receita</Label>
-                                    <div className="flex gap-2">
-                                        <Input
-                                            id="batch_size"
-                                            type="number"
-                                            min="0.1"
-                                            step="0.1"
-                                            className="flex-1"
-                                            value={currentProduct.batch_size || 1}
-                                            onChange={(e) => setCurrentProduct({ ...currentProduct, batch_size: Number(e.target.value) })}
-                                            placeholder="Ex: 500, 10..."
-                                        />
-                                        <Select
-                                            value={currentProduct.unit || 'un'}
-                                            onValueChange={(val) => setCurrentProduct({ ...currentProduct, unit: val })}
-                                        >
-                                            <SelectTrigger className="w-[100px]">
-                                                <SelectValue placeholder="Un" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="un">un</SelectItem>
-                                                <SelectItem value="g">g</SelectItem>
-                                                <SelectItem value="kg">kg</SelectItem>
-                                                <SelectItem value="ml">ml</SelectItem>
-                                                <SelectItem value="l">l</SelectItem>
-                                                <SelectItem value="cx">cx</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <p className="text-[10px] text-zinc-500">
-                                        Defina a quantidade final gerada por esta receita (ex: 500g de recheio, 10 unidades de bolo).
-                                    </p>
-                                </div>
+                                )}
 
                                 {canViewCosts && (
                                     <div className="p-4 bg-zinc-50 rounded border text-sm text-zinc-600 space-y-2">
@@ -1211,6 +1366,6 @@ export default function Recipes() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-        </div>
+        </div >
     );
 }

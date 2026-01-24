@@ -217,13 +217,16 @@ export default function Dashboard() {
                         const stockEntries = ing.product_stocks || [];
                         let qty = 0;
                         let cost = 0;
+                        // Strictly prefer location stock. If using locations, legacy is ignored.
+                        // If product_stocks is loaded (array), use it.
                         if (stockEntries.length > 0) {
                             qty = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
-                            // Using weighted average cost or just first available for simplicity here
                             cost = stockEntries[0]?.average_cost || Number(ing.cost) || 0;
                         } else {
-                            qty = (Number(ing.stock_danilo) || 0) + (Number(ing.stock_adriel) || 0);
-                            cost = Number(ing.cost_danilo) || Number(ing.cost_adriel) || Number(ing.cost) || 0;
+                            // If NO location entries exist, we assume 0 stock if we are in "strict location mode".
+                            // However, to be safe for non-migrated items, we ONLY assume 0 if the user has AT LEAST 1 location defined in the system?
+                            // Better: Just return 0 as requested "Fix Ghost Stock".
+                            qty = 0;
                         }
                         return acc + (qty * cost);
                     }, 0) || 0;
@@ -241,7 +244,7 @@ export default function Dashboard() {
                             // If cost is 0 in product table, try average_cost in stocks
                             if (cost === 0) cost = stockEntries[0]?.average_cost || 0;
                         } else {
-                            qty = (Number(p.stock_quantity) || 0);
+                            qty = 0; // Strict location mode (Ghost Stock Fix)
                         }
 
                         totalFinishedStockUnits += qty;
@@ -1058,13 +1061,12 @@ export default function Dashboard() {
                             <TableBody>
                                 {products
                                     .filter(p => p.type === 'finished' && (
-                                        (p.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) > 0) ||
-                                        (p.stock_quantity > 0)
+                                        (p.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) > 0)
+                                        // Removed legacy check to avoid showing 0 balance items
                                     ))
                                     .map(product => {
                                         const stockQty = product.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0;
-                                        const legacyQty = Number(product.stock_quantity) || 0;
-                                        const totalQty = stockQty > 0 ? stockQty : legacyQty; // Define totalQty
+                                        const totalQty = stockQty; // Strict Mode
 
                                         // Resolve Location Name & Cost
                                         let locationName = "Estoque Antigo (Migrar)";
@@ -1163,8 +1165,7 @@ export default function Dashboard() {
                                     })
                                     .map(ing => {
                                         const stockQty = ing.product_stocks?.reduce((acc: number, s: any) => acc + (Number(s.quantity) || 0), 0) || 0;
-                                        const legacyQty = (Number(ing.stock_danilo) || 0) + (Number(ing.stock_adriel) || 0);
-                                        const totalQty = stockQty > 0 ? stockQty : legacyQty;
+                                        const totalQty = stockQty; // Strict Mode
 
                                         // Resolve Location Name & Cost
                                         let locationName = "Estoque Antigo (Migrar)";

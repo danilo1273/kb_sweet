@@ -66,14 +66,14 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         { name: "Bancos", href: "/banking", icon: Building2, roles: ['admin', 'financial'] },
         { name: "Cadastros", href: "/admin/registers", icon: Database, roles: ['admin'] },
         { name: "Configurações", href: "/admin/settings", icon: Building2, roles: ['admin'] },
-        { name: "Usuários", href: "/admin", icon: User, roles: ['admin'] },
+        { name: "Usuários", href: "/team", icon: User, roles: ['admin'] },
         { name: "Auditoria", href: "/audit", icon: ShieldCheck, roles: ['admin'] },
         { name: "Perfis", href: "/profile", icon: User, roles: [] }, // Todos
     ];
 
     const navItems = allNavItems.filter(item => {
         // Plan Restrictions
-        if (item.name === "Receitas" && companyPlan !== 'plan_ii') return false;
+
 
         if (item.roles.length === 0) return true;
         // Allow super_admin to access everything

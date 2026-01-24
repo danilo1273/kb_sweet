@@ -725,45 +725,38 @@ export default function Financial() {
                     </div>
 
                     {/* Quick Stats for Selection */}
-                    {selectedMovementsList.length > 0 && (
-                        <div className="ml-auto flex items-center gap-4 animate-in fade-in slide-in-from-right-5">
-                            <div className="flex flex-col items-end">
-                                <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded text-sm font-medium border border-blue-100 shadow-sm">
-                                    Total: {selectionTotalPending > 0.01 ? `Pendente R$ ${selectionTotalPending.toFixed(2)}` : `Pago R$ ${selectionTotalPaid.toFixed(2)}`}
-                                </div>
-                                {/* Breakdown by Buyer */}
-                                <div className="text-[10px] text-zinc-500 mt-1 flex gap-2">
-                                    {Object.entries(selectedMovementsList.reduce((acc, m) => {
-                                        const matchesTab = activeTab === 'payable' ? m.type === 'expense' : m.type === 'income';
-                                        const matchesStatus = selectionTotalPending > 0.01 ? m.status === 'pending' : m.status === 'paid';
+                </div>
 
-                                        if (matchesTab && matchesStatus) {
-                                            const buyer = m.detail_buyer || 'Outros';
-                                            acc[buyer] = (acc[buyer] || 0) + Math.abs(m.amount);
-                                        }
-                                        return acc;
-                                    }, {} as Record<string, number>)).map(([buyer, total]) => (
-                                        <span key={buyer} title={buyer} className="bg-zinc-100 px-1.5 rounded border border-zinc-200">
-                                            {buyer.split(' ')[0]}: R$ {total.toFixed(2)}
-                                        </span>
-                                    ))}
-                                </div>
+                {/* Fixed Bottom Bar for Bulk Actions (Mobile Friendly) */}
+                {selectedMovementsList.length > 0 && (
+                    <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-50 flex items-center justify-between lg:static lg:p-0 lg:border-0 lg:shadow-none lg:bg-transparent lg:z-auto lg:ml-auto lg:flex-none">
+                        <div className="flex flex-col lg:items-end">
+                            <span className="text-sm font-bold text-zinc-900 lg:hidden">
+                                {selectedMovementsList.length} selecionado(s)
+                            </span>
+                            <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded text-sm font-medium border border-blue-100 shadow-sm hidden lg:block">
+                                Total: {selectionTotalPending > 0.01 ? `Pendente R$ ${selectionTotalPending.toFixed(2)}` : `Pago R$ ${selectionTotalPaid.toFixed(2)}`}
                             </div>
+                            <span className="text-xs text-zinc-500 lg:hidden">
+                                Total: {selectionTotalPending > 0.01 ? `R$ ${selectionTotalPending.toFixed(2)}` : `R$ ${selectionTotalPaid.toFixed(2)}`}
+                            </span>
+                        </div>
 
+                        <div className="flex gap-2">
                             {selectionTotalPending > 0.01 && (
                                 <Button size="sm" onClick={() => processBatchAction('pay')} className={activeTab === 'payable' ? "bg-red-600 hover:bg-red-700 h-9" : "bg-green-600 hover:bg-green-700 h-9"}>
-                                    <CheckCircle className="mr-2 h-3 w-3" /> {activeTab === 'payable' ? 'Baixar Seleção' : 'Receber Seleção'}
+                                    <CheckCircle className="mr-2 h-3 w-3" /> {activeTab === 'payable' ? 'Baixar' : 'Receber'}
                                 </Button>
                             )}
 
                             {selectionTotalPending <= 0.01 && selectionTotalPaid > 0 && (
                                 <Button size="sm" variant="outline" onClick={() => processBatchAction('reverse')} className="text-orange-600 border-orange-200 hover:bg-orange-50 h-9">
-                                    <RotateCcw className="mr-2 h-3 w-3" /> Estornar Seleção
+                                    <RotateCcw className="mr-2 h-3 w-3" /> Estornar
                                 </Button>
                             )}
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
 
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                     <Card>
