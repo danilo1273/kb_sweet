@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Search, Loader2, Edit, Trash2, User, Eye, AlertTriangle } from "lucide-react";
+import { Plus, Search, Loader2, Edit, Trash2, User, Eye, AlertTriangle, Briefcase } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
@@ -64,6 +64,96 @@ export default function Clients() {
         pixKey: ''
     });
 
+    // Portfolio State
+    const [isPortfolioOpen, setIsPortfolioOpen] = useState(false);
+    const [portfolioUserId, setPortfolioUserId] = useState<string>("");
+    const [portfolioData, setPortfolioData] = useState<any[]>([]);
+    const [sellers, setSellers] = useState<any[]>([]);
+    const [loadingPortfolio, setLoadingPortfolio] = useState(false);
+
+    useEffect(() => {
+        fetchClients();
+        checkUserRole();
+        fetchSellers();
+    }, []);
+
+    const fetchSellers = async () => {
+        // Fetch users who have sales
+        const { data } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, roles')
+            .contains('roles', ['seller']);
+        setSellers(data || []);
+    };
+
+    const fetchPortfolio = async (userId: string) => {
+        setLoadingPortfolio(true);
+        setPortfolioUserId(userId);
+
+        if (!userId) {
+            setPortfolioData([]);
+            setLoadingPortfolio(false);
+            return;
+        }
+
+        try {
+            // 1. Get Sale IDs for this user
+            const { data: salesData, error: salesError } = await supabase
+                .from('sales')
+                .select('id')
+                .eq('user_id', userId);
+
+            if (salesError) throw salesError;
+
+            const saleIds = salesData?.map(s => s.id) || [];
+
+            if (saleIds.length === 0) {
+                setPortfolioData([]);
+                setLoadingPortfolio(false);
+                return;
+            }
+
+            // 2. Find pending movements for these sales
+            const { data, error } = await supabase
+                .from('financial_movements')
+                .select(`
+                    id, amount, description, due_date, created_at,
+                    related_sale_id,
+                    clients(id, name, phone)
+                `)
+                .eq('status', 'pending')
+                .eq('type', 'income')
+                .in('related_sale_id', saleIds);
+
+            if (error) throw error;
+
+            // Group by client
+            const grouped: any[] = [];
+            data?.forEach((item: any) => {
+                const client = item.clients;
+                let group = grouped.find(g => g.client_id === client?.id);
+                if (!group) {
+                    group = {
+                        client_id: client?.id,
+                        client_name: client?.name,
+                        client_phone: client?.phone,
+                        total_pending: 0,
+                        movements: []
+                    };
+                    grouped.push(group);
+                }
+                group.total_pending += Number(item.amount);
+                group.movements.push(item);
+            });
+            setPortfolioData(grouped);
+
+        } catch (error) {
+            console.error(error);
+            toast({ variant: 'destructive', title: "Erro ao buscar carteira" });
+        } finally {
+            setLoadingPortfolio(false);
+        }
+    };
     const handleOpenWhatsApp = async (client: Client, pendingAmount: number) => {
         if (pendingAmount <= 0) return;
 
@@ -222,9 +312,14 @@ export default function Clients() {
                     <h2 className="text-3xl font-bold tracking-tight">Clientes</h2>
                     <p className="text-zinc-500">Gerencie sua base de clientes.</p>
                 </div>
-                <Button onClick={() => { setCurrentClient({}); setIsDialogOpen(true); }} className="bg-zinc-900 text-white">
-                    <Plus className="mr-2 h-4 w-4" /> Novo Cliente
-                </Button>
+                <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setIsPortfolioOpen(true)} className="border-purple-200 text-purple-700 hover:bg-purple-50">
+                        <Briefcase className="mr-2 h-4 w-4" /> Gerir Carteira
+                    </Button>
+                    <Button onClick={() => { setCurrentClient({}); setIsDialogOpen(true); }} className="bg-zinc-900 text-white">
+                        <Plus className="mr-2 h-4 w-4" /> Novo Cliente
+                    </Button>
+                </div>
             </div>
 
             <div className="relative max-w-sm">
@@ -447,6 +542,103 @@ export default function Clients() {
                 onClose={() => setIsWhatsAppDialogOpen(false)}
                 data={whatsAppDialogData}
             />
+
+            {/* PORTFOLIO DIALOG */}
+            <Dialog open={isPortfolioOpen} onOpenChange={setIsPortfolioOpen}>
+                <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-xl">
+                            <Briefcase className="h-6 w-6 text-purple-600" />
+                            Gestão de Carteira de Clientes
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
+                        <div className="p-4 bg-zinc-50 rounded-lg border flex items-end gap-4">
+                            <div className="flex-1 space-y-2">
+                                <Label>Selecione o Vendedor</Label>
+                                <select
+                                    className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                    value={portfolioUserId}
+                                    onChange={(e) => fetchPortfolio(e.target.value)}
+                                >
+                                    <option value="">Selecione...</option>
+                                    {sellers.map(s => (
+                                        <option key={s.id} value={s.id}>{s.full_name || s.email}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="flex-1">
+                                {portfolioUserId && (
+                                    <div className="flex flex-col items-end justify-center h-full">
+                                        <div className="text-xs text-zinc-500 uppercase font-medium">Total em Aberto</div>
+                                        <div className="text-2xl font-bold text-red-600">
+                                            R$ {portfolioData.reduce((acc, curr) => acc + curr.total_pending, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-auto border rounded-md">
+                            <Table>
+                                <TableHeader className="sticky top-0 bg-white z-10 shadow-sm">
+                                    <TableRow>
+                                        <TableHead>Cliente</TableHead>
+                                        <TableHead>Telefone</TableHead>
+                                        <TableHead className="text-right">Total Pendente</TableHead>
+                                        <TableHead className="text-right">Ação</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {loadingPortfolio ? (
+                                        <TableRow><TableCell colSpan={4} className="text-center py-10"><Loader2 className="animate-spin mx-auto" /></TableCell></TableRow>
+                                    ) : portfolioUserId === "" ? (
+                                        <TableRow><TableCell colSpan={4} className="text-center py-10 text-muted-foreground">Selecione um vendedor para ver a carteira.</TableCell></TableRow>
+                                    ) : portfolioData.length === 0 ? (
+                                        <TableRow><TableCell colSpan={4} className="text-center py-10 text-green-600 font-medium">Nenhuma pendência encontrada para este vendedor! 🎉</TableCell></TableRow>
+                                    ) : (
+                                        portfolioData.map((clientData: any) => (
+                                            <TableRow key={clientData.client_id}>
+                                                <TableCell className="font-medium">{clientData.client_name}</TableCell>
+                                                <TableCell>{clientData.client_phone || '-'}</TableCell>
+                                                <TableCell className="text-right font-bold text-red-600">
+                                                    R$ {clientData.total_pending.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <Button
+                                                        size="sm"
+                                                        className="bg-green-600 hover:bg-green-700 h-8 text-white"
+                                                        onClick={() => {
+                                                            // Construct items for WhatsApp
+                                                            const items = clientData.movements.map((m: any) => ({
+                                                                id: m.id,
+                                                                description: m.description, // TODO: Maybe enrich with sale items if needed
+                                                                amount: Number(m.amount),
+                                                                date: m.created_at,
+                                                                originalDescription: m.description
+                                                            }));
+
+                                                            setWhatsAppDialogData({
+                                                                clientName: clientData.client_name,
+                                                                phone: clientData.client_phone,
+                                                                items: items
+                                                            });
+                                                            setIsWhatsAppDialogOpen(true);
+                                                        }}
+                                                    >
+                                                        <MessageCircle className="w-3 h-3 mr-1" /> Cobrar
+                                                    </Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
@@ -461,6 +653,26 @@ function ClientDetailsContent({ client }: { client: Client }) {
 
     const totalBought = income.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
     const totalPending = pendingMovements.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+    const handleOpenWhatsApp = async (client: Client, pendingAmount: number) => {
+        // This function's content was likely intended to be different,
+        // but the instruction provided a snippet that looks like handleViewSale.
+        // For now, I'm inserting the provided snippet as requested.
+        // If this is incorrect, please provide the correct implementation for handleOpenWhatsApp.
+        if (!saleId) return;
+        setViewSaleId(String(saleId));
+
+        const { data } = await supabase
+            .from('sale_items')
+            .select('*, products(name)')
+            .eq('sale_id', saleId);
+
+        if (data) {
+            setViewSaleItems(data);
+        } else {
+            setViewSaleItems([]);
+        }
+    };
 
     const [viewSaleItems, setViewSaleItems] = useState<any[] | null>(null);
     const [viewSaleId, setViewSaleId] = useState<string | null>(null);

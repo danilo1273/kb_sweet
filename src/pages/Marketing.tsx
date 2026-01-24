@@ -122,9 +122,9 @@ export default function Marketing() {
     };
 
     return (
-        <div className="flex flex-col h-screen md:flex-row bg-zinc-50 dark:bg-zinc-950 overflow-hidden">
+        <div className="flex flex-col md:h-screen md:flex-row bg-zinc-50 dark:bg-zinc-950 overflow-hidden md:overflow-hidden overflow-y-auto h-auto min-h-screen">
             {/* LEFT SIDEBAR: CONTROLS */}
-            <div className="w-full md:w-96 bg-white border-r h-full flex flex-col z-10 overflow-hidden">
+            <div className="w-full md:w-96 bg-white border-r md:h-full h-auto flex flex-col z-10 overflow-visible md:overflow-hidden shrink-0">
                 <div className="p-6 border-b">
                     <h2 className="text-2xl font-bold flex items-center gap-2">
                         <LayoutTemplate className="h-6 w-6 text-purple-600" />
@@ -198,15 +198,15 @@ export default function Marketing() {
                             <h3 className="text-sm font-semibold uppercase text-zinc-400 flex items-center gap-2">
                                 <Check className="h-4 w-4" /> Produtos ({selectedProducts.length})
                             </h3>
-                            <div className="border rounded-md divide-y max-h-60 overflow-y-auto">
+                            <div className="border rounded-md max-h-[40vh] md:max-h-60 overflow-y-auto bg-white">
                                 {loading ? <div className="p-4 text-center"><Loader2 className="animate-spin mx-auto h-4 w-4" /></div> :
                                     products.map(product => (
-                                        <div key={product.id} className="flex items-center gap-3 p-3 hover:bg-zinc-50 cursor-pointer" onClick={() => toggleProduct(product.id)}>
-                                            <Checkbox checked={selectedProducts.includes(product.id)} onCheckedChange={() => toggleProduct(product.id)} />
-                                            {product.image && <img src={product.image} className="w-8 h-8 rounded object-cover" />}
+                                        <div key={product.id} className="flex items-center gap-3 p-2 border-b last:border-0 hover:bg-zinc-50 cursor-pointer" onClick={() => toggleProduct(product.id)}>
+                                            <Checkbox checked={selectedProducts.includes(product.id)} onCheckedChange={() => toggleProduct(product.id)} className="h-4 w-4" />
+                                            {product.image && <img src={product.image} className="w-8 h-8 rounded object-cover border border-zinc-100" />}
                                             <div className="flex-1 overflow-hidden">
-                                                <div className="text-sm font-medium truncate">{product.name}</div>
-                                                <div className="text-xs text-zinc-500">R$ {product.price.toFixed(2)}</div>
+                                                <div className="text-xs font-semibold text-zinc-700 truncate">{product.name}</div>
+                                                <div className="text-[10px] text-zinc-500">R$ {product.price.toFixed(2)}</div>
                                             </div>
                                         </div>
                                     ))
