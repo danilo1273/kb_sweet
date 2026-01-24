@@ -343,7 +343,7 @@ export default function Clients() {
                         const { totalBought, pending } = getSummary(client.financial_movements || []);
 
                         return (
-                            <div key={client.id} className="bg-white p-4 rounded-xl border border-zinc-100 shadow-sm flex flex-col gap-4">
+                            <div key={client.id} className="bg-white p-3 rounded-lg border border-zinc-100 shadow-sm flex flex-col gap-3">
                                 {/* Header: Info & Status */}
                                 <div className="flex justify-between items-start">
                                     <div className="flex items-center gap-3">
@@ -545,7 +545,7 @@ export default function Clients() {
 
             {/* PORTFOLIO DIALOG */}
             <Dialog open={isPortfolioOpen} onOpenChange={setIsPortfolioOpen}>
-                <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
+                <DialogContent className="max-w-4xl h-[90vh] md:h-[80vh] flex flex-col p-4 md:p-6">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2 text-xl">
                             <Briefcase className="h-6 w-6 text-purple-600" />
@@ -554,8 +554,8 @@ export default function Clients() {
                     </DialogHeader>
 
                     <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
-                        <div className="p-4 bg-zinc-50 rounded-lg border flex items-end gap-4">
-                            <div className="flex-1 space-y-2">
+                        <div className="p-4 bg-zinc-50 rounded-lg border flex flex-col md:flex-row md:items-end gap-4">
+                            <div className="flex-1 space-y-2 w-full">
                                 <Label>Selecione o Vendedor</Label>
                                 <select
                                     className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -568,11 +568,11 @@ export default function Clients() {
                                     ))}
                                 </select>
                             </div>
-                            <div className="flex-1">
+                            <div className="flex-1 w-full md:w-auto">
                                 {portfolioUserId && (
-                                    <div className="flex flex-col items-end justify-center h-full">
+                                    <div className="flex items-center justify-between md:flex-col md:items-end md:justify-center h-full bg-white md:bg-transparent p-3 md:p-0 rounded border md:border-none shadow-sm md:shadow-none">
                                         <div className="text-xs text-zinc-500 uppercase font-medium">Total em Aberto</div>
-                                        <div className="text-2xl font-bold text-red-600">
+                                        <div className="text-xl md:text-2xl font-bold text-red-600">
                                             R$ {portfolioData.reduce((acc, curr) => acc + curr.total_pending, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </div>
                                     </div>

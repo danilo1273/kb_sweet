@@ -344,91 +344,119 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
             <Card className="border-none shadow-none bg-transparent">
                 <CardContent className="p-0 space-y-4">
 
+
+
                     {sortedDailyKeys.length === 0 ? (
                         <div className="p-10 text-center text-zinc-500 bg-white rounded-lg border border-dashed">
                             Nenhum lançamento neste período.
                         </div>
                     ) : (
-                        sortedDailyKeys.map(dateKey => {
-                            const items = dailyGroups[dateKey];
-                            const isExpanded = expandedDays[dateKey] ?? false; // Default closed (except explicitly opened)
+                        (() => {
+                            // Pre-calculate balances (Backwards from current)
+                            // Note: This assumes we are viewing the latest period or that calculated_balance is the anchor.
+                            // For accurate historical balances, we would need the balance at the end of the queried period.
+                            let runningBalance = account.calculated_balance;
 
-                            // Day Totals
-                            const dayTotal = items.reduce((acc: number, m: any) => {
-                                const val = m.isGroup ? m.totalAmount : Number(m.amount);
-                                return acc + val;
-                            }, 0);
+                            // If we are NOT in the current month/year, this runningBalance starts at 'Today', 
+                            // so the displayed balances will be offset by any transactions between 'Now' and 'Selected Month'.
+                            // However, for the daily cash flow check (usually current), this is effective.
 
-                            return (
-                                <div key={dateKey} className="bg-white rounded-lg border shadow-sm overflow-hidden">
-                                    {/* Date Header */}
-                                    <div
-                                        className="flex items-center justify-between p-3 bg-zinc-50/80 cursor-pointer hover:bg-zinc-100 transition-colors"
-                                        onClick={() => toggleDay(dateKey)}
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            {isExpanded ? <ChevronDown className="h-4 w-4 text-zinc-400" /> : <ChevronLeft className="h-4 w-4 text-zinc-400 rotate-180" />}
-                                            <span className="font-semibold text-zinc-700 capitalize">
-                                                {new Date(dateKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}
-                                            </span>
-                                            <span className="text-xs text-zinc-400 font-normal">({items.length} mov)</span>
+                            return sortedDailyKeys.map(dateKey => {
+                                const items = dailyGroups[dateKey];
+                                const isExpanded = expandedDays[dateKey] ?? false;
+
+                                // Day Totals
+                                const dayTotal = items.reduce((acc: number, m: any) => {
+                                    const val = m.isGroup ? m.totalAmount : Number(m.amount);
+                                    return acc + val;
+                                }, 0);
+
+                                const closingBalance = runningBalance;
+                                runningBalance -= dayTotal; // Decrement for the next (older) day
+
+                                return (
+                                    <div key={dateKey} className="bg-white rounded-lg border shadow-sm overflow-hidden">
+                                        {/* Date Header */}
+                                        <div
+                                            className="flex flex-col md:flex-row md:items-center justify-between p-3 bg-zinc-50/80 cursor-pointer hover:bg-zinc-100 transition-colors gap-2"
+                                            onClick={() => toggleDay(dateKey)}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                {isExpanded ? <ChevronDown className="h-4 w-4 text-zinc-400" /> : <ChevronLeft className="h-4 w-4 text-zinc-400 rotate-180" />}
+                                                <span className="font-semibold text-zinc-700 capitalize text-sm md:text-base">
+                                                    {new Date(dateKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}
+                                                </span>
+                                                <span className="text-xs text-zinc-400 font-normal">({items.length} mov)</span>
+                                            </div>
+
+                                            <div className="flex items-center justify-between md:justify-end gap-4 w-full md:w-auto pl-6 md:pl-0">
+                                                <div className="flex flex-col md:items-end">
+                                                    <span className="text-[10px] text-zinc-400 uppercase font-medium">Movimentado</span>
+                                                    <span className={`text-sm font-bold ${dayTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {dayTotal > 0 ? '+' : ''}{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(dayTotal)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-col md:items-end border-l pl-4">
+                                                    <span className="text-[10px] text-zinc-400 uppercase font-medium">Saldo do Dia</span>
+                                                    <span className="text-sm font-bold text-zinc-800">
+                                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(closingBalance)}
+                                                    </span>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <span className={`text-sm font-bold ${dayTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                            {dayTotal > 0 ? '+' : ''}{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(dayTotal)}
-                                        </span>
+
+                                        {/* Items List */}
+                                        {isExpanded && (
+                                            <div className="divide-y divide-zinc-100">
+                                                {items.map((m: any, idx: number) => {
+                                                    const isGroup = m.isGroup;
+                                                    const amountVal = isGroup ? m.totalAmount : Number(m.amount);
+                                                    const description = isGroup ? (m.order_nickname || m.description) : m.description;
+
+                                                    return (
+                                                        <div key={idx} className="p-3 md:p-4 flex justify-between items-start hover:bg-zinc-50 transition-colors">
+                                                            <div className="flex flex-col gap-1 overflow-hidden">
+                                                                <div className="font-medium text-zinc-800 text-sm md:text-base line-clamp-1">
+                                                                    {description === 'Sem Nome' ? `Lote #${m.order_id?.slice(0, 5)}` : description}
+                                                                </div>
+                                                                <div className="text-xs text-zinc-500">
+                                                                    {isGroup && (
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="bg-zinc-100 px-1.5 py-0.5 rounded text-zinc-600">{m.items.length} itens</span>
+                                                                            <span
+                                                                                className="text-blue-600 font-semibold cursor-pointer hover:underline"
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    setSelectedBatch(m);
+                                                                                    setIsBatchOpen(true);
+                                                                                }}
+                                                                            >
+                                                                                Ver detalhes
+                                                                            </span>
+                                                                        </div>
+                                                                    )}
+                                                                    {!isGroup && (
+                                                                        <span className="capitalize">{m.category || 'Geral'}</span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="flex flex-col items-end shrink-0 pl-2">
+                                                                <span className={`font-bold text-sm md:text-base ${(m.type === 'expense' || (isGroup && m.groupType === 'purchase')) ? 'text-red-600' : 'text-green-600'
+                                                                    }`}>
+                                                                    {(m.type === 'expense' || (isGroup && m.groupType === 'purchase')) ? '- ' : '+ '}
+                                                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Math.abs(amountVal))}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
                                     </div>
-
-                                    {/* Items List */}
-                                    {isExpanded && (
-                                        <div className="divide-y divide-zinc-100">
-                                            {items.map((m: any, idx: number) => {
-                                                const isGroup = m.isGroup;
-                                                const amountVal = isGroup ? m.totalAmount : Number(m.amount);
-                                                const description = isGroup ? (m.order_nickname || m.description) : m.description;
-
-                                                return (
-                                                    <div key={idx} className="p-3 md:p-4 flex justify-between items-start hover:bg-zinc-50 transition-colors">
-                                                        <div className="flex flex-col gap-1 overflow-hidden">
-                                                            <div className="font-medium text-zinc-800 text-sm md:text-base line-clamp-1">
-                                                                {description === 'Sem Nome' ? `Lote #${m.order_id?.slice(0, 5)}` : description}
-                                                            </div>
-                                                            <div className="text-xs text-zinc-500">
-                                                                {isGroup && (
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="bg-zinc-100 px-1.5 py-0.5 rounded text-zinc-600">{m.items.length} itens</span>
-                                                                        <span
-                                                                            className="text-blue-600 font-semibold cursor-pointer hover:underline"
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                setSelectedBatch(m);
-                                                                                setIsBatchOpen(true);
-                                                                            }}
-                                                                        >
-                                                                            Ver detalhes
-                                                                        </span>
-                                                                    </div>
-                                                                )}
-                                                                {!isGroup && (
-                                                                    <span className="capitalize">{m.category || 'Geral'}</span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="flex flex-col items-end shrink-0 pl-2">
-                                                            <span className={`font-bold text-sm md:text-base ${(m.type === 'expense' || (isGroup && m.groupType === 'purchase')) ? 'text-red-600' : 'text-green-600'
-                                                                }`}>
-                                                                {(m.type === 'expense' || (isGroup && m.groupType === 'purchase')) ? '- ' : '+ '}
-                                                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Math.abs(amountVal))}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })
+                                );
+                            })
+                        })()
                     )}
                 </CardContent>
             </Card>

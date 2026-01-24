@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { LayoutTemplate, Download, Type, Image as ImageIcon, Palette, Loader2, Check, Store } from "lucide-react";
+import { LayoutTemplate, Download, Type, Image as ImageIcon, Palette, Loader2, Check, Store, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -138,6 +138,77 @@ export default function Marketing() {
                         {/* 1. Customization */}
                         <div className="space-y-3">
                             <h3 className="text-sm font-semibold uppercase text-zinc-400 flex items-center gap-2">
+                                <Store className="h-4 w-4" /> Identidade Visual
+                            </h3>
+
+                            {/* Logo Upload in Marketing */}
+                            <div className="p-3 bg-zinc-50 rounded-lg border border-dashed border-zinc-200 text-center">
+                                {company?.logo_url ? (
+                                    <div className="relative group">
+                                        <img src={company.logo_url} className="h-16 w-auto mx-auto object-contain mb-2" />
+                                        <Button
+                                            variant="destructive"
+                                            size="icon"
+                                            className="h-6 w-6 absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={() => setCompany({ ...company, logo_url: null })}
+                                        >
+                                            <X className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center py-2 text-zinc-400">
+                                        <Store className="h-8 w-8 mb-1 opacity-20" />
+                                        <span className="text-[10px]">Sem Logo</span>
+                                    </div>
+                                )}
+
+                                <Label htmlFor="marketing-logo-upload" className="cursor-pointer">
+                                    <div className="mt-2 flex items-center justify-center gap-2 bg-white hover:bg-zinc-100 text-zinc-700 px-3 py-1.5 rounded border shadow-sm text-xs font-medium transition-colors">
+                                        <ImageIcon className="h-3 w-3" />
+                                        {company?.logo_url ? 'Alterar Logo' : 'Enviar Logo'}
+                                    </div>
+                                    <Input
+                                        id="marketing-logo-upload"
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={async (e) => {
+                                            if (!e.target.files?.[0]) return;
+                                            try {
+                                                const file = e.target.files[0];
+                                                const fileName = `menu_logo_${Date.now()}.${file.name.split('.').pop()}`;
+
+                                                // Upload
+                                                const { error: upErr } = await supabase.storage.from('company-logos').upload(fileName, file);
+                                                if (upErr) throw upErr;
+
+                                                const { data: { publicUrl } } = supabase.storage.from('company-logos').getPublicUrl(fileName);
+
+                                                // Update local state AND DB
+                                                setCompany(prev => ({ ...prev, logo_url: publicUrl }));
+
+                                                // Try to update company if we have a user profile linked
+                                                const { data: { user } } = await supabase.auth.getUser();
+                                                if (user) {
+                                                    const { data: profile } = await supabase.from('profiles').select('company_id').eq('id', user.id).single();
+                                                    if (profile?.company_id) {
+                                                        await supabase.from('companies').update({ logo_url: publicUrl }).eq('id', profile.company_id);
+                                                    }
+                                                }
+
+                                                toast({ title: "Logo atualizado!" });
+                                            } catch (err: any) {
+                                                console.error(err);
+                                                toast({ variant: 'destructive', title: "Erro no upload", description: err.message });
+                                            }
+                                        }}
+                                    />
+                                </Label>
+                            </div>
+
+                            <Separator />
+
+                            <h3 className="text-sm font-semibold uppercase text-zinc-400 flex items-center gap-2">
                                 <Type className="h-4 w-4" /> Textos
                             </h3>
                             <div className="space-y-2">
@@ -240,51 +311,57 @@ export default function Marketing() {
                 >
                     {/* Header with Curve */}
                     <div className="relative text-white overflow-hidden" style={{ backgroundColor: themeColor }}>
-                        <div className="relative z-10 px-8 py-10 text-center">
+                        <div className="relative z-10 px-8 pt-12 pb-24 text-center">
                             {company?.logo_url ? (
-                                <img src={company.logo_url} className="h-16 w-auto mx-auto mb-4 object-contain brightness-0 invert drop-shadow-md" alt="Logo" />
+                                <img
+                                    src={company.logo_url}
+                                    className="h-28 w-28 mx-auto mb-6 object-contain rounded-full bg-white p-2 shadow-2xl ring-4 ring-white/30"
+                                    alt="Logo"
+                                />
                             ) : (
-                                <div className="flex flex-col items-center justify-center mb-4 opacity-70">
-                                    <Store className="h-12 w-12 mb-1" />
-                                    <span className="text-[10px] uppercase tracking-widest font-bold">Sua Logo Aqui</span>
+                                <div className="h-28 w-28 mx-auto mb-6 flex flex-col items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm border-2 border-white/30">
+                                    <Store className="h-12 w-12 mb-1 opacity-90" />
+                                    <span className="text-[10px] uppercase tracking-widest font-bold">Logo</span>
                                 </div>
                             )}
-                            <h1 className="text-3xl font-black uppercase tracking-tight mb-2 drop-shadow-sm">{title}</h1>
-                            <p className="opacity-90 font-medium text-purple-50">{subtitle}</p>
+                            <h1 className="text-4xl font-black uppercase tracking-tight mb-3 drop-shadow-md text-white">{title}</h1>
+                            <p className="opacity-100 font-semibold text-purple-50 text-xl drop-shadow-sm">{subtitle}</p>
                         </div>
-                        {/* Decorative Circles */}
-                        <div className="absolute top-0 left-0 w-48 h-48 bg-white/10 rounded-full -translate-x-12 -translate-y-12 blur-3xl"></div>
-                        <div className="absolute bottom-0 right-0 w-64 h-64 bg-black/10 rounded-full translate-x-20 translate-y-20 blur-3xl"></div>
+
+                        {/* Decorative Elements */}
+                        <div className="absolute top-0 left-0 w-64 h-64 bg-white/10 rounded-full -translate-x-20 -translate-y-20 blur-3xl"></div>
+                        <div className="absolute bottom-0 right-0 w-64 h-64 bg-black/10 rounded-full translate-x-20 translate-y-10 blur-3xl"></div>
 
                         {/* Wave SVG Divider */}
                         <div className="absolute bottom-0 left-0 w-full overflow-hidden leading-[0]">
-                            <svg data-name="Layer 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 120" preserveAspectRatio="none" className="relative block w-[calc(118%)] h-[40px] rotate-0 fill-white">
+                            <svg data-name="Layer 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 120" preserveAspectRatio="none" className="relative block w-[calc(118%)] h-[60px] rotate-0 fill-white">
                                 <path d="M321.39,56.44c58-10.79,114.16-30.13,172-41.86,82.39-16.72,168.19-17.73,250.45-.39C823.78,31,906.67,72,985.66,92.83c70.05,18.48,146.53,26.09,214.34,3V0H0V27.35A600.21,600.21,0,0,0,321.39,56.44Z"></path>
                             </svg>
                         </div>
                     </div>
 
                     {/* Content */}
-                    <div className="p-8 space-y-4 flex-1">
+                    <div className="p-8 space-y-6 flex-1 bg-white">
                         {selectedProducts.length === 0 ? (
-                            <div className="text-center py-20 text-zinc-300 italic">Selecione produtos para visualizar...</div>
+                            <div className="text-center py-20 text-zinc-300 italic border-2 border-dashed border-zinc-100 rounded-xl">Selecione produtos para visualizar...</div>
                         ) : (
                             layout === 'list' ? (
-                                <div className="space-y-4">
+                                <div className="space-y-6">
                                     {products.filter(p => selectedProducts.includes(p.id)).map(product => (
-                                        <div key={product.id} className="flex items-center gap-4 border-b border-dashed border-zinc-200 pb-4 last:border-0">
-                                            {/* Product Image in List */}
-                                            {product.image && (
-                                                <div className="h-16 w-16 rounded-md bg-zinc-100 overflow-hidden flex-shrink-0 border border-zinc-100">
-                                                    <img src={product.image} className="h-full w-full object-cover" />
+                                        <div key={product.id} className="flex items-end justify-between group py-1">
+                                            {/* Product Info */}
+                                            <div className="flex-[3] min-w-0 pr-2">
+                                                <div className="flex items-baseline gap-2">
+                                                    <h3 className="font-bold text-zinc-800 text-xl leading-snug">{product.name}</h3>
                                                 </div>
-                                            )}
-
-                                            <div className="flex-1">
-                                                <div className="font-bold text-zinc-800 text-lg leading-tight">{product.name}</div>
-                                                <div className="text-xs text-zinc-400 uppercase tracking-wide mt-1">Pronta Entrega</div>
+                                                <div className="text-xs text-zinc-500 uppercase tracking-wide font-medium mt-1">Pronta Entrega</div>
                                             </div>
-                                            <div className="text-xl font-black whitespace-nowrap" style={{ color: themeColor }}>
+
+                                            {/* Dotted Leader */}
+                                            <div className="flex-[1] border-b-2 border-dotted border-zinc-300 mx-2 mb-2 opacity-40"></div>
+
+                                            {/* Price */}
+                                            <div className="text-2xl font-black whitespace-nowrap" style={{ color: themeColor }}>
                                                 R$ {product.price.toFixed(2)}
                                             </div>
                                         </div>
@@ -293,17 +370,17 @@ export default function Marketing() {
                             ) : (
                                 <div className="grid grid-cols-2 gap-4">
                                     {products.filter(p => selectedProducts.includes(p.id)).map(product => (
-                                        <div key={product.id} className="bg-white rounded-xl p-3 text-center border border-zinc-100 shadow-sm relative overflow-hidden group">
+                                        <div key={product.id} className="bg-white rounded-xl p-3 text-center border border-zinc-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
                                             {product.image ? (
                                                 <div className="h-32 w-full bg-zinc-100 rounded-lg mb-3 overflow-hidden">
                                                     <img src={product.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                                                 </div>
                                             ) : (
                                                 <div className="h-32 w-full bg-zinc-50 rounded-lg mb-3 flex items-center justify-center text-zinc-300">
-                                                    <Store className="h-8 w-8" />
+                                                    <Store className="h-8 w-8 opacity-50" />
                                                 </div>
                                             )}
-                                            <div className="font-bold text-zinc-900 mb-1 leading-tight text-sm line-clamp-2 h-10">{product.name}</div>
+                                            <div className="font-bold text-zinc-900 mb-1 leading-tight text-sm line-clamp-2 h-10 flex items-center justify-center">{product.name}</div>
                                             <div className="inline-block px-3 py-1 rounded-full text-white font-bold text-sm shadow-sm" style={{ backgroundColor: themeColor }}>
                                                 R$ {product.price.toFixed(2)}
                                             </div>
@@ -315,16 +392,11 @@ export default function Marketing() {
                     </div>
 
                     {/* Footer */}
-                    <div className="p-6 bg-zinc-50 border-t text-center mt-auto">
-                        {!company?.logo_url && (
-                            <Link to="/admin/settings" className="text-[10px] text-purple-400 hover:underline mb-2 block mx-auto w-fit">
-                                Cadastrar Logo da Empresa
-                            </Link>
-                        )}
-                        <div className="flex items-center justify-center gap-2 text-zinc-600 font-bold mb-1 border-2 border-zinc-200 rounded-full py-2 px-6 inline-block bg-white">
-                            {footer}
+                    <div className="p-8 bg-zinc-50 border-t text-center mt-auto">
+                        <div className="flex items-center justify-center gap-3 text-zinc-700 font-bold mb-3 border-2 border-zinc-200 rounded-2xl py-3 px-8 inline-block bg-white shadow-sm">
+                            <span className="text-lg">📱</span> {footer}
                         </div>
-                        <div className="text-[9px] text-zinc-400 uppercase tracking-widest mt-2">Oferta válida enquanto durarem os estoques</div>
+                        <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-medium">Oferta válida enquanto durarem os estoques</div>
                     </div>
                 </div>
             </div>

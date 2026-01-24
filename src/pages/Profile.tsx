@@ -144,14 +144,14 @@ export default function Profile() {
             const fileName = `company_${companyId}_${Date.now()}.${fileExt}`;
             const filePath = `${fileName}`;
 
-            // Upload to 'logos' bucket (assuming it exists as per instructions)
+            // Upload to 'company-logos' bucket
             const { error: uploadError } = await supabase.storage
-                .from('logos')
+                .from('company-logos')
                 .upload(filePath, file);
 
             if (uploadError) throw uploadError;
 
-            const { data } = supabase.storage.from('logos').getPublicUrl(filePath);
+            const { data } = supabase.storage.from('company-logos').getPublicUrl(filePath);
             const publicUrl = data.publicUrl;
 
             // Update Company Record
