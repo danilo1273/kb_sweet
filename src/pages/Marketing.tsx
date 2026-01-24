@@ -106,13 +106,17 @@ export default function Marketing() {
     const handleDownloadPDF = async () => {
         if (!canvasRef.current) return;
         try {
-            const canvas = await html2canvas(canvasRef.current, { scale: 2 });
+            const canvas = await html2canvas(canvasRef.current, { scale: 2, useCORS: true, backgroundColor: null });
             const imgData = canvas.toDataURL('image/png');
-            const pdf = new jsPDF('p', 'mm', 'a4');
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
 
-            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+            // Generate PDF with dynamic height to fit content exactly (no cut-off)
+            const pdf = new jsPDF({
+                orientation: 'p',
+                unit: 'px',
+                format: [canvas.width, canvas.height]
+            });
+
+            pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
             pdf.save(`cardapio-${new Date().toISOString().split('T')[0]}.pdf`);
             toast({ title: "PDF baixado!", description: "Pronto para enviar no WhatsApp." });
         } catch (e) {
@@ -311,7 +315,7 @@ export default function Marketing() {
                 >
                     {/* Header with Curve */}
                     <div className="relative text-white overflow-hidden" style={{ backgroundColor: themeColor }}>
-                        <div className="relative z-10 px-8 pt-12 pb-24 text-center">
+                        <div className="relative z-10 px-8 pt-12 pb-16 text-center">
                             {company?.logo_url ? (
                                 <img
                                     src={company.logo_url}
@@ -346,7 +350,7 @@ export default function Marketing() {
                             <div className="text-center py-20 text-zinc-300 italic border-2 border-dashed border-zinc-100 rounded-xl">Selecione produtos para visualizar...</div>
                         ) : (
                             layout === 'list' ? (
-                                <div className="space-y-6">
+                                <div className="space-y-4">
                                     {products.filter(p => selectedProducts.includes(p.id)).map(product => (
                                         <div key={product.id} className="flex items-end justify-between group py-1">
                                             {/* Product Info */}
