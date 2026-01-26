@@ -305,6 +305,64 @@ export default function Clients() {
         return { totalBought, pending, paid };
     };
 
+    const handlePortfolioCharge = async (clientData: any) => {
+        const pendingMovements = clientData.movements;
+        if (!pendingMovements || pendingMovements.length === 0) return;
+
+        // 1. Get Sale IDs
+        const saleIds = pendingMovements
+            .map((m: any) => m.related_sale_id)
+            .filter((id: any) => id !== null && id !== undefined);
+
+        // Map to store sale details
+        const saleDetailsMap: Record<number, string> = {};
+
+        if (saleIds.length > 0) {
+            const { data: salesData } = await supabase
+                .from('sales')
+                .select('id, sale_items(quantity, products(name))')
+                .in('id', saleIds);
+
+            if (salesData) {
+                salesData.forEach(sale => {
+                    const desc = sale.sale_items?.map((item: any) => {
+                        const qty = item.quantity > 1 ? ` (${item.quantity}x)` : '';
+                        return `${item.products?.name}${qty}`;
+                    }).join(', ');
+                    if (desc) saleDetailsMap[sale.id] = desc;
+                });
+            }
+        }
+
+        const items: ChargeItem[] = pendingMovements.map((m: any) => {
+            let desc = m.description;
+            if (m.related_sale_id && saleDetailsMap[m.related_sale_id]) {
+                // If the description is generic, replace it with the product list
+                if (m.description.includes("Venda PDV") || m.description.includes("Pedido")) {
+                    desc = saleDetailsMap[m.related_sale_id];
+                } else {
+                    // Otherwise append
+                    desc = `${m.description} - ${saleDetailsMap[m.related_sale_id]}`;
+                }
+            }
+
+            return {
+                id: m.id,
+                description: desc,
+                amount: Number(m.amount),
+                date: m.created_at,
+                originalDescription: m.description
+            };
+        });
+
+        setWhatsAppDialogData({
+            clientName: clientData.client_name,
+            phone: clientData.client_phone,
+            items: items,
+        });
+        setIsWhatsAppDialogOpen(true);
+    };
+
     return (
         <div className="flex-1 p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
             <div className="flex items-center justify-between">
@@ -609,23 +667,7 @@ export default function Clients() {
                                                     <Button
                                                         size="sm"
                                                         className="bg-green-600 hover:bg-green-700 h-8 text-white"
-                                                        onClick={() => {
-                                                            // Construct items for WhatsApp
-                                                            const items = clientData.movements.map((m: any) => ({
-                                                                id: m.id,
-                                                                description: m.description, // TODO: Maybe enrich with sale items if needed
-                                                                amount: Number(m.amount),
-                                                                date: m.created_at,
-                                                                originalDescription: m.description
-                                                            }));
-
-                                                            setWhatsAppDialogData({
-                                                                clientName: clientData.client_name,
-                                                                phone: clientData.client_phone,
-                                                                items: items
-                                                            });
-                                                            setIsWhatsAppDialogOpen(true);
-                                                        }}
+                                                        onClick={() => handlePortfolioCharge(clientData)}
                                                     >
                                                         <MessageCircle className="w-3 h-3 mr-1" /> Cobrar
                                                     </Button>
