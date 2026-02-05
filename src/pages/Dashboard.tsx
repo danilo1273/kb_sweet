@@ -38,10 +38,12 @@ export default function Dashboard() {
         avgTicket: 0,
         projectedSalesValue: 0,
         totalFinishedStock: 0,
-        totalIngredientsValue: 0
+        totalIngredientsValue: 0,
+        potentialStockRevenue: 0
     });
 
     const [financialData, setFinancialData] = useState<any[]>([]);
+    const [projectedFlowData, setProjectedFlowData] = useState<any[]>([]);
     const [topClients, setTopClients] = useState<any[]>([]); // Replaces salesTrend
     const [topProducts, setTopProducts] = useState<any[]>([]);
     const [topMarginProducts, setTopMarginProducts] = useState<any[]>([]);
@@ -95,7 +97,7 @@ export default function Dashboard() {
                     ] = await Promise.all([
                         supabase.from('ingredients').select('*, product_stocks(quantity, average_cost, location_id, stock_locations(name))'),
                         supabase.from('products').select('*, product_stocks(quantity, average_cost, location_id, stock_locations(name))'),
-                        supabase.from('financial_movements').select('*').or(`due_date.gte.${sixMonthsAgo.toISOString()},payment_date.gte.${sixMonthsAgo.toISOString()}`),
+                        supabase.from('financial_movements').select('*').or(`due_date.gte.${new Date(new Date().getFullYear() - 1, 0, 1).toISOString()},payment_date.gte.${new Date(new Date().getFullYear() - 1, 0, 1).toISOString()}`),
                         supabase.from('production_orders').select('id, status').eq('status', 'open'),
                         // Fetch Sales with Items and Product Cost for Margin Calculation
                         supabase.from('sales').select(`
@@ -231,13 +233,16 @@ export default function Dashboard() {
                         return acc + (qty * cost);
                     }, 0) || 0;
 
-                    // Finished Goods - Asset Value (Custo)
+                    // Finished Goods - Asset Value (Custo) & Potential Revenue
                     const finishedProducts = productsRes.data || [];
                     let totalFinishedStockUnits = 0;
+                    let potentialStockRevenue = 0;
+
                     const stockAssetValue = finishedProducts.reduce((acc, p) => {
                         const stockEntries = p.product_stocks || [];
                         let qty = 0;
                         let cost = Number(p.cost) || 0;
+                        let price = Number(p.price) || 0;
 
                         if (stockEntries.length > 0) {
                             qty = stockEntries.reduce((sAcc: number, s: any) => sAcc + (Number(s.quantity) || 0), 0);
@@ -248,6 +253,7 @@ export default function Dashboard() {
                         }
 
                         totalFinishedStockUnits += qty;
+                        potentialStockRevenue += (qty * price);
                         return acc + (qty * cost);
                     }, 0);
 
@@ -262,7 +268,11 @@ export default function Dashboard() {
                     const now = new Date();
                     const currentMonthMovements = financialRes.data?.filter(m => {
                         const refDate = m.status === 'paid' ? m.payment_date : m.due_date;
-                        const d = new Date(refDate || m.created_at);
+                        // FIX: Handle 'YYYY-MM-DD' vs ISO string. If date-only, append time to avoid timezone shift (UTC midnight -> Prev Day Local)
+                        const dateStr = refDate || m.created_at;
+                        const safeDateStr = (dateStr && dateStr.length === 10) ? `${dateStr}T12:00:00` : dateStr;
+                        const d = new Date(safeDateStr);
+
                         return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
                     }) || [];
 
@@ -301,12 +311,26 @@ export default function Dashboard() {
                     const chartData = months.map(date => {
                         const monthKey = date.toLocaleString('pt-BR', { month: 'short' });
                         const mData = financialRes.data?.filter(m => {
-                            const d = new Date(m.due_date || m.payment_date);
+                            // Use payment_date for Realized Cash Flow
+                            const refDate = m.status === 'paid' ? m.payment_date : m.due_date;
+                            if (!refDate) return false;
+
+                            // FIX: Timezone safety for YYYY-MM-DD
+                            const safeDateStr = (refDate.length === 10) ? `${refDate}T12:00:00` : refDate;
+                            const d = new Date(safeDateStr);
+
                             return d.getMonth() === date.getMonth() && d.getFullYear() === date.getFullYear() && m.status === 'paid';
                         });
-                        const expense = mData?.filter(m => m.type === 'expense').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
+
+                        // Visualization: Expenses as Positive Magnitude
+                        const rawExpense = mData?.filter(m => m.type === 'expense').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
+                        const expense = Math.abs(rawExpense);
                         const income = mData?.filter(m => m.type === 'income').reduce((acc, m) => acc + Number(m.amount), 0) || 0;
-                        return { name: monthKey, Receita: income, Despesa: expense, Líquido: income + expense };
+
+                        // Liquid: Income (Pos) + Expense (Neg)
+                        const liquid = income + rawExpense;
+
+                        return { name: monthKey, Receita: income, Despesa: expense, Líquido: liquid };
                     });
 
                     // B. Sales by Seller (Margin)
@@ -487,10 +511,23 @@ export default function Dashboard() {
                         avgTicket,
                         projectedSalesValue: stockAssetValue,
                         totalFinishedStock: totalFinishedStockUnits,
-                        totalIngredientsValue // Add this
+                        totalIngredientsValue,
+                        potentialStockRevenue
                     });
 
+                    // B. Projected Flow Chart (New)
+                    const projectedData = [
+                        {
+                            name: 'Projeção Atual',
+                            'Entradas Futuras': pendingReceivables,
+                            'Potencial Estoque': potentialStockRevenue,
+                            'Saídas Futuras': pendingPayments,
+                            'Total Ativo': pendingReceivables + potentialStockRevenue
+                        }
+                    ];
+
                     setFinancialData(chartData);
+                    setProjectedFlowData(projectedData);
                     // setSalesTrend(salesTrendData);
                     setTopClients(topClientData);
                     setTopProducts(topProductData);
@@ -716,7 +753,7 @@ export default function Dashboard() {
                     {/* Financial Chart (Big) */}
                     <Card className="col-span-4 shadow-sm">
                         <CardHeader>
-                            <CardTitle>Fluxo de Caixa</CardTitle>
+                            <CardTitle>Fluxo de Caixa Realizado</CardTitle>
                             <CardDescription>Receitas vs Despesas (Últimos 6 meses)</CardDescription>
                         </CardHeader>
                         <CardContent className="pl-2">
@@ -725,11 +762,11 @@ export default function Dashboard() {
                                     <ComposedChart data={financialData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                                         <XAxis dataKey="name" stroke="#9CA3AF" tickLine={false} axisLine={false} />
-                                        <YAxis stroke="#9CA3AF" tickLine={false} axisLine={false} tickFormatter={(value) => `R$${value}`} />
+                                        <YAxis stroke="#9CA3AF" tickLine={false} axisLine={false} tickFormatter={(value) => `R$${value / 1000}k`} />
                                         <Tooltip
                                             cursor={{ fill: '#F3F4F6' }}
                                             contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                            formatter={(value: any) => [`R$ ${Number(value).toFixed(2)}`, '']}
+                                            formatter={(value: any) => [`R$ ${Number(value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, '']}
                                         />
                                         <Legend wrapperStyle={{ paddingTop: '20px' }} />
                                         <Bar dataKey="Receita" fill="#22c55e" radius={[4, 4, 0, 0]} maxBarSize={40} stackId="a" />
@@ -741,17 +778,53 @@ export default function Dashboard() {
                         </CardContent>
                     </Card>
 
-                    {/* NEW: Seller Performance Widget (Replaces Top Products placement for better visibility, or Stacked?) */}
-                    {/* Let's put Seller Performance here instead of Top Products, or split this column */}
-                    <Card className="col-span-3 shadow-sm flex flex-col">
+                    {/* NEW: Projected Flow Chart */}
+                    <Card className="col-span-3 shadow-sm flex flex-col border-l-4 border-l-amber-500">
+                        <CardHeader>
+                            <CardTitle>Fluxo Projetado</CardTitle>
+                            <CardDescription>Potencial (Estoque + A Receber) vs (A Pagar)</CardDescription>
+                        </CardHeader>
+                        <CardContent className="flex-1 min-h-[300px]">
+                            <div className="h-[300px] w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={projectedFlowData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                        <XAxis dataKey="name" stroke="#9CA3AF" tickLine={false} axisLine={false} />
+                                        <YAxis stroke="#9CA3AF" tickLine={false} axisLine={false} tickFormatter={(value) => `R$${value / 1000}k`} />
+                                        <Tooltip
+                                            cursor={{ fill: 'rgba(0,0,0,0.05)' }}
+                                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                                            formatter={(value: any) => [`R$ ${Number(value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, '']}
+                                        />
+                                        <Legend />
+
+                                        {/* Stacked Bar for Assets */}
+                                        <Bar dataKey="Entradas Futuras" stackId="a" fill="#f59e0b" name="A Receber" radius={[0, 0, 0, 0]} />
+                                        <Bar dataKey="Potencial Estoque" stackId="a" fill="#8b5cf6" name="Potencial Estoque" radius={[4, 4, 0, 0]} />
+
+                                        {/* Separate Bar for Liabilities */}
+                                        <Bar dataKey="Saídas Futuras" fill="#ef4444" name="A Pagar" radius={[4, 4, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div className="mt-4 text-xs text-center text-zinc-500">
+                                Considera todas as contas pendentes e o valor de venda estimado do estoque atual.
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+
+                {/* Seller Performance (Moved Down) */}
+                <div className="grid gap-4 md:grid-cols-1">
+                    <Card className="shadow-sm flex flex-col">
                         <CardHeader>
                             <CardTitle>Performance por Vendedor</CardTitle>
                             <CardDescription>Vendas e Margem (30 dias)</CardDescription>
                         </CardHeader>
                         <CardContent className="flex-1 overflow-auto">
-                            <div className="space-y-4">
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                                 {(notifications as any[]).length === 0 ? (
-                                    <div className="text-center text-zinc-400 py-10">Sem vendas recentes</div>
+                                    <div className="col-span-full text-center text-zinc-400 py-10">Sem vendas recentes</div>
                                 ) : (
                                     (notifications as any[]).map((seller, i) => (
                                         <div key={i} className="flex flex-col gap-2 p-3 bg-zinc-50 rounded-lg border border-zinc-100">
