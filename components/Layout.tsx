@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { View } from '../types';
 
@@ -12,12 +11,12 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onNavigate }) =>
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const navItems = [
-    { id: 'dashboard', icon: 'home', label: 'Visão Geral', color: 'text-primary' },
+    { id: 'dashboard', icon: 'home', label: 'Visão Geral', color: 'text-orange-500' },
     { id: 'inventory', icon: 'inventory_2', label: 'Estoque', color: 'text-amber-400' },
     { id: 'sales', icon: 'shopping_cart', label: 'Vendas', color: 'text-blue-400' },
     { id: 'recipes', icon: 'cookie', label: 'Receitas', color: 'text-pink-400' },
     { id: 'receivables', icon: 'account_balance_wallet', label: 'Contas a Receber', color: 'text-emerald-400' },
-    { id: 'requests', icon: 'shopping_bag', label: 'Solicitações', color: 'text-purple-400' },
+    { id: 'requests', icon: 'shopping_bag', label: 'Solicitações', color: 'text-orange-400' },
     { id: 'seller-summary', icon: 'person_search', label: 'Resumo Vendedor', color: 'text-indigo-400' },
   ];
 
@@ -31,8 +30,8 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onNavigate }) =>
       <aside className="hidden md:flex flex-col w-64 h-full bg-zinc-800 text-white shrink-0 shadow-2xl z-20">
         <div className="flex items-center h-20 px-6 border-b border-zinc-700/50">
           <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-primary text-3xl">cake</span>
-            <h1 className="text-2xl font-bold text-primary tracking-tight">KB Sweet</h1>
+            <span className="material-symbols-outlined text-orange-500 text-3xl">cake</span>
+            <h1 className="text-2xl font-bold text-orange-500 tracking-tight">KB Sweet</h1>
           </div>
         </div>
         <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
@@ -41,7 +40,7 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onNavigate }) =>
               key={item.id}
               onClick={() => onNavigate(item.id as View)}
               className={`flex items-center w-full gap-3 px-4 py-3 rounded-xl transition-all group ${
-                currentView === item.id ? 'bg-primary/20 text-primary' : 'text-zinc-400 hover:bg-zinc-700 hover:text-white'
+                currentView === item.id ? 'bg-orange-500/20 text-orange-500' : 'text-zinc-400 hover:bg-zinc-700 hover:text-white'
               }`}
             >
               <span className={`material-symbols-outlined ${currentView === item.id ? '' : `group-hover:${item.color}`} transition-colors`}>
@@ -54,7 +53,7 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onNavigate }) =>
         
         <div className="p-4 border-t border-zinc-700/50 space-y-4">
           <div className="flex items-center gap-3 px-2 py-2">
-            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center text-white font-bold shadow-lg">
+            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-orange-500 to-blue-600 flex items-center justify-center text-white font-bold shadow-lg">
               AB
             </div>
             <div className="flex flex-col">
@@ -104,8 +103,8 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onNavigate }) =>
             >
               <div className="flex justify-between items-center mb-8 pr-2">
                 <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary text-xl">cake</span>
-                  <span className="text-primary font-bold text-xl">KB Sweet</span>
+                  <span className="material-symbols-outlined text-orange-500 text-xl">cake</span>
+                  <span className="text-orange-500 font-bold text-xl">KB Sweet</span>
                 </div>
                 <button onClick={() => setIsMobileMenuOpen(false)}>
                   <span className="material-symbols-outlined">close</span>
@@ -117,7 +116,7 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onNavigate }) =>
                     key={item.id}
                     onClick={() => { onNavigate(item.id as View); setIsMobileMenuOpen(false); }}
                     className={`flex items-center w-full gap-3 px-4 py-3 rounded-xl transition-all ${
-                      currentView === item.id ? 'bg-primary/20 text-primary' : 'text-zinc-400'
+                      currentView === item.id ? 'bg-orange-500/20 text-orange-500' : 'text-zinc-400'
                     }`}
                   >
                     <span className="material-symbols-outlined">{item.icon}</span>
