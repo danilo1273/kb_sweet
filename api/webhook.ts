@@ -663,16 +663,11 @@ Retorne um JSON seguindo exatamente este formato:
       }
 
       // Apply adjustment via Supabase RPC
-      // The DB constraint only allows 'danilo' or 'adriel' as stock_owner values
-      const slugLower = (matchedLocation.slug || '').toLowerCase();
-      let stockOwner = 'danilo'; // default fallback
-      if (slugLower.includes('adriel')) stockOwner = 'adriel';
-      else if (slugLower.includes('danilo')) stockOwner = 'danilo';
-
+      // Pass the slug directly — the DB function resolves any dynamic slug to location_id
       const rpcName = matchedItem.is_product ? 'apply_product_stock_adjustment' : 'apply_stock_adjustment';
       const rpcParams: any = {
         p_new_stock: newQty,
-        p_stock_owner: stockOwner,
+        p_stock_owner: matchedLocation.slug,
         p_reason: parsed.reason || 'Ajuste Telegram',
         p_type: newQty >= currentQty ? 'found' : 'loss'
       };
