@@ -22,23 +22,33 @@ async function sendMessage(chatId: string | number, text: string, replyMarkup?: 
   });
 }
 
-async function generateContentWithRetry(ai: any, options: any, maxAttempts = 3, delayMs = 1500) {
+async function generateContentWithRetry(ai: any, options: any, maxAttempts = 2, delayMs = 1000) {
   let lastError: any;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const response = await ai.models.generateContent(options);
-      return response;
-    } catch (error: any) {
-      lastError = error;
-      const errMsg = error.message || '';
-      const isUnavailable = error.status === 'UNAVAILABLE' || errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('temporary');
-      
-      if (attempt < maxAttempts && isUnavailable) {
-        console.warn(`Gemini call failed with 503 (attempt ${attempt}/${maxAttempts}). Retrying in ${delayMs * attempt}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
-        continue;
+  // Try 2.5-flash, fallback to 1.5-flash if 2.5 is overloaded
+  const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  
+  for (const model of models) {
+    const currentOptions = { ...options, model };
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const response = await ai.models.generateContent(currentOptions);
+        return response;
+      } catch (error: any) {
+        lastError = error;
+        const errMsg = error.message || '';
+        const isUnavailable = error.status === 'UNAVAILABLE' || errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('temporary');
+        
+        if (isUnavailable) {
+          if (attempt < maxAttempts) {
+            console.warn(`Gemini model ${model} overloaded (attempt ${attempt}/${maxAttempts}). Retrying in ${delayMs * attempt}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
+            continue;
+          }
+          // If we reached max attempts for this model, break loop to try the fallback model
+          break;
+        }
+        throw error;
       }
-      throw error;
     }
   }
   throw lastError;
