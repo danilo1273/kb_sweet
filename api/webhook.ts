@@ -38,6 +38,8 @@ const backKeyboard = {
   one_time_keyboard: true
 };
 
+export const maxDuration = 60;
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(200).send('Webhook ativo');
@@ -484,6 +486,11 @@ Retorne um JSON seguindo exatamente este formato:
       if (photo) {
         fileId = photo[photo.length - 1].file_id;
       } else if (document) {
+        if (document.file_size && document.file_size > 10 * 1024 * 1024) {
+          await sendMessage(chatId, '⚠️ *O arquivo enviado é muito grande (maior que 10MB).* Por favor, envie uma foto ou um arquivo PDF menor para garantir o processamento.', mainKeyboard);
+          await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+          return res.status(200).send('OK');
+        }
         fileId = document.file_id;
         mimeType = document.mime_type || 'application/pdf';
       }
