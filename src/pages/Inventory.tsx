@@ -93,18 +93,22 @@ export default function Inventory() {
     }, []);
 
     async function fetchCategories() {
-        // Fetch categories for STOCK (exclude product types)
-        const { data, error } = await supabase.from('custom_categories')
-            .select('*')
-            .neq('type', 'product')
-            .order('name');
+        try {
+            // Fetch categories for STOCK (exclude product types)
+            const { data, error } = await supabase.from('custom_categories')
+                .select('*')
+                .neq('type', 'product')
+                .order('name');
 
-        if (!error && data) {
-            setAvailableCategories(data.map((d: any) => ({
-                id: d.id,
-                name: d.name,
-                type: d.type || 'stock'
-            })));
+            if (!error && data) {
+                setAvailableCategories(data.map((d: any) => ({
+                    id: d.id,
+                    name: d.name || '',
+                    type: d.type || 'stock'
+                })));
+            }
+        } catch (err) {
+            console.error("Error fetching categories:", err);
         }
     }
 
@@ -140,9 +144,13 @@ export default function Inventory() {
     }
 
     async function fetchUnits() {
-        const { data, error } = await supabase.from('custom_units').select('name').order('name');
-        if (!error && data) {
-            setAvailableUnits(data.map(d => d.name.toLowerCase()));
+        try {
+            const { data, error } = await supabase.from('custom_units').select('name').order('name');
+            if (!error && data) {
+                setAvailableUnits(Array.from(new Set(data.map(d => d.name?.toLowerCase() || ''))).filter(Boolean));
+            }
+        } catch (err) {
+            console.error("Error fetching units:", err);
         }
     }
 
@@ -295,7 +303,7 @@ export default function Inventory() {
     };
 
     const filteredIngredients = ingredients.filter((ing) => {
-        const matchesSearch = ing.name.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesSearch = (ing.name || "").toLowerCase().includes(searchTerm.toLowerCase());
         const matchesCategory = categoryFilter === 'all' || (ing.category && ing.category === categoryFilter);
         
         // Filter by warehouse
@@ -316,7 +324,7 @@ export default function Inventory() {
         return matchesSearch && matchesCategory && matchesStock && matchesType && matchesWarehouse;
     });
 
-    const uniqueCategories = Array.from(new Set(ingredients.map(i => i.category))).filter(Boolean).sort();
+    const uniqueCategories = Array.from(new Set(ingredients.map(i => i.category || 'Outros'))).filter(Boolean).sort();
 
     async function handleSave() {
         setIsSaving(true);

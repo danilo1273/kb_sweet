@@ -157,7 +157,7 @@ function BankStatement({ account, onBack, fetchStatement, onAddTransaction, load
                             const sale = sales.find((s: any) => s.id === m.related_sale_id);
                             if (sale) {
                                 const clientName = (sale.clients as any)?.name || 'Consumidor Final';
-                                const itemsSummary = (sale.sale_items as any[])?.map((i: any) => {
+                                const itemsSummary = ((sale.sale_items as any[]) || []).map((i: any) => {
                                     const prodName = i.products?.name || 'Item';
                                     return `${i.quantity}x ${prodName}`;
                                 }).join(', ');
