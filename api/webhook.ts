@@ -2,15 +2,6 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { persistSession: false, autoRefreshToken: false }
-});
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
 async function sendTelegram(method: string, payload: any) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const url = `https://api.telegram.org/bot${token}/${method}`;
@@ -43,6 +34,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(200).send('Webhook ativo');
   }
+
+  // Lazy initialize clients inside handler to avoid module import failure when variables are not configured yet
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.error('Supabase URL or Key is missing!');
+    return res.status(200).send('Configuração do Supabase ausente.');
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
   try {
     const { message, callback_query } = req.body;
