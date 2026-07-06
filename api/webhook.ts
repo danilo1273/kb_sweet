@@ -245,7 +245,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).send('OK');
     }
 
-    if (text === '⬅️ Voltar ao Menu') {
+    if (text === '⬅️ Voltar ao Menu' || text === '/cancelar' || text?.toLowerCase() === 'cancelar') {
       await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
       await sendMessage(chatId, 'Voltou ao menu principal. Selecione uma opção para começar:', getMainKeyboard(profile));
       return res.status(200).send('OK');
@@ -876,7 +876,18 @@ Retorne um JSON seguindo exatamente este formato:
     console.error('Webhook Error:', error);
     const chatId = req.body?.message?.chat?.id || req.body?.callback_query?.message?.chat?.id;
     if (chatId) {
-      await sendMessage(chatId, `❌ *Erro ao processar requisição:*\n_${error.message || error}_`, getMainKeyboard(profile));
+      try {
+        if (profile?.id) {
+          await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+        }
+      } catch (dbErr) {
+        console.error('Failed to clear state:', dbErr);
+      }
+      try {
+        await sendMessage(chatId, `❌ *Erro ao processar requisição:*\n_${error.message || error}_`, getMainKeyboard(profile));
+      } catch (tgErr) {
+        console.error('Failed to send error message:', tgErr);
+      }
     }
   }
 
