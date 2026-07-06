@@ -38,6 +38,7 @@ interface UnifiedHistoryItem {
     total_value: number;
     user_name?: string;
     link_id?: string; // Order ID
+    warehouse?: string;
 }
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -76,6 +77,7 @@ export default function Inventory() {
     const [categoryFilter, setCategoryFilter] = useState("all");
     const [stockFilter, setStockFilter] = useState("all");
     const [typeFilter, setTypeFilter] = useState("all"); // 'all', 'stock' (insumo), 'product' (acabado)
+    const [warehouseFilter, setWarehouseFilter] = useState("all");
 
     // Category State
     const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
@@ -263,19 +265,48 @@ export default function Inventory() {
         setLoading(false);
     }
 
+    const getItemStockAtLocation = (item: any, locationIdOrSlug: string) => {
+        const stocks = item.product_stocks || [];
+        const match = stocks.find((s: any) => s.location?.id === locationIdOrSlug || s.location?.slug === locationIdOrSlug);
+        if (match) return Number(match.quantity || 0);
+        
+        if (locationIdOrSlug === 'stock-danilo' || locationIdOrSlug === 'danilo') {
+            return Number(item.stock_danilo || 0);
+        }
+        if (locationIdOrSlug === 'stock-adriel' || locationIdOrSlug === 'adriel') {
+            return Number(item.stock_adriel || 0);
+        }
+        return 0;
+    };
+
+    const getTotalStock = (item: any) => {
+        const stocks = item.product_stocks || [];
+        if (stocks.length > 0) {
+            return stocks.reduce((sum: number, s: any) => sum + Number(s.quantity || 0), 0);
+        }
+        return Number(item.stock_danilo || 0) + Number(item.stock_adriel || 0);
+    };
+
     const filteredIngredients = ingredients.filter((ing) => {
         const matchesSearch = ing.name.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesCategory = categoryFilter === 'all' || (ing.category && ing.category === categoryFilter);
+        
+        // Filter by warehouse
+        const matchesWarehouse = warehouseFilter === 'all' || getItemStockAtLocation(ing, warehouseFilter) > 0;
+
+        // Resolve active stock level for filters
+        const activeStock = warehouseFilter !== 'all' ? getItemStockAtLocation(ing, warehouseFilter) : getTotalStock(ing);
+
         const matchesStock = stockFilter === 'all' ||
-            (stockFilter === 'low' && ((ing.stock_danilo || 0) <= (ing.min_stock || 0) || (ing.stock_adriel || 0) <= (ing.min_stock || 0))) ||
-            (stockFilter === 'with_balance' && ((ing.stock_danilo || 0) > 0 || (ing.stock_adriel || 0) > 0)) ||
-            (stockFilter === 'no_balance' && ((ing.stock_danilo || 0) <= 0 && (ing.stock_adriel || 0) <= 0));
+            (stockFilter === 'low' && activeStock <= (ing.min_stock || 0)) ||
+            (stockFilter === 'with_balance' && activeStock > 0) ||
+            (stockFilter === 'no_balance' && activeStock <= 0);
 
         let matchesType = true;
         if (typeFilter === 'product') matchesType = ing.type === 'product'; // Acabado
         if (typeFilter === 'stock') matchesType = ing.type !== 'product'; // Insumos (stock or expense)
 
-        return matchesSearch && matchesCategory && matchesStock && matchesType;
+        return matchesSearch && matchesCategory && matchesStock && matchesType && matchesWarehouse;
     });
 
     const uniqueCategories = Array.from(new Set(ingredients.map(i => i.category))).filter(Boolean).sort();
@@ -370,16 +401,15 @@ export default function Inventory() {
                 .or(`ingredient_id.eq.${ingredient.id},item_name.eq."${safeName}"`)
                 .eq('status', 'approved')
                 .order('created_at', { ascending: false })
-                .limit(15);
-
-            // 2. Fetch Production Usage (Ingredients Consumed)
+                 // 2. Fetch Production Usage (Ingredients Consumed)
             const productionPromise = supabase
                 .from('production_order_items')
                 .select(`
                     *,
                     production_orders!inner(
                         id, closed_at, status, products(name),
-                        profiles: user_id(full_name)
+                        profiles: user_id(full_name),
+                        stock_source, location_id
                     )
                     `)
                 .eq('item_id', ingredient.id)
@@ -392,7 +422,8 @@ export default function Inventory() {
                 .from('production_orders')
                 .select(`
                    id, quantity, actual_quantity, closed_at, status,
-                    profiles: user_id(full_name)
+                   profiles: user_id(full_name),
+                   stock_source, location_id
                     `)
                 .eq('product_id', ingredient.id)
                 .eq('status', 'closed')
@@ -405,7 +436,7 @@ export default function Inventory() {
                 .select(`
                     id, quantity, unit_price,
                     sales!inner(
-                        id, created_at, status, stock_source,
+                        id, created_at, status, stock_source, location_id,
                         profiles: user_id(full_name)
                     )
                     `)
@@ -465,6 +496,17 @@ export default function Inventory() {
                 profiles?.forEach(p => profileMap.set(p.id, p.full_name || 'Desconhecido'));
             }
 
+            const locMap = new Map<string, string>();
+            stockLocations.forEach(l => {
+                locMap.set(l.id, l.name);
+                locMap.set(l.slug, l.name);
+            });
+            const getWarehouseName = (val: string) => {
+                if (!val) return '-';
+                const clean = val.startsWith('stock-') ? val : `stock-${val}`;
+                return locMap.get(val) || locMap.get(clean) || val.toUpperCase();
+            };
+
             purchaseItems = (purchasesRes.data || []).map((r: any) => {
                 const po = r.purchase_orders || {};
                 const supplierName = po.suppliers?.name || r.supplier || 'Fornecedor Externo';
@@ -479,11 +521,10 @@ export default function Inventory() {
                     unit: r.unit || 'un',
                     total_value: Number(r.cost || 0),
                     user_name: userName,
-                    link_id: po.id
+                    link_id: po.id,
+                    warehouse: getWarehouseName(r.destination)
                 };
             });
-
-            // ... (Production Usage & Output & Sales - Unchanged) ...
 
             // 4. Process Production Usage
             const productionUsageItems: UnifiedHistoryItem[] = (productionRes.data || []).map((item: any) => {
@@ -506,7 +547,8 @@ export default function Inventory() {
                     unit: item.unit || 'un',
                     total_value: cost,
                     user_name: userName,
-                    link_id: order.id
+                    link_id: order.id,
+                    warehouse: getWarehouseName(order.location_id || order.stock_source)
                 };
             });
 
@@ -527,7 +569,8 @@ export default function Inventory() {
                     unit: ingredient.unit || 'un',
                     total_value: 0,
                     user_name: userName,
-                    link_id: order.id
+                    link_id: order.id,
+                    warehouse: getWarehouseName(order.location_id || order.stock_source)
                 };
             });
 
@@ -549,7 +592,8 @@ export default function Inventory() {
                     unit: ingredient.unit || 'un',
                     total_value: Number(item.quantity * item.unit_price),
                     user_name: userName,
-                    link_id: sale.id
+                    link_id: sale.id,
+                    warehouse: getWarehouseName(sale.location_id || sale.stock_source)
                 };
             });
 
@@ -577,7 +621,8 @@ export default function Inventory() {
                     quantity: qtyDiff,
                     unit: ingredient.unit || 'un',
                     total_value: moveValue,
-                    user_name: userName
+                    user_name: userName,
+                    warehouse: getWarehouseName(adj.stock_owner)
                 };
             });
 
@@ -685,6 +730,19 @@ export default function Inventory() {
                             <SelectItem value="low">Baixo Estoque</SelectItem>
                         </SelectContent>
                     </Select>
+                    <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
+                        <SelectTrigger className="w-[180px] bg-zinc-50">
+                            <SelectValue placeholder="Armazém" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Todos os Armazéns</SelectItem>
+                            {stockLocations.map(loc => (
+                                <SelectItem key={loc.id} value={loc.slug}>
+                                    {loc.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                 </div>
             </div >
 
@@ -730,22 +788,47 @@ export default function Inventory() {
                                                 else if (loc.slug === 'stock-adriel') qty = item.stock_adriel || 0;
                                                 else qty = 0;
                                             }
+                                            const isSelected = warehouseFilter === loc.slug || warehouseFilter === loc.id;
+                                            const hasStock = qty > 0;
 
                                             return (
-                                                <div key={loc.id} className="bg-zinc-50 p-2 rounded border border-zinc-100 flex flex-col justify-between">
+                                                <div 
+                                                    key={loc.id} 
+                                                    className={cn(
+                                                        "p-2.5 rounded border flex flex-col justify-between transition-all duration-200",
+                                                        hasStock 
+                                                            ? isSelected 
+                                                                ? "bg-indigo-50/20 border-indigo-400 border-l-4 border-l-indigo-600 shadow-sm" 
+                                                                : "bg-white border-zinc-200 border-l-4 border-l-emerald-500 shadow-sm"
+                                                            : isSelected
+                                                                ? "bg-indigo-50/10 border-indigo-300 opacity-80"
+                                                                : "bg-zinc-50/60 border-zinc-150 text-zinc-400 opacity-55"
+                                                    )}
+                                                >
                                                     <div>
-                                                        <div className="text-[10px] text-zinc-500 font-bold uppercase truncate" title={loc.name}>{loc.name}</div>
-                                                        <div className={cn("font-medium",
-                                                            qty <= 0 ? "text-red-600 font-bold" :
-                                                                qty <= (item.min_stock || 0) ? "text-amber-600" : "text-zinc-700"
+                                                        <div className={cn(
+                                                            "text-[9px] font-bold uppercase truncate flex items-center gap-1",
+                                                            hasStock ? "text-zinc-600" : "text-zinc-400"
+                                                        )} title={loc.name}>
+                                                            {hasStock ? "📍" : "⚪"} {loc.name}
+                                                        </div>
+                                                        <div className={cn("font-bold text-sm mt-0.5",
+                                                            qty <= 0 ? "text-zinc-400 font-normal" :
+                                                                qty <= (item.min_stock || 0) ? "text-amber-600" : "text-zinc-800"
                                                         )}>
-                                                            {qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-[10px]">{item.unit}</span>
+                                                            {qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-[10px] font-normal">{item.unit}</span>
                                                         </div>
                                                     </div>
                                                     {canViewCosts && (
-                                                        <div className="mt-1 pt-1 border-t border-zinc-200/50">
-                                                            <div className="text-[9px] text-zinc-400">Total</div>
-                                                            <div className="text-xs font-semibold text-zinc-600">
+                                                        <div className={cn(
+                                                            "mt-1.5 pt-1 border-t",
+                                                            hasStock ? "border-zinc-150" : "border-zinc-200/40"
+                                                        )}>
+                                                            <div className="text-[8px] text-zinc-400">Total</div>
+                                                            <div className={cn(
+                                                                "text-xs font-semibold",
+                                                                hasStock ? "text-zinc-700" : "text-zinc-400 font-normal"
+                                                            )}>
                                                                 {((qty || 0) * (stock?.average_cost || item.cost || 0)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                             </div>
                                                         </div>
@@ -780,23 +863,31 @@ export default function Inventory() {
                         <TableRow>
                             <TableHead rowSpan={2} className="align-bottom w-[200px] max-w-[200px]">Nome</TableHead>
                             <TableHead rowSpan={2} className="w-[60px] align-bottom">Un.</TableHead>
-                            {stockLocations.map(loc => (
-                                <TableHead key={loc.id} colSpan={3} className="text-center bg-zinc-50/80 text-zinc-700 border-b border-zinc-200 font-semibold h-8 py-1 truncate max-w-[150px]" title={loc.name}>
-                                    {loc.name}
-                                </TableHead>
-                            ))}
+                            {stockLocations.map(loc => {
+                                const isSelected = warehouseFilter === loc.slug || warehouseFilter === loc.id;
+                                return (
+                                    <TableHead key={loc.id} colSpan={3} className={cn("text-center text-zinc-700 border-b border-zinc-200 font-semibold h-8 py-1 truncate max-w-[150px]", 
+                                        isSelected ? "bg-blue-100 text-blue-900 border-x border-blue-200" : "bg-zinc-50/80"
+                                    )} title={loc.name}>
+                                        {loc.name}
+                                    </TableHead>
+                                );
+                            })}
                             <TableHead colSpan={2} className="text-center bg-zinc-100 text-zinc-700 border-b border-zinc-200 font-semibold h-8 py-1">Total Geral</TableHead>
                             <TableHead rowSpan={2} className="text-right w-[80px] align-bottom">Ações</TableHead>
                         </TableRow>
                         <TableRow>
                             {/* Dynamic Sub-headers */}
-                            {stockLocations.map(loc => (
-                                <Fragment key={loc.id}>
-                                    <TableHead className="text-right bg-zinc-50/30 h-8 py-1 text-xs">Qtd</TableHead>
-                                    <TableHead className="text-right bg-zinc-50/30 h-8 py-1 text-xs">Médio</TableHead>
-                                    <TableHead className="text-right bg-zinc-50/30 h-8 py-1 text-xs font-bold">Total</TableHead>
-                                </Fragment>
-                            ))}
+                            {stockLocations.map(loc => {
+                                const isSelected = warehouseFilter === loc.slug || warehouseFilter === loc.id;
+                                return (
+                                    <Fragment key={loc.id}>
+                                        <TableHead className={cn("text-right h-8 py-1 text-xs", isSelected ? "bg-blue-50/80 border-l border-blue-200 font-bold" : "bg-zinc-50/30")}>Qtd</TableHead>
+                                        <TableHead className={cn("text-right h-8 py-1 text-xs", isSelected ? "bg-blue-50/80" : "bg-zinc-50/30")}>Médio</TableHead>
+                                        <TableHead className={cn("text-right h-8 py-1 text-xs font-bold", isSelected ? "bg-blue-50/80 border-r border-blue-200" : "bg-zinc-50/30")}>Total</TableHead>
+                                    </Fragment>
+                                );
+                            })}
                             {/* Total Geral Sub-headers */}
                             <TableHead className="text-right bg-zinc-50 h-8 py-1 text-xs font-bold">Qtd</TableHead>
                             <TableHead className="text-right bg-zinc-50 h-8 py-1 text-xs font-bold">Total</TableHead>
@@ -880,9 +971,12 @@ export default function Inventory() {
 
                                                 const totalLocVal = qty * cost;
 
+                                                const isSelected = warehouseFilter === loc.slug || warehouseFilter === loc.id;
+
                                                 return (
                                                     <Fragment key={loc.id}>
-                                                        <TableCell className={cn("text-right bg-zinc-50/30 border-l border-zinc-100",
+                                                        <TableCell className={cn("text-right border-l border-zinc-100",
+                                                            isSelected ? "bg-blue-50/30 border-x border-blue-100" : "bg-zinc-50/30",
                                                             qty <= 0 && item.type !== 'expense' ? "text-red-600 font-bold" :
                                                                 qty <= (item.min_stock || 0) && item.type !== 'expense' ? "text-amber-600 font-bold" : ""
                                                         )}>
@@ -897,7 +991,7 @@ export default function Inventory() {
                                                                 </div>
                                                             )}
                                                         </TableCell>
-                                                        <TableCell className="text-right text-xs bg-zinc-50/30">
+                                                        <TableCell className={cn("text-right text-xs", isSelected ? "bg-blue-50/30 border-r border-blue-100" : "bg-zinc-50/30")}>
                                                             {item.type === 'expense' ? '-' : (
                                                                 qty <= 0 ? <div className="text-zinc-300">-</div> : (
                                                                     <>
@@ -907,7 +1001,7 @@ export default function Inventory() {
                                                                 )
                                                             )}
                                                         </TableCell>
-                                                        <TableCell className="text-right text-xs font-bold text-zinc-700 bg-zinc-50/30 border-r border-zinc-100">
+                                                        <TableCell className={cn("text-right text-xs font-bold border-r border-zinc-100", isSelected ? "bg-blue-50/30 border-r border-blue-100 text-blue-900" : "text-zinc-700 bg-zinc-50/30")}>
                                                             {item.type === 'expense' ? '-' : `R$ ${totalLocVal.toFixed(2)}`}
                                                         </TableCell>
                                                     </Fragment>
@@ -1179,6 +1273,7 @@ export default function Inventory() {
                                 <TableRow>
                                     <TableHead>Data</TableHead>
                                     <TableHead>Tipo</TableHead>
+                                    <TableHead>Armazém</TableHead>
                                     <TableHead>Descrição</TableHead>
                                     <TableHead>Resp.</TableHead>
                                     <TableHead className="text-right">Qtd</TableHead>
@@ -1187,9 +1282,9 @@ export default function Inventory() {
                             </TableHeader>
                             <TableBody>
                                 {historyLoading ? (
-                                    <TableRow><TableCell colSpan={6} className="text-center py-8"><Loader2 className="animate-spin mx-auto text-zinc-400" /></TableCell></TableRow>
+                                    <TableRow><TableCell colSpan={7} className="text-center py-8"><Loader2 className="animate-spin mx-auto text-zinc-400" /></TableCell></TableRow>
                                 ) : historyData.length === 0 ? (
-                                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Nenhuma movimentação recente.</TableCell></TableRow>
+                                    <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Nenhuma movimentação recente.</TableCell></TableRow>
                                 ) : (
                                     historyData.map(h => (
                                         <TableRow key={`${h.type} - ${h.id}`} className="hover:bg-zinc-50/50">
@@ -1202,6 +1297,11 @@ export default function Inventory() {
                                                     h.type === 'purchase' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
                                                 )}>
                                                     {h.type === 'purchase' ? 'Entrada' : 'Baixa'}
+                                                </span>
+                                            </TableCell>
+                                            <TableCell>
+                                                <span className="text-xs font-semibold text-zinc-600 bg-zinc-100 px-1.5 py-0.5 rounded border border-zinc-200 whitespace-nowrap">
+                                                    📍 {h.warehouse || '-'}
                                                 </span>
                                             </TableCell>
                                             <TableCell className="font-medium text-sm">
