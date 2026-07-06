@@ -57,6 +57,22 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
         }
     }, [isOpen]);
 
+    const getAuditColorClass = (slug: string | undefined) => {
+        const colors = [
+            "bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200",
+            "bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200",
+            "bg-violet-50 text-violet-700 hover:bg-violet-100 border-violet-200",
+            "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200",
+            "bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200",
+            "bg-cyan-50 text-cyan-700 hover:bg-cyan-100 border-cyan-200",
+            "bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-200",
+        ];
+        if (!slug) return colors[0];
+        let hash = 0;
+        for (let i = 0; i < slug.length; i++) hash = slug.charCodeAt(i) + ((hash << 5) - hash);
+        return colors[Math.abs(hash) % colors.length];
+    };
+
     const startAudit = (ownerSlug: string) => {
         setStockOwner(ownerSlug);
         // Initialize audit items based on current stock
@@ -66,18 +82,21 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
         const items = validIngredients.map(ing => {
             const stockRecord = ing.stocks?.find((s: any) => s.location_slug === ownerSlug || s.location_id === ownerSlug);
             
-            const currentCost = stockRecord ? stockRecord.average_cost : (
-                ownerSlug.includes('danilo') ? (ing.cost_danilo !== undefined ? ing.cost_danilo : ing.cost) :
-                ownerSlug.includes('adriel') ? (ing.cost_adriel !== undefined ? ing.cost_adriel : ing.cost) :
-                ing.cost
-            );
+            const currentCost = stockRecord && stockRecord.average_cost > 0 
+                ? stockRecord.average_cost 
+                : (
+                    ownerSlug.includes('danilo') ? (ing.cost_danilo !== undefined ? ing.cost_danilo : ing.cost) :
+                    ownerSlug.includes('adriel') ? (ing.cost_adriel !== undefined ? ing.cost_adriel : ing.cost) :
+                    ing.cost
+                ) || 0;
 
             let systemStock = 0;
             if (stockRecord) {
-                systemStock = stockRecord.quantity;
+                systemStock = stockRecord.quantity || 0;
             } else {
                 if (ownerSlug.includes('danilo')) systemStock = ing.stock_danilo || 0;
                 else if (ownerSlug.includes('adriel')) systemStock = ing.stock_adriel || 0;
+                else systemStock = 0;
             }
 
             return {
@@ -247,13 +266,7 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
                             <h3 className="text-lg font-medium text-zinc-600">Selecione o estoque para auditar:</h3>
                             <div className="flex flex-wrap gap-4 justify-center">
                                 {locations.map((loc: any) => {
-                                    const isDanilo = loc.slug?.includes('danilo');
-                                    const isAdriel = loc.slug?.includes('adriel');
-                                    const colorClass = isDanilo 
-                                        ? "bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200" 
-                                        : isAdriel 
-                                            ? "bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200"
-                                            : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200";
+                                    const colorClass = getAuditColorClass(loc.slug);
 
                                     return (
                                         <Button 

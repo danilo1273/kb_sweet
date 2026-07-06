@@ -59,8 +59,8 @@ export interface Ingredient {
     name: string;
     category?: string;
     unit: string;
-    stock_danilo: number;
-    stock_adriel: number;
+    stock_danilo?: number;
+    stock_adriel?: number;
     cost: number;
     cost_danilo?: number;
     cost_adriel?: number;
@@ -168,8 +168,8 @@ export interface POSProduct {
     cost_danilo?: number; // Added
     cost_adriel?: number; // Added
     category: string;
-    stock_danilo: number;
-    stock_adriel: number;
+    stock_danilo?: number;
+    stock_adriel?: number;
     unit?: string;
     product_stocks?: ProductStock[];
 }

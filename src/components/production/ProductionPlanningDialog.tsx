@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 interface MinimalOrder {
     product_id: string;
     quantity: number;
-    stock_source?: 'danilo' | 'adriel';
+    stock_source?: string;
 }
 
 interface ProductionPlanningDialogProps {
@@ -49,7 +49,8 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
     const [prodFilter, setProdFilter] = useState("");
     const [selectedProductId, setSelectedProductId] = useState("");
     const [quantity, setQuantity] = useState(1);
-    const [stockSource, setStockSource] = useState<'danilo' | 'adriel'>('danilo');
+    const [stockSource, setStockSource] = useState<string>('');
+    const [locations, setLocations] = useState<any[]>([]);
 
     // Tab State
     const [currentTab, setCurrentTab] = useState<'single' | 'batch'>('single');
@@ -59,16 +60,37 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
     const [batchAnalysisItems, setBatchAnalysisItems] = useState<{ source: string, items: AnalysisItem[] }[]>([]);
 
     useEffect(() => {
+        async function loadLocations() {
+            try {
+                const { data, error } = await supabase.from('stock_locations').select('*').order('name');
+                if (error) throw error;
+                if (data) {
+                    setLocations(data);
+                    
+                    let initialSource = '';
+                    if (existingOrder) {
+                        initialSource = existingOrder.stock_source || '';
+                    } else {
+                        const defaultLoc = data.find((l: any) => l.is_default === true);
+                        initialSource = defaultLoc?.slug || data[0]?.slug || 'estoque-principal';
+                    }
+                    setStockSource(initialSource);
+                }
+            } catch (err) {
+                console.error("Erro ao carregar localizações de estoque:", err);
+            }
+        }
+
         if (isOpen) {
             // fetchProducts(); // Removed internal fetch
             setAnalysisItems([]);
             setBatchAnalysisItems([]);
+            loadLocations();
 
             if (existingOrder) {
                 // Pre-fill and Prepare to Simulate
                 setSelectedProductId(existingOrder.product_id);
                 setQuantity(existingOrder.quantity);
-                setStockSource(existingOrder.stock_source || 'danilo');
                 setCurrentTab('single');
             } else {
                 setStep('input');
@@ -82,13 +104,13 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
     // Trigger simulation once products are loaded if existingOrder is present
     useEffect(() => {
         if (isOpen && existingOrder && availableProducts.length > 0 && !loading && analysisItems.length === 0) {
-            handleSimulate(existingOrder.product_id, existingOrder.quantity, existingOrder.stock_source || 'danilo');
+            handleSimulate(existingOrder.product_id, existingOrder.quantity, existingOrder.stock_source || '');
         }
     }, [isOpen, existingOrder, availableProducts]);
 
     // Removed async function fetchProducts
 
-    async function handleSimulate(manualProdId?: string, manualQty?: number, manualSource?: 'danilo' | 'adriel') {
+        async function handleSimulate(manualProdId?: string, manualQty?: number, manualSource?: string) {
         const pId = manualProdId || selectedProductId;
         const qty = manualQty || quantity;
         const source = manualSource || stockSource;
@@ -131,10 +153,7 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                     .in('id', ingIds);
 
                 ings?.forEach((i: any) => {
-                    const sDanilo = i.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-danilo')?.quantity || 0;
-                    const sAdriel = i.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-adriel')?.quantity || 0;
-                    // Overwrite legacy with computed
-                    ingredientsMap.set(i.id, { ...i, stock_danilo: sDanilo, stock_adriel: sAdriel });
+                    ingredientsMap.set(i.id, i);
                 });
             }
 
@@ -145,9 +164,7 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                     .in('id', prodIds);
 
                 prods?.forEach((p: any) => {
-                    const sDanilo = p.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-danilo')?.quantity || 0;
-                    const sAdriel = p.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-adriel')?.quantity || 0;
-                    productsMap.set(p.id, { ...p, stock_danilo: sDanilo, stock_adriel: sAdriel });
+                    productsMap.set(p.id, p);
                 });
             }
 
@@ -165,7 +182,16 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                     const ing = ingredientsMap.get(bomItem.ingredient_id);
                     if (ing) {
                         name = ing.name;
-                        const rawStock = source === 'danilo' ? (ing.stock_danilo || 0) : (ing.stock_adriel || 0);
+                        const matchedStock = ing.product_stocks?.find((s: any) => 
+                            s.stock_locations?.slug === source || 
+                            s.stock_locations?.slug === `stock-${source}` || 
+                            s.location_id === source
+                        )?.quantity;
+                        const rawStock = matchedStock !== undefined ? matchedStock : (
+                            source === 'danilo' || source === 'stock-danilo' ? (ing.stock_danilo || 0) :
+                            source === 'adriel' || source === 'stock-adriel' ? (ing.stock_adriel || 0) :
+                            0
+                        );
 
                         // Unit Conversion Logic (Aligned with Production.tsx)
                         const stockUnitLower = ing.unit?.toLowerCase();
@@ -196,12 +222,22 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                         // Products usually have 'un' stock. If BOM needs 'g', it implies usage of part of a batch? 
                         // Or maybe Child Product is used as UN?
                         // Assuming Child Product is always UN for now unless we see otherwise.
-                        currentStock = source === 'danilo' ? (prod.stock_danilo || 0) : (prod.stock_adriel || 0);
+                        const matchedStock = prod.product_stocks?.find((s: any) => 
+                            s.stock_locations?.slug === source || 
+                            s.stock_locations?.slug === `stock-${source}` || 
+                            s.location_id === source
+                        )?.quantity;
+                        let rawStock = matchedStock !== undefined ? matchedStock : (
+                            source === 'danilo' || source === 'stock-danilo' ? (prod.stock_danilo || 0) :
+                            source === 'adriel' || source === 'stock-adriel' ? (prod.stock_adriel || 0) :
+                            0
+                        );
+                        currentStock = rawStock;
 
                         if (bomItem.unit.toLowerCase() === 'g' || bomItem.unit.toLowerCase() === 'ml') {
                             // Intermediate product used by weight?
                             // Typically intermediate products are "Recheio X" produced in batches.
-                            // Their stock might be in 'g' if they are produced in bulk.
+                            // Their stock might be in 'g' or 'kg' if they are produced in bulk.
                             // Let's assume Product stock is in the unit defined by Product.unit (default 'un')
                             const prodUnit = prod.unit || 'un';
                             if (prodUnit.toLowerCase() !== bomItem.unit.toLowerCase()) {
@@ -285,9 +321,7 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                     .in('id', ingIds);
 
                 ings?.forEach((i: any) => {
-                    const sDanilo = i.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-danilo')?.quantity || 0;
-                    const sAdriel = i.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-adriel')?.quantity || 0;
-                    ingredientsMap.set(i.id, { ...i, stock_danilo: sDanilo, stock_adriel: sAdriel });
+                    ingredientsMap.set(i.id, i);
                 });
             }
 
@@ -300,22 +334,17 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                     .in('id', allProductIdsToFetch);
 
                 prods?.forEach((p: any) => {
-                    const sDanilo = p.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-danilo')?.quantity || 0;
-                    const sAdriel = p.product_stocks?.find((s: any) => s.stock_locations?.slug === 'stock-adriel')?.quantity || 0;
-                    productsMap.set(p.id, { ...p, stock_danilo: sDanilo, stock_adriel: sAdriel });
+                    productsMap.set(p.id, p);
                 });
             }
 
             // 5. Aggregate Requirements by Stock Source
             // structure: requirements[source] = Map<ItemId, {req, type, name, unit}>
-            const requirements: Record<string, Map<string, any>> = {
-                danilo: new Map<string, any>(),
-                adriel: new Map<string, any>()
-            };
+            const defaultDest = locations.find((l: any) => l.is_default === true)?.slug || locations[0]?.slug || 'estoque-principal';
+            const requirements: Record<string, Map<string, any>> = {};
 
             openOrders.forEach(order => {
-                const source = order.stock_source || 'danilo';
-                // Initialize map if source is unexpected, though type limits to danilo/adriel
+                const source = order.stock_source || defaultDest;
                 if (!requirements[source]) requirements[source] = new Map();
 
                 const product = productsMap.get(order.product_id) as any;
@@ -338,16 +367,22 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                     if (!itemEntry) {
                         let name = "Desconhecido";
                         let type = bom.ingredient_id ? 'ingredient' : 'product';
-                        let stockDanilo = 0;
-                        let stockAdriel = 0;
+                        let systemStock = 0;
                         let unit = bom.unit;
 
                         if (bom.ingredient_id && ingredientsMap.has(bom.ingredient_id)) {
                             const i = ingredientsMap.get(bom.ingredient_id);
                             name = i.name;
 
-                            let rawStockDanilo = i.stock_danilo || 0;
-                            let rawStockAdriel = i.stock_adriel || 0;
+                            const matchedStock = i.product_stocks?.find((s: any) => 
+                                s.stock_locations?.slug === source || 
+                                s.location_id === source
+                            )?.quantity;
+                            let rawStock = matchedStock !== undefined ? matchedStock : (
+                                source === 'danilo' || source === 'stock-danilo' ? (i.stock_danilo || 0) :
+                                source === 'adriel' || source === 'stock-adriel' ? (i.stock_adriel || 0) :
+                                0
+                            );
 
                             // Apply Conversion Logic for Stock (Same as Single Mode / Production.tsx)
                             const stockUnitLower = i.unit?.toLowerCase();
@@ -359,39 +394,39 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                                 (targetUnitLower === 'g' || targetUnitLower === 'ml')) {
 
                                 if (stockUnitLower === 'kg' || stockUnitLower === 'l') {
-                                    rawStockDanilo *= 1000;
-                                    rawStockAdriel *= 1000;
+                                    rawStock *= 1000;
                                 } else {
-                                    rawStockDanilo *= unitWeight;
-                                    rawStockAdriel *= unitWeight;
+                                    rawStock *= unitWeight;
                                 }
                             } else if (unitWeight > 1 && unitTypeLower && targetUnitLower === unitTypeLower) {
-                                rawStockDanilo *= unitWeight;
-                                rawStockAdriel *= unitWeight;
+                                rawStock *= unitWeight;
                             }
 
-                            stockDanilo = rawStockDanilo;
-                            stockAdriel = rawStockAdriel;
+                            systemStock = rawStock;
 
                         } else if (bom.child_product_id && productsMap.has(bom.child_product_id)) {
                             const p = productsMap.get(bom.child_product_id);
                             name = p.name;
 
-                            let rawStockDanilo = p.stock_danilo || 0;
-                            let rawStockAdriel = p.stock_adriel || 0;
+                            const matchedStock = p.product_stocks?.find((s: any) => 
+                                s.stock_locations?.slug === source || 
+                                s.location_id === source
+                            )?.quantity;
+                            let rawStock = matchedStock !== undefined ? matchedStock : (
+                                source === 'danilo' || source === 'stock-danilo' ? (p.stock_danilo || 0) :
+                                source === 'adriel' || source === 'stock-adriel' ? (p.stock_adriel || 0) :
+                                0
+                            );
 
                             // Product Unit Conversion (Simple kg->g)
                             const pUnit = p.unit || 'un';
                             if (pUnit.toLowerCase() === 'kg' && bom.unit.toLowerCase() === 'g') {
-                                rawStockDanilo *= 1000;
-                                rawStockAdriel *= 1000;
+                                rawStock *= 1000;
                             } else if (pUnit.toLowerCase() === 'l' && bom.unit.toLowerCase() === 'ml') {
-                                rawStockDanilo *= 1000;
-                                rawStockAdriel *= 1000;
+                                rawStock *= 1000;
                             }
 
-                            stockDanilo = rawStockDanilo;
-                            stockAdriel = rawStockAdriel;
+                            systemStock = rawStock;
                         }
 
                         itemEntry = {
@@ -400,8 +435,7 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                             type,
                             unit,
                             req: 0, // initialized below
-                            stockDanilo,
-                            stockAdriel,
+                            systemStock,
                             source
                         };
                         map.set(itemId, itemEntry);
@@ -414,14 +448,12 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
             // 6. Convert to Array and Analyze Stock
             const result: { source: string, items: AnalysisItem[] }[] = [];
 
-            ['danilo', 'adriel'].forEach(src => {
+            Object.keys(requirements).forEach(src => {
                 const map = requirements[src];
                 if (map && map.size > 0) {
                     const items: AnalysisItem[] = [];
                     map.forEach((val) => {
-                        // Check stock against specific source
-                        // If source is danilo, check stockDanilo. If adriel, check stockAdriel.
-                        const currentStock = src === 'danilo' ? val.stockDanilo : val.stockAdriel;
+                        const currentStock = val.systemStock;
                         const balance = currentStock - val.req;
 
                         items.push({
@@ -486,13 +518,14 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
     function renderAnalysisTable(items: AnalysisItem[], title?: string) {
         // Calculate missing for this batch
         const missing = items.filter(i => i.status !== 'ok').length;
+        const friendlyTitle = title ? (locations.find(l => l.slug === title || l.id === title)?.name || title) : title;
 
         return (
             <div className="space-y-2 mb-6" key={title}>
                 {title && (
                     <div className="flex items-center justify-between bg-zinc-50 p-2 rounded border">
                         <h3 className="font-bold text-lg capitalize flex items-center gap-2">
-                            <Box className="h-5 w-5 text-zinc-500" /> Estoque: {title}
+                            <Box className="h-5 w-5 text-zinc-500" /> Estoque: {friendlyTitle}
                         </h3>
                         <div className="text-sm">
                             {missing === 0 ? (
@@ -620,8 +653,9 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                                                             <SelectValue />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value="danilo">Danilo</SelectItem>
-                                                            <SelectItem value="adriel">Adriel</SelectItem>
+                                                            {locations.map(loc => (
+                                                                <SelectItem key={loc.id} value={loc.slug}>{loc.name}</SelectItem>
+                                                            ))}
                                                         </SelectContent>
                                                     </Select>
                                                 </div>
@@ -657,7 +691,9 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                                                 <Card>
                                                     <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-zinc-500">Estoque Selecionado</CardTitle></CardHeader>
                                                     <CardContent>
-                                                        <div className="text-2xl font-bold capitalize">{stockSource}</div>
+                                                        <div className="text-2xl font-bold capitalize">
+                                                            {locations.find(l => l.slug === stockSource || l.id === stockSource)?.name || stockSource}
+                                                        </div>
                                                     </CardContent>
                                                 </Card>
                                             </div>
@@ -717,7 +753,9 @@ export function ProductionPlanningDialog({ isOpen, onClose, onOrderCreated, exis
                                     <Card>
                                         <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-zinc-500">Estoque Selecionado</CardTitle></CardHeader>
                                         <CardContent>
-                                            <div className="text-2xl font-bold capitalize">{stockSource}</div>
+                                            <div className="text-2xl font-bold capitalize">
+                                                {locations.find(l => l.slug === stockSource || l.id === stockSource)?.name || stockSource}
+                                            </div>
                                         </CardContent>
                                     </Card>
                                 </div>
