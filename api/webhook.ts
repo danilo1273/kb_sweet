@@ -716,7 +716,8 @@ Retorne um JSON seguindo exatamente este formato:
             location_id: matchedLocation.id,
             average_cost: newCostVal,
             quantity: newQty,
-            last_updated: new Date().toISOString()
+            last_updated: new Date().toISOString(),
+            company_id: profile.company_id
           };
           if (matchedItem.is_product) insertData.product_id = matchedItem.id;
           else insertData.ingredient_id = matchedItem.id;
@@ -1097,6 +1098,16 @@ Retorne um JSON seguindo exatamente este formato:
 
       if (orderErr) throw orderErr;
 
+      // Get company's default stock location
+      const { data: defaultLocation } = await supabase
+        .from('stock_locations')
+        .select('slug')
+        .eq('company_id', profile.company_id)
+        .eq('is_default', true)
+        .maybeSingle();
+
+      const defaultDest = defaultLocation?.slug || 'estoque-principal';
+
       // Create purchase requests
       const requestsPayload = parsed.items.map((item: any) => {
         // Calculate total cost correctly: total_price if extracted, or unit_price * quantity, or cost as fallback
@@ -1109,7 +1120,7 @@ Retorne um JSON seguindo exatamente este formato:
           quantity: item.quantity,
           unit: item.unit || 'un',
           cost: finalCost,
-          destination: item.destination || 'danilo',
+          destination: item.destination || defaultDest,
           status: 'pending',
           company_id: profile.company_id
         };

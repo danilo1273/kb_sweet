@@ -119,13 +119,7 @@ export function EditItemDialog({
                         <div className="space-y-2">
                             <Label>Estoque de Destino (Para onde vai?)</Label>
                             <Select 
-                                value={
-                                    editedValues.destination === 'danilo' 
-                                        ? 'stock-danilo' 
-                                        : editedValues.destination === 'adriel' 
-                                            ? 'stock-adriel' 
-                                            : editedValues.destination
-                                } 
+                                value={editedValues.destination} 
                                 onValueChange={(v: any) => onEditedValuesChange({ ...editedValues, destination: v })}
                             >
                                 <SelectTrigger><SelectValue /></SelectTrigger>

@@ -73,11 +73,11 @@ export default function POS() {
     async function loadData() {
         try {
             // Fetch Locations
-            const { data: locData } = await supabase.from('stock_locations').select('id, name, slug').order('created_at');
+            const { data: locData } = await supabase.from('stock_locations').select('id, name, slug, is_default').order('created_at');
             if (locData) {
                 setStockLocations(locData);
-                // Default to Danilo or first one
-                const def = locData.find(l => l.slug === 'stock-danilo') || locData[0];
+                // Default to first default location or just first one
+                const def = locData.find(l => l.is_default) || locData[0];
                 if (def && !stockSource) setStockSource(def.id);
             }
 

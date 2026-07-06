@@ -90,7 +90,7 @@ export interface PurchaseRequest {
     status: 'pending' | 'approved' | 'rejected' | 'edit_requested' | 'edit_approved';
     cost: number;
     supplier?: string;
-    destination?: 'danilo' | 'adriel';
+    destination?: string; // Dynamic warehouse slug
     created_at: string;
     user_id?: string;
     requested_by?: string;
@@ -131,7 +131,7 @@ export interface ItemDraft {
     quantity: number;
     unit: string;
     cost: number;
-    destination: 'danilo' | 'adriel';
+    destination: string; // Dynamic warehouse slug
 }
 
 export interface Sale {

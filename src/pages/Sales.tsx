@@ -204,6 +204,22 @@ export default function Sales() {
     const totalRevenue = filteredSales.filter(s => s.status === 'completed').reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
     const countSales = filteredSales.filter(s => s.status === 'completed').length;
 
+    const getWarehouseColor = (slug: string | undefined) => {
+        const colors = [
+            'bg-blue-100 text-blue-800',
+            'bg-violet-100 text-violet-800',
+            'bg-emerald-100 text-emerald-800',
+            'bg-amber-100 text-amber-800',
+            'bg-rose-100 text-rose-800',
+            'bg-cyan-100 text-cyan-800',
+            'bg-orange-100 text-orange-800',
+        ];
+        if (!slug) return colors[0];
+        let hash = 0;
+        for (let i = 0; i < slug.length; i++) hash = slug.charCodeAt(i) + ((hash << 5) - hash);
+        return colors[Math.abs(hash) % colors.length];
+    };
+
     return (
         <div className="flex-1 p-8 space-y-6 bg-zinc-50 dark:bg-zinc-950 min-h-screen">
             <div className="flex items-center justify-between">
@@ -436,8 +452,7 @@ export default function Sales() {
                                     <TableCell>{sale.clients?.name || 'Consumidor Final'}</TableCell>
                                     <TableCell className="capitalize text-zinc-600 text-xs">{(sale.profiles?.full_name || 'Sistema').split(' ')[0]}</TableCell>
                                     <TableCell>
-                                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${sale.stock_locations?.slug === 'stock-danilo' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'
-                                            }`}>
+                                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getWarehouseColor(sale.stock_locations?.slug)}`}>
                                             {sale.stock_locations?.name || `Estoque ${sale.stock_source}`}
                                         </span>
                                     </TableCell>

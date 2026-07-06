@@ -34,7 +34,7 @@ export function NewOrderDialog({
     const [nickname, setNickname] = useState("");
     const [supplierId, setSupplierId] = useState<string>("default");
     const [orderItems, setOrderItems] = useState<ItemDraft[]>([]);
-    const [draftItem, setDraftItem] = useState<ItemDraft>({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo' });
+    const [draftItem, setDraftItem] = useState<ItemDraft>({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: locations.find(l => l.is_default)?.slug || locations[0]?.slug || '' });
     const [isSaving, setIsSaving] = useState(false);
 
     // Editing State
@@ -48,7 +48,7 @@ export function NewOrderDialog({
             setNickname("");
             setSupplierId("default");
             setOrderItems([]);
-            setDraftItem({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo', ingredient_id: undefined });
+            setDraftItem({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: locations.find(l => l.is_default)?.slug || locations[0]?.slug || '', ingredient_id: undefined });
             setEditIndex(-1);
             setUnitCost(0);
         }
@@ -77,7 +77,7 @@ export function NewOrderDialog({
         }
 
         // Reset Draft
-        setDraftItem({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo', ingredient_id: undefined });
+        setDraftItem({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: locations.find(l => l.is_default)?.slug || locations[0]?.slug || '', ingredient_id: undefined });
         setUnitCost(0);
     };
 
@@ -96,7 +96,7 @@ export function NewOrderDialog({
 
     const handleCancelEdit = () => {
         setEditIndex(-1);
-        setDraftItem({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo', ingredient_id: undefined });
+        setDraftItem({ item_name: '', quantity: 0, unit: 'un', cost: 0, destination: locations.find(l => l.is_default)?.slug || locations[0]?.slug || '', ingredient_id: undefined });
         setUnitCost(0);
     };
 
@@ -218,13 +218,7 @@ export function NewOrderDialog({
                             <div className="space-y-1 col-span-1 md:col-span-2">
                                 <Label className="text-xs md:text-[10px]">Destino</Label>
                                 <Select 
-                                    value={
-                                        draftItem.destination === 'danilo' 
-                                            ? 'stock-danilo' 
-                                            : draftItem.destination === 'adriel' 
-                                                ? 'stock-adriel' 
-                                                : draftItem.destination
-                                    } 
+                                    value={draftItem.destination} 
                                     onValueChange={(val: any) => setDraftItem({ ...draftItem, destination: val })}
                                 >
                                     <SelectTrigger className="h-9 md:h-8"><SelectValue /></SelectTrigger>
@@ -264,7 +258,7 @@ export function NewOrderDialog({
                                                 const loc = locations.find(l => l.slug === i.destination || l.id === i.destination || l.name === i.destination);
                                                 return (
                                                     <span className="text-[10px] text-zinc-500 uppercase mr-2 border px-1 rounded">
-                                                        {loc ? loc.name : i.destination || 'Danilo'}
+                                                        {loc ? loc.name : i.destination || locations[0]?.name || 'N/A'}
                                                     </span>
                                                 );
                                             })()}

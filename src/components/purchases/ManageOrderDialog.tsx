@@ -83,9 +83,17 @@ export function ManageOrderDialog({
         quantity: 0,
         unit: 'un',
         cost: 0,
-        destination: 'danilo'
+        destination: locations.find(l => l.is_default)?.slug || locations[0]?.slug || ''
     });
     const [isAddingItem, setIsAddingItem] = useState(false);
+
+    // Initialize destination from first available location
+    useEffect(() => {
+        if (locations.length > 0 && (!newItemDraft.destination || newItemDraft.destination === 'danilo')) {
+            const defaultLoc = locations.find(l => l.is_default) || locations[0];
+            setNewItemDraft(prev => ({ ...prev, destination: defaultLoc.slug }));
+        }
+    }, [locations]);
 
     // Sync local header state when order changes
     useEffect(() => {
@@ -127,7 +135,7 @@ export function ManageOrderDialog({
 
         setIsAddingItem(false);
         if (success) {
-            setNewItemDraft({ ingredient_id: undefined, item_name: '', quantity: 0, unit: 'un', cost: 0, destination: 'danilo' });
+            setNewItemDraft({ ingredient_id: undefined, item_name: '', quantity: 0, unit: 'un', cost: 0, destination: locations.find(l => l.is_default)?.slug || locations[0]?.slug || '' });
             fetchOrders();
             onOrderUpdated?.();
         }
@@ -240,7 +248,7 @@ export function ManageOrderDialog({
                                     {order.requests?.map((item: any) => {
                                         const ing = ingredients.find(i => i.id === item.ingredient_id);
                                         const loc = locations.find(l => l.slug === item.destination || l.id === item.destination || l.name === item.destination);
-                                        const destName = loc ? loc.name : item.destination || 'Danilo';
+                                        const destName = loc ? loc.name : item.destination || locations[0]?.name || 'N/A';
                                         
                                         return (
                                             <div key={item.id} className="bg-white p-3 rounded-lg border text-sm space-y-2 shadow-sm">
@@ -271,7 +279,7 @@ export function ManageOrderDialog({
                                                             if (stocks.length > 0) {
                                                                 return stocks.map((s: any) => `${s.stock_locations?.name || 'Estoque'}: ${s.quantity} ${ing.unit}`).join(' | ');
                                                             }
-                                                            return `Danilo: ${ing.stock_danilo || 0} ${ing.unit} | Adriel: ${ing.stock_adriel || 0} ${ing.unit}`;
+                                                            return stocks.length > 0 ? stocks.map((s: any) => `${s.stock_locations?.name || 'Estoque'}: ${s.quantity} ${ing.unit}`).join(' | ') : 'Sem estoque';
                                                         })()}
                                                     </div>
                                                 )}
@@ -322,7 +330,7 @@ export function ManageOrderDialog({
                                             {order.requests?.map((item: any) => {
                                                 const ing = ingredients.find(i => i.id === item.ingredient_id);
                                                 const loc = locations.find(l => l.slug === item.destination || l.id === item.destination || l.name === item.destination);
-                                                const destName = loc ? loc.name : item.destination || 'Danilo';
+                                                const destName = loc ? loc.name : item.destination || locations[0]?.name || 'N/A';
                                                 
                                                 return (
                                                     <TableRow key={item.id}>
@@ -336,7 +344,7 @@ export function ManageOrderDialog({
                                                                             if (stocks.length > 0) {
                                                                                 return stocks.map((s: any) => `${s.stock_locations?.name || 'Estoque'}: ${s.quantity} ${ing.unit}`).join(' | ');
                                                                             }
-                                                                            return `Danilo: ${ing.stock_danilo || 0} ${ing.unit} | Adriel: ${ing.stock_adriel || 0} ${ing.unit}`;
+                                                                            return stocks.length > 0 ? stocks.map((s: any) => `${s.stock_locations?.name || 'Estoque'}: ${s.quantity} ${ing.unit}`).join(' | ') : 'Sem estoque';
                                                                         })()}
                                                                     </span>
                                                                 </div>
@@ -432,13 +440,7 @@ export function ManageOrderDialog({
                                         <div className="col-span-1 md:col-span-2">
                                             <Label className="text-[10px]">Destino</Label>
                                             <Select 
-                                                value={
-                                                    newItemDraft.destination === 'danilo' 
-                                                        ? 'stock-danilo' 
-                                                        : newItemDraft.destination === 'adriel' 
-                                                            ? 'stock-adriel' 
-                                                            : newItemDraft.destination
-                                                } 
+                                                value={newItemDraft.destination} 
                                                 onValueChange={(val: any) => setNewItemDraft({ ...newItemDraft, destination: val })}
                                             >
                                                 <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>

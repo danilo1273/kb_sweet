@@ -270,6 +270,7 @@ export default function Inventory() {
         const match = stocks.find((s: any) => s.location?.id === locationIdOrSlug || s.location?.slug === locationIdOrSlug);
         if (match) return Number(match.quantity || 0);
         
+        // Legacy fallback for old data without product_stocks
         if (locationIdOrSlug === 'stock-danilo' || locationIdOrSlug === 'danilo') {
             return Number(item.stock_danilo || 0);
         }
@@ -284,7 +285,8 @@ export default function Inventory() {
         if (stocks.length > 0) {
             return stocks.reduce((sum: number, s: any) => sum + Number(s.quantity || 0), 0);
         }
-        return Number(item.stock_danilo || 0) + Number(item.stock_adriel || 0);
+        // Fallback: se não tem product_stocks, retorna 0 (evita assumir armazéns fixos)
+        return 0;
     };
 
     const filteredIngredients = ingredients.filter((ing) => {
