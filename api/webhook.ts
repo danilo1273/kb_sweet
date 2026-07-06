@@ -75,34 +75,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (callbackData.startsWith('confirm_purchase:')) {
         const orderId = callbackData.split(':')[1];
         
-        await sendTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId, text: 'Processando lançamento...' });
+        await sendTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId, text: 'Enviando para aprovação...' });
 
-        // Fetch requests in this order
-        const { data: requests, error: fetchReqErr } = await supabase
-          .from('purchase_requests')
-          .select('*')
-          .eq('order_id', orderId);
+        // Update Order status to pending (awaiting review/approval on dashboard)
+        const { error: orderStatusErr } = await supabase
+          .from('purchase_orders')
+          .update({ status: 'pending' })
+          .eq('id', orderId);
 
-        if (fetchReqErr || !requests) throw new Error(fetchReqErr?.message || 'Itens não encontrados');
-
-        // Approve each item (stock movement & financial entry)
-        for (const reqItem of requests) {
-          if (reqItem.status === 'pending') {
-            const { error: approveErr } = await supabase.rpc('approve_purchase_item', {
-              p_request_id: reqItem.id,
-              p_user_id: profile.id
-            });
-            if (approveErr) throw approveErr;
-          }
-        }
-
-        // Update Order status to completed
-        await supabase.from('purchase_orders').update({ status: 'approved' }).eq('id', orderId);
+        if (orderStatusErr) throw orderStatusErr;
 
         await sendTelegram('editMessageText', {
           chat_id: chatId,
           message_id: messageId,
-          text: '✅ *Compra lançada e estoques atualizados com sucesso!*',
+          text: '✅ *Lote de compra enviado para aprovação no painel web com sucesso!*',
           parse_mode: 'Markdown'
         });
       } else if (callbackData.startsWith('cancel_purchase:')) {
