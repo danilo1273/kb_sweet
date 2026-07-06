@@ -80,7 +80,7 @@ async function generateContentREST(prompt: string, model: string = 'gemini-2.5-f
 
 async function generateContentWithRetry(prompt: string, fileData?: { mimeType: string, data: string }) {
   let lastError: any;
-  const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  const models = ['gemini-2.5-flash', 'gemini-2.0-flash'];
   
   for (const model of models) {
     try {
