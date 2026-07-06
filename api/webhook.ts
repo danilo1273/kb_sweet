@@ -40,26 +40,39 @@ async function generateContentREST(prompt: string, model: string = 'gemini-2.5-f
   }
   parts.push({ text: prompt });
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: { responseMimeType: 'application/json' }
-    })
-  });
-  
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini REST API failed with status ${response.status}: ${errText}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 seconds timeout
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: { responseMimeType: 'application/json' }
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Gemini REST API failed with status ${response.status}: ${errText}`);
+    }
+    
+    const data = await response.json();
+    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textResponse) {
+      throw new Error('Empty response from Gemini API');
+    }
+    return textResponse;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error(`Tempo limite de 5s excedido para o modelo ${model}`);
+    }
+    throw err;
   }
-  
-  const data = await response.json();
-  const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!textResponse) {
-    throw new Error('Empty response from Gemini API');
-  }
-  return textResponse;
 }
 
 async function generateContentWithRetry(prompt: string, fileData?: { mimeType: string, data: string }) {
@@ -442,12 +455,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ...ingredients.map(i => ({ ...i, is_product: false }))
       ];
 
+      // Pre-filter items based on keyword matching to reduce payload size and speed up Gemini response
+      const stopWords = new Set(['unidades', 'unidade', 'custo', 'cada', 'ajustar', 'estoque', 'danilo', 'adriel', 'armazem', 'subir', 'baixar', 'adicionar', 'remover', 'de', 'para', 'com', 'no', 'na', 'um', 'uma', 'dois', 'tres', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez']);
+      const textLower = text.toLowerCase();
+      const textWords = textLower
+        .replace(/[^a-z0-9áéíóúãõç]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length >= 3 && !stopWords.has(w));
+
+      const scoredItems = items.map(item => {
+        const nameLower = item.name.toLowerCase();
+        let score = 0;
+        for (const word of textWords) {
+          if (nameLower.includes(word)) {
+            score += 2;
+          }
+        }
+        return { item, score };
+      });
+
+      let filteredItems = scoredItems
+        .filter(si => si.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map(si => si.item);
+
+      if (filteredItems.length === 0) {
+        filteredItems = items.slice(0, 15);
+      } else {
+        filteredItems = filteredItems.slice(0, 15);
+      }
+
       const prompt = `Você é o assistente inteligente do KB Sweet. Analise a mensagem de ajuste de estoque enviada pelo usuário (um administrador) e mapeie o item correto, o local de estoque (armazém) correto, a operação (definir valor exato "set", adicionar quantidade "add" ou subtrair quantidade "subtract") e a quantidade.
 
 Mensagem do usuário: "${text}"
 
 Produtos e Ingredientes disponíveis:
-${JSON.stringify(items.map(i => ({ id: i.id, name: i.name, is_product: i.is_product })))}
+${JSON.stringify(filteredItems.map(i => ({ id: i.id, name: i.name, is_product: i.is_product })))}
 
 Locais de estoque (Armazéns) disponíveis:
 ${JSON.stringify(locations || [])}
@@ -606,16 +649,54 @@ Retorne um JSON seguindo exatamente este formato:
         locationsQuery = locationsQuery.is('company_id', null);
       }
 
-      const { data: products } = await productsQuery;
-      const { data: clients } = await clientsQuery;
-      const { data: locations } = await locationsQuery;
+      const [productsRes, clientsRes, locationsRes] = await Promise.all([
+        productsQuery,
+        clientsQuery,
+        locationsQuery
+      ]);
+
+      const products = productsRes.data || [];
+      const clients = clientsRes.data || [];
+      const locations = locationsRes.data || [];
+
+      const productsList = products;
+
+      // Pre-filter products based on keyword matching to reduce payload size and speed up Gemini response
+      const stopWords = new Set(['venda', 'vendi', 'cliente', 'pagamento', 'estoque', 'danilo', 'adriel', 'armazem', 'pix', 'dinheiro', 'cartao', 'de', 'para', 'com', 'no', 'na', 'um', 'uma', 'dois', 'tres', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez']);
+      const textLower = text.toLowerCase();
+      const textWords = textLower
+        .replace(/[^a-z0-9áéíóúãõç]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length >= 3 && !stopWords.has(w));
+
+      const scoredProducts = productsList.map(p => {
+        const nameLower = p.name.toLowerCase();
+        let score = 0;
+        for (const word of textWords) {
+          if (nameLower.includes(word)) {
+            score += 2;
+          }
+        }
+        return { p, score };
+      });
+
+      let filteredProducts = scoredProducts
+        .filter(sp => sp.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map(sp => sp.p);
+
+      if (filteredProducts.length === 0) {
+        filteredProducts = productsList.slice(0, 15);
+      } else {
+        filteredProducts = filteredProducts.slice(0, 15);
+      }
 
       const prompt = `Você é o assistente inteligente do KB Sweet. Analise a mensagem de venda enviada pelo usuário e mapeie os produtos, cliente, método de pagamento e local de estoque corretos a partir das listas fornecidas.
 
 Mensagem do usuário: "${text}"
 
 Produtos disponíveis:
-${JSON.stringify(products || [])}
+${JSON.stringify(filteredProducts)}
 
 Clientes disponíveis:
 ${JSON.stringify(clients || [])}
