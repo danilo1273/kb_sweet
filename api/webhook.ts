@@ -233,10 +233,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       await sendMessage(chatId, '⏳ *Analisando venda com inteligência artificial...*');
 
-      // Fetch products, clients, locations
-      const { data: products } = await supabase.from('products').select('id, name, price, cost').eq('company_id', profile.company_id);
-      const { data: clients } = await supabase.from('clients').select('id, name').eq('company_id', profile.company_id);
-      const { data: locations } = await supabase.from('stock_locations').select('id, name, slug').eq('company_id', profile.company_id);
+      // Fetch products, clients, locations (allowing private company items and shared global ones)
+      let productsQuery = supabase.from('products').select('id, name, price, cost');
+      let clientsQuery = supabase.from('clients').select('id, name');
+      let locationsQuery = supabase.from('stock_locations').select('id, name, slug');
+
+      if (profile.company_id) {
+        productsQuery = productsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+        clientsQuery = clientsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+        locationsQuery = locationsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+      } else {
+        productsQuery = productsQuery.is('company_id', null);
+        clientsQuery = clientsQuery.is('company_id', null);
+        locationsQuery = locationsQuery.is('company_id', null);
+      }
+
+      const { data: products } = await productsQuery;
+      const { data: clients } = await clientsQuery;
+      const { data: locations } = await locationsQuery;
 
       const prompt = `Você é o assistente inteligente do KB Sweet. Analise a mensagem de venda enviada pelo usuário e mapeie os produtos, cliente, método de pagamento e local de estoque corretos a partir das listas fornecidas.
 
@@ -409,9 +423,20 @@ Retorne um JSON seguindo exatamente este formato:
       const fileBuffer = await fetch(downloadUrl).then(res => res.arrayBuffer());
       const base64Data = Buffer.from(fileBuffer).toString('base64');
 
-      // Fetch ingredients and suppliers
-      const { data: ingredients } = await supabase.from('ingredients').select('id, name, unit').eq('company_id', profile.company_id);
-      const { data: suppliers } = await supabase.from('suppliers').select('id, name').eq('company_id', profile.company_id);
+      // Fetch ingredients and suppliers (allowing private company items and shared global ones)
+      let ingredientsQuery = supabase.from('ingredients').select('id, name, unit');
+      let suppliersQuery = supabase.from('suppliers').select('id, name');
+
+      if (profile.company_id) {
+        ingredientsQuery = ingredientsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+        suppliersQuery = suppliersQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+      } else {
+        ingredientsQuery = ingredientsQuery.is('company_id', null);
+        suppliersQuery = suppliersQuery.is('company_id', null);
+      }
+
+      const { data: ingredients } = await ingredientsQuery;
+      const { data: suppliers } = await suppliersQuery;
 
       const prompt = `Você é o assistente inteligente do KB Sweet. Analise a nota fiscal (imagem/PDF) fornecida e extraia os itens de compra, o fornecedor, o valor total e mapeie para os ingredientes e fornecedores existentes da lista, se houver.
 
