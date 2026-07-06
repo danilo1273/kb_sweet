@@ -13,13 +13,16 @@ async function sendTelegram(method: string, payload: any) {
   return response.json();
 }
 
-async function sendMessage(chatId: string | number, text: string, replyMarkup?: any) {
-  return sendTelegram('sendMessage', {
+async function sendMessage(chatId: string | number, text: string, replyMarkup?: any, parseMode: string = 'Markdown') {
+  const payload: any = {
     chat_id: chatId,
     text,
-    parse_mode: 'Markdown',
     reply_markup: replyMarkup
-  });
+  };
+  if (parseMode) {
+    payload.parse_mode = parseMode;
+  }
+  return sendTelegram('sendMessage', payload);
 }
 
 async function generateContentREST(prompt: string, model: string = 'gemini-2.5-flash', fileData?: { mimeType: string, data: string }) {
@@ -148,6 +151,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 
 
+  let profile: any = null;
+
   try {
     const { message, callback_query } = req.body;
 
@@ -159,11 +164,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const callbackQueryId = callback_query.id;
 
       // Authenticate
-      const { data: profile } = await supabase
+      const { data: cbProfile } = await supabase
         .from('profiles')
         .select('*')
         .eq('telegram_chat_id', chatId.toString())
         .single();
+      profile = cbProfile;
 
       if (!profile) {
         await sendTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId, text: 'Usuário não autenticado.' });
@@ -237,11 +243,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const text = message.text?.trim();
 
     // 1. Authenticate user
-    const { data: profile, error: profileErr } = await supabase
+    const { data: msgProfile, error: profileErr } = await supabase
       .from('profiles')
       .select('*')
       .eq('telegram_chat_id', chatId.toString())
       .maybeSingle();
+    profile = msgProfile;
 
     // 2. If not authenticated
     if (!profile) {
@@ -1039,6 +1046,11 @@ Retorne um JSON seguindo exatamente este formato:
     const chatId = req.body?.message?.chat?.id || req.body?.callback_query?.message?.chat?.id;
     if (chatId) {
       try {
+        await logStep(supabase, 'webhook_error_catch', { error: error.message || error.toString() });
+      } catch (logErr) {
+        console.error('Failed to log error to database:', logErr);
+      }
+      try {
         if (profile?.id) {
           await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
         }
@@ -1046,7 +1058,8 @@ Retorne um JSON seguindo exatamente este formato:
         console.error('Failed to clear state:', dbErr);
       }
       try {
-        await sendMessage(chatId, `❌ *Erro ao processar requisição:*\n_${error.message || error}_`, getMainKeyboard(profile));
+        const errorText = error.message || error.toString();
+        await sendMessage(chatId, `❌ Erro ao processar requisição:\n${errorText}`, getMainKeyboard(profile), '');
       } catch (tgErr) {
         console.error('Failed to send error message:', tgErr);
       }
