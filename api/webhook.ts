@@ -73,9 +73,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (callbackData.startsWith('confirm_purchase:')) {
-        const orderId = callbackData.split(':')[1];
+        const parts = callbackData.split(':');
+        const orderId = parts[1];
+        const locationSlug = parts[2] || 'danilo';
         
         await sendTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId, text: 'Enviando para aprovação...' });
+
+        // Update all purchase requests in this order to the selected destination
+        const { error: reqUpdateErr } = await supabase
+          .from('purchase_requests')
+          .update({ destination: locationSlug })
+          .eq('order_id', orderId);
+
+        if (reqUpdateErr) throw reqUpdateErr;
+
+        // Fetch location name for feedback message
+        const { data: locationData } = await supabase
+          .from('stock_locations')
+          .select('name')
+          .eq('slug', locationSlug)
+          .eq('company_id', profile.company_id)
+          .maybeSingle();
+
+        const locName = locationData?.name || locationSlug;
 
         // Update Order status to pending (awaiting review/approval on dashboard)
         const { error: orderStatusErr } = await supabase
@@ -88,7 +108,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await sendTelegram('editMessageText', {
           chat_id: chatId,
           message_id: messageId,
-          text: '✅ *Lote de compra enviado para aprovação no painel web com sucesso!*',
+          text: `✅ *Lote de compra enviado para aprovação no painel web com destino ao ${locName}!*`,
           parse_mode: 'Markdown'
         });
       } else if (callbackData.startsWith('cancel_purchase:')) {
@@ -177,9 +197,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Check menu button clicks
+    // Check menu button clicks
     if (text === '🛒 Vendas') {
-      await supabase.from('profiles').update({ telegram_state: { action: 'awaiting_sale_details' } }).eq('id', profile.id);
-      await sendMessage(chatId, '✍️ *Registrar Venda*\n\nPor favor, digite os detalhes da venda em linguagem natural.\n\n_Exemplo:_\n`vendi 2 bolos de pote por 15 reais cada no Pix para o cliente João`', { remove_keyboard: true });
+      const { error: stateErr } = await supabase.from('profiles').update({ telegram_state: { action: 'awaiting_sale_details' } }).eq('id', profile.id);
+      if (stateErr) throw stateErr;
+
+      // Fetch products and their stocks
+      let productsQuery = supabase
+        .from('products')
+        .select(`
+          name,
+          product_stocks (
+            quantity,
+            location:stock_locations (name)
+          )
+        `);
+
+      if (profile.company_id) {
+        productsQuery = productsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+      } else {
+        productsQuery = productsQuery.is('company_id', null);
+      }
+
+      const { data: products } = await productsQuery;
+
+      // Format stock list
+      let stockList = '';
+      if (products && products.length > 0) {
+        stockList = '📋 *Produtos Disponíveis em Estoque:*\n';
+        products.forEach((p: any) => {
+          const stocks = p.product_stocks || [];
+          const stockDetails = stocks
+            .filter((s: any) => s.quantity > 0)
+            .map((s: any) => `${s.quantity} un no ${s.location?.name || 'Estoque'}`)
+            .join(', ');
+          
+          if (stockDetails) {
+            stockList += `• *${p.name}*: ${stockDetails}\n`;
+          } else {
+            stockList += `• *${p.name}*: _Sem estoque_\n`;
+          }
+        });
+        stockList += '\n';
+      }
+
+      await sendMessage(chatId, `✍️ *Registrar Venda*\n\n${stockList}Por favor, digite os detalhes da venda em linguagem natural.\n\n*Exemplo:*\n_vendi 2 bolos de pote por 15 reais cada no Pix para o cliente João_`, { remove_keyboard: true });
       return res.status(200).send('OK');
     }
 
@@ -409,22 +471,29 @@ Retorne um JSON seguindo exatamente este formato:
       const fileBuffer = await fetch(downloadUrl).then(res => res.arrayBuffer());
       const base64Data = Buffer.from(fileBuffer).toString('base64');
 
-      // Fetch ingredients and suppliers (allowing private company items and shared global ones)
+      // Fetch ingredients, suppliers and stock locations (allowing private company items and shared global ones)
       let ingredientsQuery = supabase.from('ingredients').select('id, name, unit');
       let suppliersQuery = supabase.from('suppliers').select('id, name');
+      let locationsQuery = supabase.from('stock_locations').select('id, name, slug');
 
       if (profile.company_id) {
         ingredientsQuery = ingredientsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
         suppliersQuery = suppliersQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+        locationsQuery = locationsQuery.eq('company_id', profile.company_id);
       } else {
         ingredientsQuery = ingredientsQuery.is('company_id', null);
         suppliersQuery = suppliersQuery.is('company_id', null);
+        locationsQuery = locationsQuery.is('company_id', null);
       }
 
       const { data: ingredients } = await ingredientsQuery;
       const { data: suppliers } = await suppliersQuery;
+      const { data: locations } = await locationsQuery;
 
       const prompt = `Você é o assistente inteligente do KB Sweet. Analise a nota fiscal (imagem/PDF) fornecida e extraia os itens de compra, o fornecedor, o valor total e mapeie para os ingredientes e fornecedores existentes da lista, se houver.
+
+IMPORTANTE SOBRE MAPEAMENTO DE INGREDIENTES:
+Você deve fazer um mapeamento inteligente. As descrições dos itens na nota fiscal podem variar de acordo com o mercado (por exemplo: abreviações, marcas ou formatos de embalagem descritos de forma ligeiramente diferente, como "SACOLA KRAFT M" vs "SACOLA KRAFT TAM M"). Mapeie para o "id" do ingrediente da lista que seja semanticamente o mesmo produto, mesmo que o nome não seja 100% idêntico. Só crie um novo item (retornando "ingredient_id": null) se o insumo realmente não existir na lista.
 
 Ingredientes disponíveis:
 ${JSON.stringify(ingredients || [])}
@@ -445,7 +514,7 @@ Retorne um JSON seguindo exatamente este formato:
       "unit": "kg",
       "unit_price": 10.0,
       "total_price": 50.0,
-      "destination": "danilo"
+      "destination": "uuid-do-local-de-estoque"
     }
   ]
 }`;
@@ -571,14 +640,16 @@ Retorne um JSON seguindo exatamente este formato:
 
       const inlineKeyboard = {
         inline_keyboard: [
+          ...(locations || []).map((loc: any) => [
+            { text: `📍 Enviar para: ${loc.name}`, callback_data: `confirm_purchase:${order.id}:${loc.slug}` }
+          ]),
           [
-            { text: '✅ Confirmar Entrada', callback_data: `confirm_purchase:${order.id}` },
-            { text: '❌ Cancelar', callback_data: `cancel_purchase:${order.id}` }
+            { text: '❌ Cancelar Lote', callback_data: `cancel_purchase:${order.id}` }
           ]
         ]
       };
 
-      await sendMessage(chatId, `📝 *Nota Fiscal Processada com Sucesso!*\n\n*Fornecedor:* ${parsed.supplier_name || 'Desconhecido'}\n*Valor Total:* R$ ${(parsed.total_value || 0).toFixed(2)}\n\n*Itens Extraídos:*\n${itemsList}\n\nDeseja confirmar a entrada deste pedido no estoque e lançar no financeiro?`, inlineKeyboard);
+      await sendMessage(chatId, `📝 *Nota Fiscal Processada com Sucesso!*\n\n*Fornecedor:* ${parsed.supplier_name || 'Desconhecido'}\n*Valor Total:* R$ ${(parsed.total_value || 0).toFixed(2)}\n\n*Itens Extraídos:*\n${itemsList}\n\n*Por favor, escolha abaixo o estoque de destino para a entrada deste lote:*`, inlineKeyboard);
 
       await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
       return res.status(200).send('OK');
