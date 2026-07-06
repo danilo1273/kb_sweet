@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
-import { User, Loader2, Upload, LogOut } from "lucide-react";
+import { User, Loader2, Upload, LogOut, Send } from "lucide-react";
 
 export default function Profile() {
     const { toast } = useToast();
@@ -21,6 +21,10 @@ export default function Profile() {
     const [userRole, setUserRole] = useState<string[]>([]);
     const [companyId, setCompanyId] = useState<string | null>(null);
 
+    // Telegram Connection State
+    const [telegramChatId, setTelegramChatId] = useState<string | null>(null);
+    const [telegramLinkCode, setTelegramLinkCode] = useState<string | null>(null);
+
     useEffect(() => {
         getProfile();
     }, []);
@@ -33,10 +37,10 @@ export default function Profile() {
             if (!user) throw new Error("Usuário não autenticado");
             setEmail(user.email || "");
 
-            // Fetch profile including company_id and roles
+            // Fetch profile including company_id, roles, and telegram fields
             const { data: profile, error } = await supabase
                 .from('profiles')
-                .select('full_name, avatar_url, roles, company_id')
+                .select('full_name, avatar_url, roles, company_id, telegram_chat_id, telegram_link_code')
                 .eq('id', user.id)
                 .single();
 
@@ -47,6 +51,8 @@ export default function Profile() {
                 setAvatarUrl(profile.avatar_url);
                 setUserRole(profile.roles || []);
                 setCompanyId(profile.company_id);
+                setTelegramChatId(profile.telegram_chat_id || null);
+                setTelegramLinkCode(profile.telegram_link_code || null);
 
                 // If user belongs to a company, fetch company details
                 if (profile.company_id) {
@@ -95,6 +101,53 @@ export default function Profile() {
                 title: "❌ Erro ao atualizar perfil. Tente novamente mais tarde.",
                 description: error.message,
             });
+        } finally {
+            setUpdating(false);
+        }
+    }
+
+    async function generateTelegramCode() {
+        try {
+            setUpdating(true);
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error("Usuário não autenticado");
+
+            const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+            const { error } = await supabase
+                .from('profiles')
+                .update({ telegram_link_code: code })
+                .eq('id', user.id);
+
+            if (error) throw error;
+
+            setTelegramLinkCode(code);
+            toast({ title: "Código gerado com sucesso!" });
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Erro ao gerar código", description: error.message });
+        } finally {
+            setUpdating(false);
+        }
+    }
+
+    async function unlinkTelegram() {
+        try {
+            setUpdating(true);
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error("Usuário não autenticado");
+
+            const { error } = await supabase
+                .from('profiles')
+                .update({ telegram_chat_id: null, telegram_link_code: null })
+                .eq('id', user.id);
+
+            if (error) throw error;
+
+            setTelegramChatId(null);
+            setTelegramLinkCode(null);
+            toast({ title: "Telegram desvinculado com sucesso!" });
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Erro ao desvincular", description: error.message });
         } finally {
             setUpdating(false);
         }
@@ -225,6 +278,53 @@ export default function Profile() {
                                 {updating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Salvar Alterações
                             </Button>
                         </CardFooter>
+                    </Card>
+
+                    <Card className="bg-white shadow-sm rounded-xl mt-6">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <Send className="h-5 w-5 text-sky-500" /> Conexão com o Telegram
+                            </CardTitle>
+                            <CardDescription>
+                                Vincule seu bot do Telegram para registrar vendas, compras e lançamentos financeiros pelo chat.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            {telegramChatId ? (
+                                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-sm flex items-center justify-between">
+                                    <div>
+                                        <p className="font-semibold">✓ Telegram Vinculado!</p>
+                                        <p className="text-xs text-emerald-600 mt-1">ID do Chat: {telegramChatId}</p>
+                                    </div>
+                                    <Button variant="outline" size="sm" onClick={unlinkTelegram} disabled={updating} className="border-emerald-200 text-emerald-800 hover:bg-emerald-100">
+                                        Desvincular
+                                    </Button>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="p-4 bg-zinc-50 border border-zinc-200 rounded-lg text-sm text-zinc-700">
+                                        <p className="font-medium">Como vincular seu Telegram:</p>
+                                        <ol className="list-decimal list-inside space-y-1 mt-2 text-xs text-zinc-600">
+                                            <li>Inicie uma conversa com seu Bot no Telegram.</li>
+                                            <li>Clique em <strong>Gerar Código</strong> abaixo.</li>
+                                            <li>Envie o comando no chat do Bot: <code className="bg-zinc-200 px-1 py-0.5 rounded text-zinc-900 font-mono">/vincular [código]</code></li>
+                                        </ol>
+                                    </div>
+
+                                    {telegramLinkCode ? (
+                                        <div className="flex flex-col items-center justify-center p-4 bg-sky-50 border border-sky-100 rounded-lg">
+                                            <p className="text-xs text-sky-600 font-medium">Seu código de vinculação:</p>
+                                            <p className="text-3xl font-bold tracking-widest text-sky-900 mt-2 font-mono">{telegramLinkCode}</p>
+                                            <p className="text-[10px] text-sky-500 mt-2">Envie no Telegram: <code className="bg-sky-100 px-1 py-0.5 rounded font-mono text-sky-700">/vincular {telegramLinkCode}</code></p>
+                                        </div>
+                                    ) : (
+                                        <Button onClick={generateTelegramCode} disabled={updating} className="w-full bg-sky-600 hover:bg-sky-700 text-white font-medium">
+                                            {updating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Gerar Código de Vinculação
+                                        </Button>
+                                    )}
+                                </div>
+                            )}
+                        </CardContent>
                     </Card>
                 </TabsContent>
 
