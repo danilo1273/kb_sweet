@@ -237,13 +237,13 @@ export default function Inventory() {
                     location_id: s.location?.id,
                     location_name: s.location?.name,
                     location_slug: s.location?.slug,
-                    quantity: s.quantity,
-                    average_cost: s.average_cost
+                    quantity: Number(s.quantity || 0),
+                    average_cost: Number(s.average_cost || 0)
                 })),
-                stock_danilo: sDanilo,
-                stock_adriel: sAdriel,
-                cost_danilo: stockDanilo ? stockDanilo.average_cost : (ignoreLegacy ? 0 : (item.cost_danilo || 0)),
-                cost_adriel: stockAdriel ? stockAdriel.average_cost : (ignoreLegacy ? 0 : (item.cost_adriel || 0)),
+                stock_danilo: Number(sDanilo || 0),
+                stock_adriel: Number(sAdriel || 0),
+                cost_danilo: Number((stockDanilo ? stockDanilo.average_cost : (ignoreLegacy ? 0 : (item.cost_danilo || 0))) || 0),
+                cost_adriel: Number((stockAdriel ? stockAdriel.average_cost : (ignoreLegacy ? 0 : (item.cost_adriel || 0))) || 0),
             };
         };
 
@@ -784,7 +784,7 @@ export default function Inventory() {
                                     <div className="grid grid-cols-2 gap-2 text-sm border-t pt-2">
                                         {stockLocations.map(loc => {
                                             const stock = item.stocks?.find(s => s.location_id === loc.id);
-                                            let qty = stock?.quantity;
+                                            let qty = stock ? Number(stock.quantity || 0) : undefined;
 
                                             if (qty === undefined) {
                                                 if (loc.slug === 'stock-danilo') qty = item.stock_danilo || 0;
@@ -956,8 +956,8 @@ export default function Inventory() {
                                             {/* Dynamic Location Columns */}
                                             {stockLocations.map(loc => {
                                                 let stock = item.stocks?.find(s => s.location_id === loc.id);
-                                                let qty = stock?.quantity;
-                                                let cost = stock?.average_cost || 0;
+                                                let qty = stock ? Number(stock.quantity || 0) : undefined;
+                                                let cost = stock ? Number(stock.average_cost || 0) : 0;
 
                                                 // Fallback for legacy data if migration hasn't covered this product yet
                                                 if (qty === undefined) {

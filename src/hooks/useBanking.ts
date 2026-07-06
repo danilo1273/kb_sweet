@@ -52,7 +52,7 @@ export function useBanking() {
                 balMap[bid] = (balMap[bid] || 0) + val;
             });
 
-            const enriched = accs.map((a: BankAccount) => ({
+            const enriched = (accs || []).map((a: BankAccount) => ({
                 ...a,
                 calculated_balance: Number(a.initial_balance) + (balMap[a.id] || 0)
             }));
