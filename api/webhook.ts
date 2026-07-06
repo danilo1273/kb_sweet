@@ -498,6 +498,45 @@ Retorne um JSON seguindo exatamente este formato:
         }
       }
 
+      // Process items: auto-create missing ingredients if they don't exist
+      for (const item of parsed.items) {
+        let ingId = item.ingredient_id;
+        
+        if (!ingId) {
+          // Double check if name matches case-insensitive in loaded ingredients
+          const match = ingredients?.find(i => i.name.toLowerCase().trim() === item.item_name.toLowerCase().trim());
+          if (match) {
+            ingId = match.id;
+          } else {
+            // Auto-create new ingredient in the database
+            const { data: newIng, error: ingCreateErr } = await supabase
+              .from('ingredients')
+              .insert({
+                name: item.item_name,
+                unit: item.unit || 'un',
+                category: 'Outros',
+                type: 'stock',
+                stock_danilo: 0,
+                stock_adriel: 0,
+                cost: 0,
+                cost_danilo: 0,
+                cost_adriel: 0,
+                is_active: true,
+                company_id: profile.company_id
+              })
+              .select()
+              .single();
+
+            if (ingCreateErr) {
+              console.error('Error creating ingredient:', ingCreateErr);
+            } else if (newIng) {
+              ingId = newIng.id;
+            }
+          }
+        }
+        item.ingredient_id = ingId;
+      }
+
       // Create a new purchase order
       const { data: order, error: orderErr } = await supabase
         .from('purchase_orders')
@@ -533,7 +572,8 @@ Retorne um JSON seguindo exatamente este formato:
 
       // Build preview message
       const itemsList = parsed.items.map((item: any) => {
-        const mappingName = ingredients?.find(i => i.id === item.ingredient_id)?.name || '❌ Não Mapeado';
+        const found = ingredients?.find(i => i.id === item.ingredient_id);
+        const mappingName = found ? found.name : '🆕 Cadastrado Automático';
         return `• ${item.quantity} ${item.unit} - ${item.item_name} (R$ ${item.cost.toFixed(2)})\n  └─ Mapeado para: *${mappingName}*`;
       }).join('\n');
 
