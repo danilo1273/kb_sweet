@@ -515,6 +515,7 @@ export default function AdminCompanies() {
                     data: {
                         full_name: newUserName,
                         company_id: selectedCompany.id,
+                        role: 'admin',
                     },
                 },
             });
@@ -527,6 +528,8 @@ export default function AdminCompanies() {
                 .update({
                     company_id: selectedCompany.id,
                     full_name: newUserName,
+                    role: 'admin',
+                    roles: ['admin']
                 })
                 .eq("id", data.user.id);
 
