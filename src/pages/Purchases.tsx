@@ -26,6 +26,7 @@ const Purchases = () => {
     // Meta State (Ingredients, Suppliers, Categories)
     const [ingredients, setIngredients] = useState<Ingredient[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+    const [locations, setLocations] = useState<any[]>([]);
 
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [currentUserRoles, setCurrentUserRoles] = useState<string[]>([]);
@@ -88,10 +89,23 @@ const Purchases = () => {
 
 
     async function fetchMeta() {
-        const { data: ing } = await supabase.from('ingredients').select('id, name, stock_danilo, stock_adriel, cost, cost_danilo, cost_adriel, unit, purchase_unit, purchase_unit_factor, category, type').order('name');
-        if (ing) setIngredients(ing as Ingredient[]);
+        const { data: ing } = await supabase.from('ingredients')
+            .select(`
+                id, name, stock_danilo, stock_adriel, cost, cost_danilo, cost_adriel, unit, purchase_unit, purchase_unit_factor, category, type,
+                product_stocks (
+                    quantity,
+                    average_cost,
+                    location_id,
+                    stock_locations (name, slug)
+                )
+            `)
+            .order('name');
+        if (ing) setIngredients(ing as any[]);
         const { data: sup } = await supabase.from('suppliers').select('id, name').order('name');
         if (sup) setSuppliers(sup);
+
+        const { data: locs } = await supabase.from('stock_locations').select('id, name, slug').order('name');
+        if (locs) setLocations(locs);
 
         // Fetch Categories
         const { data: catData } = await supabase.from('custom_categories').select('*').order('name');
@@ -444,6 +458,7 @@ const Purchases = () => {
                 onOpenChange={setIsOrderDialogOpen}
                 suppliers={suppliers}
                 ingredients={ingredients}
+                locations={locations}
                 onNewSupplier={() => setIsSupplierDialogOpen(true)}
                 onNewProduct={() => setIsProductDialogOpen(true)}
                 onCreate={handleCreateOrder}
@@ -456,6 +471,7 @@ const Purchases = () => {
                 order={selectedOrder}
                 suppliers={suppliers}
                 ingredients={ingredients}
+                locations={locations}
                 onNewSupplier={() => setIsSupplierDialogOpen(true)}
                 onNewProduct={() => setIsProductDialogOpen(true)}
                 formatCurrency={formatCurrency}
@@ -478,6 +494,7 @@ const Purchases = () => {
                 editedValues={editedValues}
                 onEditedValuesChange={setEditedValues}
                 ingredients={ingredients}
+                locations={locations}
                 availableUnits={availableUnits}
                 onSave={saveEditItem}
             />

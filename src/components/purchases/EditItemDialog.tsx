@@ -12,6 +12,7 @@ interface EditItemDialogProps {
     editedValues: any;
     onEditedValuesChange: (values: any) => void;
     ingredients: any[];
+    locations: any[];
     availableUnits: string[];
     onSave: () => void;
 }
@@ -23,6 +24,7 @@ export function EditItemDialog({
     editedValues,
     onEditedValuesChange,
     ingredients,
+    locations = [],
     availableUnits,
     onSave
 }: EditItemDialogProps) {
@@ -116,11 +118,23 @@ export function EditItemDialog({
                     {!isExpense && (
                         <div className="space-y-2">
                             <Label>Estoque de Destino (Para onde vai?)</Label>
-                            <Select value={editedValues.destination} onValueChange={(v: any) => onEditedValuesChange({ ...editedValues, destination: v })}>
+                            <Select 
+                                value={
+                                    editedValues.destination === 'danilo' 
+                                        ? 'stock-danilo' 
+                                        : editedValues.destination === 'adriel' 
+                                            ? 'stock-adriel' 
+                                            : editedValues.destination
+                                } 
+                                onValueChange={(v: any) => onEditedValuesChange({ ...editedValues, destination: v })}
+                            >
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="danilo">Danilo</SelectItem>
-                                    <SelectItem value="adriel">Adriel</SelectItem>
+                                    {locations.map((loc: any) => (
+                                        <SelectItem key={loc.id} value={loc.slug}>
+                                            {loc.name}
+                                        </SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>

@@ -20,6 +20,7 @@ interface ManageOrderDialogProps {
     order: any; // PurchaseOrder
     suppliers: any[];
     ingredients: any[];
+    locations: any[];
     onNewSupplier: () => void;
     onNewProduct: () => void;
     formatCurrency: (val: number) => string;
@@ -38,6 +39,7 @@ export function ManageOrderDialog({
     order,
     suppliers,
     ingredients,
+    locations = [],
     onNewSupplier,
     onNewProduct,
     formatCurrency,
@@ -236,45 +238,72 @@ export function ManageOrderDialog({
 
                                 {/* Mobile View: List */}
                                 <div className="md:hidden space-y-3">
-                                    {order.requests?.map((item: any) => (
-                                        <div key={item.id} className="bg-zinc-50 p-3 rounded-lg border text-sm space-y-2">
-                                            <div className="flex justify-between font-medium text-zinc-900">
-                                                <span>{item.item_name}</span>
-                                                <span>{formatCurrency(Number(item.cost))}</span>
-                                            </div>
-                                            <div className="flex justify-between text-zinc-500 text-xs">
-                                                <span>{item.quantity} {item.unit}</span>
-                                                {item.financial_status === 'paid'
-                                                    ? <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge>
-                                                    : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>
-                                                }
-                                            </div>
-                                            {showEditControls && (
-                                                <div className="flex justify-end gap-2 pt-2 border-t mt-1">
-                                                    {item.status === 'pending' && canApprove && (
-                                                        <>
-                                                            <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, true, currentUserId); onOrderUpdated?.(); }} className="h-8 w-8 p-0 text-green-600 bg-green-50">
-                                                                <Check className="h-4 w-4" />
-                                                            </Button>
-                                                            <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, false, currentUserId); onOrderUpdated?.(); }} className="h-8 w-8 p-0 text-red-600 bg-red-50">
-                                                                <Ban className="h-4 w-4" />
-                                                            </Button>
-                                                        </>
-                                                    )}
-                                                    {item.financial_status !== 'paid' && (
-                                                        <>
-                                                            <Button variant="ghost" size="sm" onClick={() => onEditItem(item)} className="h-8 w-8 p-0 text-blue-500 bg-blue-50">
-                                                                <Pencil className="h-3 w-3" />
-                                                            </Button>
-                                                            <Button variant="ghost" size="sm" onClick={() => handleDeleteItem(item.id, item.status)} className="h-8 w-8 p-0 text-red-400 bg-red-50">
-                                                                <Trash2 className="h-3 w-3" />
-                                                            </Button>
-                                                        </>
-                                                    )}
+                                    {order.requests?.map((item: any) => {
+                                        const ing = ingredients.find(i => i.id === item.ingredient_id);
+                                        const loc = locations.find(l => l.slug === item.destination || l.id === item.destination || l.name === item.destination);
+                                        const destName = loc ? loc.name : item.destination || 'Danilo';
+                                        
+                                        return (
+                                            <div key={item.id} className="bg-white p-3 rounded-lg border text-sm space-y-2 shadow-sm">
+                                                <div className="flex justify-between font-medium text-zinc-900">
+                                                    <span>{item.item_name}</span>
+                                                    <span>{formatCurrency(Number(item.cost))}</span>
                                                 </div>
-                                            )}
-                                        </div>
-                                    ))}
+                                                <div className="flex justify-between text-zinc-500 text-xs items-center">
+                                                    <span>{item.quantity} {item.unit}</span>
+                                                    <div className="flex items-center gap-1.5">
+                                                        {item.financial_status === 'paid'
+                                                            ? <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge>
+                                                            : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>
+                                                        }
+                                                    </div>
+                                                </div>
+                                                
+                                                {/* Destination Location Info */}
+                                                <div className="flex justify-between items-center text-xs pt-1.5 border-t border-dashed mt-1.5">
+                                                    <span className="text-zinc-500 flex items-center gap-1">📍 Destino: <strong className="text-zinc-700">{destName}</strong></span>
+                                                </div>
+
+                                                {/* Stock Levels Info */}
+                                                {ing && (
+                                                    <div className="text-[11px] text-zinc-500 bg-zinc-50 p-2 rounded border mt-1">
+                                                        📦 <strong>Estoque atual:</strong> {(() => {
+                                                            const stocks = ing.product_stocks || [];
+                                                            if (stocks.length > 0) {
+                                                                return stocks.map((s: any) => `${s.stock_locations?.name || 'Estoque'}: ${s.quantity} ${ing.unit}`).join(' | ');
+                                                            }
+                                                            return `Danilo: ${ing.stock_danilo || 0} ${ing.unit} | Adriel: ${ing.stock_adriel || 0} ${ing.unit}`;
+                                                        })()}
+                                                    </div>
+                                                )}
+
+                                                {showEditControls && (
+                                                    <div className="flex justify-end gap-2 pt-2 border-t mt-1">
+                                                        {item.status === 'pending' && canApprove && (
+                                                            <>
+                                                                <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, true, currentUserId); onOrderUpdated?.(); }} className="h-8 w-8 p-0 text-green-600 bg-green-50">
+                                                                    <Check className="h-4 w-4" />
+                                                                </Button>
+                                                                <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, false, currentUserId); onOrderUpdated?.(); }} className="h-8 w-8 p-0 text-red-600 bg-red-50">
+                                                                    <Ban className="h-4 w-4" />
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                        {item.financial_status !== 'paid' && (
+                                                            <>
+                                                                <Button variant="ghost" size="sm" onClick={() => onEditItem(item)} className="h-8 w-8 p-0 text-blue-500 bg-blue-50">
+                                                                    <Pencil className="h-3 w-3" />
+                                                                </Button>
+                                                                <Button variant="ghost" size="sm" onClick={() => handleDeleteItem(item.id, item.status)} className="h-8 w-8 p-0 text-red-400 bg-red-50">
+                                                                    <Trash2 className="h-3 w-3" />
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
 
                                 {/* Desktop View: Table */}
@@ -283,6 +312,7 @@ export function ManageOrderDialog({
                                         <TableHeader>
                                             <TableRow>
                                                 <TableHead>Item</TableHead>
+                                                <TableHead>Destino</TableHead>
                                                 <TableHead>Qtd</TableHead>
                                                 <TableHead>Custo</TableHead>
                                                 <TableHead>Status</TableHead>
@@ -290,40 +320,66 @@ export function ManageOrderDialog({
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                            {order.requests?.map((item: any) => (
-                                                <TableRow key={item.id}>
-                                                    <TableCell>{item.item_name}</TableCell>
-                                                    <TableCell>{item.quantity} {item.unit}</TableCell>
-                                                    <TableCell>{formatCurrency(Number(item.cost))}</TableCell>
-                                                    <TableCell>
-                                                        {item.financial_status === 'paid' ? <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge> : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>}
-                                                    </TableCell>
-                                                    {showEditControls && (
-                                                        <TableCell className="text-right flex justify-end gap-1">
-                                                            {item.status === 'pending' && canApprove && (
-                                                                <>
-                                                                    <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, true, currentUserId); onOrderUpdated?.(); }} className="h-6 w-6 p-0 text-green-600 hover:text-green-700 hover:bg-green-50" title="Aprovar">
-                                                                        <Check className="h-4 w-4" />
-                                                                    </Button>
-                                                                    <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, false, currentUserId); onOrderUpdated?.(); }} className="h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-50" title="Rejeitar">
-                                                                        <Ban className="h-4 w-4" />
-                                                                    </Button>
-                                                                </>
-                                                            )}
-                                                            {item.financial_status !== 'paid' && (
-                                                                <>
-                                                                    <Button variant="ghost" size="sm" onClick={() => onEditItem(item)} className="h-6 w-6 p-0 text-blue-500">
-                                                                        <Pencil className="h-3 w-3" />
-                                                                    </Button>
-                                                                    <Button variant="ghost" size="sm" onClick={() => handleDeleteItem(item.id, item.status)} className="h-6 w-6 p-0 text-red-400">
-                                                                        <Trash2 className="h-3 w-3" />
-                                                                    </Button>
-                                                                </>
+                                            {order.requests?.map((item: any) => {
+                                                const ing = ingredients.find(i => i.id === item.ingredient_id);
+                                                const loc = locations.find(l => l.slug === item.destination || l.id === item.destination || l.name === item.destination);
+                                                const destName = loc ? loc.name : item.destination || 'Danilo';
+                                                
+                                                return (
+                                                    <TableRow key={item.id}>
+                                                        <TableCell>
+                                                            <div className="font-medium text-zinc-900">{item.item_name}</div>
+                                                            {ing && (
+                                                                <div className="text-[10px] text-zinc-500 mt-0.5">
+                                                                    📦 Estoque atual: <span className="font-semibold text-zinc-600">
+                                                                        {(() => {
+                                                                            const stocks = ing.product_stocks || [];
+                                                                            if (stocks.length > 0) {
+                                                                                return stocks.map((s: any) => `${s.stock_locations?.name || 'Estoque'}: ${s.quantity} ${ing.unit}`).join(' | ');
+                                                                            }
+                                                                            return `Danilo: ${ing.stock_danilo || 0} ${ing.unit} | Adriel: ${ing.stock_adriel || 0} ${ing.unit}`;
+                                                                        })()}
+                                                                    </span>
+                                                                </div>
                                                             )}
                                                         </TableCell>
-                                                    )}
-                                                </TableRow>
-                                            ))}
+                                                        <TableCell>
+                                                            <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-800 border-blue-100 flex items-center gap-1 w-max">
+                                                                📍 {destName}
+                                                            </Badge>
+                                                        </TableCell>
+                                                        <TableCell>{item.quantity} {item.unit}</TableCell>
+                                                        <TableCell>{formatCurrency(Number(item.cost))}</TableCell>
+                                                        <TableCell>
+                                                            {item.financial_status === 'paid' ? <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Pago</Badge> : <Badge variant="outline" className="text-[10px]">{formatStatus(item.status)}</Badge>}
+                                                        </TableCell>
+                                                        {showEditControls && (
+                                                            <TableCell className="text-right flex justify-end gap-1">
+                                                                {item.status === 'pending' && canApprove && (
+                                                                    <>
+                                                                        <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, true, currentUserId); onOrderUpdated?.(); }} className="h-6 w-6 p-0 text-green-600 hover:text-green-700 hover:bg-green-50" title="Aprovar">
+                                                                            <Check className="h-4 w-4" />
+                                                                        </Button>
+                                                                        <Button variant="ghost" size="sm" onClick={async () => { await approveRequest(item, false, currentUserId); onOrderUpdated?.(); }} className="h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-50" title="Rejeitar">
+                                                                            <Ban className="h-4 w-4" />
+                                                                        </Button>
+                                                                    </>
+                                                                )}
+                                                                {item.financial_status !== 'paid' && (
+                                                                    <>
+                                                                        <Button variant="ghost" size="sm" onClick={() => onEditItem(item)} className="h-6 w-6 p-0 text-blue-500">
+                                                                            <Pencil className="h-3 w-3" />
+                                                                        </Button>
+                                                                        <Button variant="ghost" size="sm" onClick={() => handleDeleteItem(item.id, item.status)} className="h-6 w-6 p-0 text-red-400">
+                                                                            <Trash2 className="h-3 w-3" />
+                                                                        </Button>
+                                                                    </>
+                                                                )}
+                                                            </TableCell>
+                                                        )}
+                                                    </TableRow>
+                                                );
+                                            })}
                                         </TableBody>
                                     </Table>
                                 </div>
@@ -374,13 +430,25 @@ export function ManageOrderDialog({
                                                 </SelectContent>
                                             </Select>
                                         </div>
-                                        <div className="col-span-1 md:col-span-1">
+                                        <div className="col-span-1 md:col-span-2">
                                             <Label className="text-[10px]">Destino</Label>
-                                            <Select value={newItemDraft.destination} onValueChange={(val: any) => setNewItemDraft({ ...newItemDraft, destination: val })}>
+                                            <Select 
+                                                value={
+                                                    newItemDraft.destination === 'danilo' 
+                                                        ? 'stock-danilo' 
+                                                        : newItemDraft.destination === 'adriel' 
+                                                            ? 'stock-adriel' 
+                                                            : newItemDraft.destination
+                                                } 
+                                                onValueChange={(val: any) => setNewItemDraft({ ...newItemDraft, destination: val })}
+                                            >
                                                 <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="danilo">Danilo</SelectItem>
-                                                    <SelectItem value="adriel">Adriel</SelectItem>
+                                                    {locations.map((loc: any) => (
+                                                        <SelectItem key={loc.id} value={loc.slug}>
+                                                            {loc.name}
+                                                        </SelectItem>
+                                                    ))}
                                                 </SelectContent>
                                             </Select>
                                         </div>

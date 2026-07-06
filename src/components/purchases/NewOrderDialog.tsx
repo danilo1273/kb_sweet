@@ -14,6 +14,7 @@ interface NewOrderDialogProps {
     onOpenChange: (open: boolean) => void;
     suppliers: Supplier[];
     ingredients: Ingredient[];
+    locations: any[];
     onNewSupplier: () => void;
     onNewProduct: () => void;
     onCreate: (nickname: string, supplierId: string, items: ItemDraft[]) => Promise<boolean | void>;
@@ -24,6 +25,7 @@ export function NewOrderDialog({
     onOpenChange,
     suppliers,
     ingredients,
+    locations = [],
     onNewSupplier,
     onNewProduct,
     onCreate
@@ -215,11 +217,23 @@ export function NewOrderDialog({
                             </div>
                             <div className="space-y-1 col-span-1 md:col-span-2">
                                 <Label className="text-xs md:text-[10px]">Destino</Label>
-                                <Select value={draftItem.destination} onValueChange={(val: any) => setDraftItem({ ...draftItem, destination: val })}>
+                                <Select 
+                                    value={
+                                        draftItem.destination === 'danilo' 
+                                            ? 'stock-danilo' 
+                                            : draftItem.destination === 'adriel' 
+                                                ? 'stock-adriel' 
+                                                : draftItem.destination
+                                    } 
+                                    onValueChange={(val: any) => setDraftItem({ ...draftItem, destination: val })}
+                                >
                                     <SelectTrigger className="h-9 md:h-8"><SelectValue /></SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="danilo">Danilo</SelectItem>
-                                        <SelectItem value="adriel">Adriel</SelectItem>
+                                        {locations.map((loc: any) => (
+                                            <SelectItem key={loc.id} value={loc.slug}>
+                                                {loc.name}
+                                            </SelectItem>
+                                        ))}
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -246,7 +260,14 @@ export function NewOrderDialog({
                                         <TableCell className="py-2 text-right">R$ {Number(i.cost / (i.quantity || 1)).toFixed(2)} un</TableCell>
                                         <TableCell className="py-2 text-right font-bold">R$ {Number(i.cost).toFixed(2)}</TableCell>
                                         <TableCell className="py-2 text-right">
-                                            <span className="text-[10px] text-zinc-500 uppercase mr-2 border px-1 rounded">{i.destination}</span>
+                                            {(() => {
+                                                const loc = locations.find(l => l.slug === i.destination || l.id === i.destination || l.name === i.destination);
+                                                return (
+                                                    <span className="text-[10px] text-zinc-500 uppercase mr-2 border px-1 rounded">
+                                                        {loc ? loc.name : i.destination || 'Danilo'}
+                                                    </span>
+                                                );
+                                            })()}
                                         </TableCell>
                                         <TableCell className="py-2 text-right flex justify-end gap-1">
                                             <Button variant="ghost" size="sm" onClick={() => handleEditItem(x)} className="h-6 w-6 p-0 text-blue-500"><Pencil className="h-3 w-3" /></Button>
