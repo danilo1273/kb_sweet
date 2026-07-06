@@ -457,7 +457,8 @@ Retorne um JSON seguindo exatamente este formato:
       "ingredient_id": "uuid-do-ingrediente-mapeado-ou-null",
       "quantity": 5.0,
       "unit": "kg",
-      "cost": 50.0,
+      "unit_price": 10.0,
+      "total_price": 50.0,
       "destination": "danilo"
     }
   ]
@@ -554,18 +555,22 @@ Retorne um JSON seguindo exatamente este formato:
       if (orderErr) throw orderErr;
 
       // Create purchase requests
-      const requestsPayload = parsed.items.map((item: any) => ({
-        order_id: order.id,
-        user_id: profile.id,
-        item_name: item.item_name,
-        ingredient_id: item.ingredient_id || null,
-        quantity: item.quantity,
-        unit: item.unit || 'un',
-        cost: item.cost || 0,
-        destination: item.destination || 'danilo',
-        status: 'pending',
-        company_id: profile.company_id
-      }));
+      const requestsPayload = parsed.items.map((item: any) => {
+        // Calculate total cost correctly: total_price if extracted, or unit_price * quantity, or cost as fallback
+        const finalCost = item.total_price || (item.unit_price * item.quantity) || item.cost || 0;
+        return {
+          order_id: order.id,
+          user_id: profile.id,
+          item_name: item.item_name,
+          ingredient_id: item.ingredient_id || null,
+          quantity: item.quantity,
+          unit: item.unit || 'un',
+          cost: finalCost,
+          destination: item.destination || 'danilo',
+          status: 'pending',
+          company_id: profile.company_id
+        };
+      });
 
       const { error: reqErr } = await supabase.from('purchase_requests').insert(requestsPayload);
       if (reqErr) throw reqErr;
@@ -574,7 +579,8 @@ Retorne um JSON seguindo exatamente este formato:
       const itemsList = parsed.items.map((item: any) => {
         const found = ingredients?.find(i => i.id === item.ingredient_id);
         const mappingName = found ? found.name : '🆕 Cadastrado Automático';
-        return `• ${item.quantity} ${item.unit} - ${item.item_name} (R$ ${item.cost.toFixed(2)})\n  └─ Mapeado para: *${mappingName}*`;
+        const finalCost = item.total_price || (item.unit_price * item.quantity) || item.cost || 0;
+        return `• ${item.quantity} ${item.unit} - ${item.item_name} (R$ ${finalCost.toFixed(2)})\n  └─ Mapeado para: *${mappingName}*`;
       }).join('\n');
 
       const inlineKeyboard = {
