@@ -114,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).send('OK');
       }
 
-      if (callbackData.startsWith('confirm_purchase:')) {
+      if (callbackData.startsWith('confirm_purchase:') || callbackData.startsWith('conf_p:')) {
         const parts = callbackData.split(':');
         const orderId = parts[1];
         const locationSlug = parts[2] || 'danilo';
@@ -153,7 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           text: `✅ *Lote de compra enviado para aprovação no painel web com destino ao ${locName}!*`,
           parse_mode: 'Markdown'
         });
-      } else if (callbackData.startsWith('cancel_purchase:')) {
+      } else if (callbackData.startsWith('cancel_purchase:') || callbackData.startsWith('canc_p:')) {
         const orderId = callbackData.split(':')[1];
 
         await sendTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId, text: 'Cancelando...' });
@@ -710,10 +710,10 @@ Retorne um JSON seguindo exatamente este formato:
       const inlineKeyboard = {
         inline_keyboard: [
           ...(locations || []).map((loc: any) => [
-            { text: `📍 Enviar para: ${loc.name}`, callback_data: `confirm_purchase:${order.id}:${loc.slug}` }
+            { text: `📍 Enviar para: ${loc.name}`, callback_data: `conf_p:${order.id}:${loc.slug}` }
           ]),
           [
-            { text: '❌ Cancelar Lote', callback_data: `cancel_purchase:${order.id}` }
+            { text: '❌ Cancelar Lote', callback_data: `canc_p:${order.id}` }
           ]
         ]
       };
