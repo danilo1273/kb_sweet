@@ -31,7 +31,7 @@ interface AuditItem {
     reason: string;
 }
 
-export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, categories, locations = [] }: InventoryAuditDialogProps) {
+export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients = [], categories = [], locations = [] }: InventoryAuditDialogProps) {
     const { toast } = useToast();
     const [loading, setLoading] = useState(false);
     const [auditItems, setAuditItems] = useState<AuditItem[]>([]);
@@ -41,7 +41,7 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
 
     // Filter Logic
     const filteredItems = auditItems.filter(item => {
-        const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesSearch = (item.name || "").toLowerCase().includes(searchTerm.toLowerCase());
 
         // Find original ingredient to check category
         const original = ingredients.find(i => i.id === item.id);
@@ -360,13 +360,13 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
                                                                 let isRecipeUnit = false;
 
                                                                 // Priority 1: Purchase Unit (Base / Factor = Sec)
-                                                                if (original?.purchase_unit && original.purchase_unit.toLowerCase() !== item.unit.toLowerCase()) {
+                                                                if (original?.purchase_unit && (original.purchase_unit || "").toLowerCase() !== (item.unit || "").toLowerCase()) {
                                                                     secUnit = original.purchase_unit;
                                                                     factor = original.purchase_unit_factor || 1;
                                                                     isRecipeUnit = false;
                                                                 }
                                                                 // Priority 2: Recipe/Secondary Unit (Base * Factor = Sec)
-                                                                else if (original?.unit_type && original.unit_type.toLowerCase() !== item.unit.toLowerCase()) {
+                                                                else if (original?.unit_type && (original.unit_type || "").toLowerCase() !== (item.unit || "").toLowerCase()) {
                                                                     secUnit = original.unit_type;
                                                                     factor = original.unit_weight || 1;
                                                                     isRecipeUnit = true;

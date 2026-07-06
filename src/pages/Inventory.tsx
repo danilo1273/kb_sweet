@@ -1010,14 +1010,14 @@ export default function Inventory() {
                                                             {item.type === 'expense' ? '-' : (
                                                                 qty <= 0 ? <div className="text-zinc-300">-</div> : (
                                                                     <>
-                                                                        <div>R$ {cost.toFixed(2)}</div>
+                                                                        <div>R$ {(Number(cost) || 0).toFixed(2)}</div>
                                                                         <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
                                                                     </>
                                                                 )
                                                             )}
                                                         </TableCell>
                                                         <TableCell className={cn("text-right text-xs font-bold border-r border-zinc-100", isSelected ? "bg-blue-50/30 border-r border-blue-100 text-blue-900" : "text-zinc-700 bg-zinc-50/30")}>
-                                                            {item.type === 'expense' ? '-' : `R$ ${totalLocVal.toFixed(2)}`}
+                                                            {item.type === 'expense' ? '-' : `R$ ${(Number(totalLocVal) || 0).toFixed(2)}`}
                                                         </TableCell>
                                                     </Fragment>
                                                 );
@@ -1036,7 +1036,7 @@ export default function Inventory() {
                                                     </div>
                                                 )}
                                             </TableCell>
-                                            <TableCell className="text-right font-bold text-green-700 bg-zinc-50">{item.type === 'expense' ? '-' : `R$ ${totalVal.toFixed(2)}`}</TableCell>
+                                            <TableCell className="text-right font-bold text-green-700 bg-zinc-50">{item.type === 'expense' ? '-' : `R$ ${(Number(totalVal) || 0).toFixed(2)}`}</TableCell>
 
                                             <TableCell className="text-right space-x-1">
                                                 <Button variant="ghost" size="icon" onClick={() => openHistory(item)} title="Histórico de Compras">
@@ -1342,7 +1342,7 @@ export default function Inventory() {
                                                 </span>
                                             </TableCell>
                                             <TableCell className="text-right text-xs">
-                                                R$ {h.total_value.toFixed(2)}
+                                                R$ {(Number(h.total_value) || 0).toFixed(2)}
                                             </TableCell>
                                         </TableRow>
                                     ))
