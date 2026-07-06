@@ -9,6 +9,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Loader2, Plus, Shield, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { createClient } from "@supabase/supabase-js";
+import { useUserRole } from "@/hooks/useUserRole";
 
 // Tipos
 interface Profile {
@@ -18,6 +19,8 @@ interface Profile {
     roles?: string[]; // New Multi-Role
     status: string;
     email?: string;
+    company_id?: string;
+    companies?: { name: string };
 }
 
 // Mapeamento de Roles para Labels amigáveis
@@ -36,6 +39,15 @@ export default function AdminUsers() {
     const [users, setUsers] = useState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
     const { toast } = useToast();
+
+    // Roles Hook
+    const { roles } = useUserRole();
+    const isSuperAdmin = roles.includes('super_admin');
+
+    // Empresas State
+    const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+    const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
+    const [editingCompanyId, setEditingCompanyId] = useState<string>("");
 
     // Novo Usuário State
     const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -58,11 +70,28 @@ export default function AdminUsers() {
         fetchUsers();
     }, []);
 
+    useEffect(() => {
+        async function fetchCompanies() {
+            if (isSuperAdmin) {
+                const { data, error } = await supabase
+                    .from('companies')
+                    .select('id, name')
+                    .order('name');
+                if (error) {
+                    console.error("Erro ao carregar empresas:", error);
+                } else if (data) {
+                    setCompanies(data);
+                }
+            }
+        }
+        fetchCompanies();
+    }, [isSuperAdmin]);
+
     async function fetchUsers() {
         setLoading(true);
         const { data, error } = await supabase
             .from('profiles')
-            .select('*');
+            .select('*, companies(name)');
 
         if (error) {
             toast({ variant: 'destructive', title: 'Erro ao listar usuários', description: error.message });
@@ -89,8 +118,28 @@ export default function AdminUsers() {
         if (newUserRoles.length === 0) {
             return toast({ variant: 'destructive', title: 'Selecione pelo menos uma função' });
         }
+        if (isSuperAdmin && !selectedCompanyId) {
+            return toast({ variant: 'destructive', title: 'Por favor, selecione uma empresa.' });
+        }
         setIsCreating(true);
         try {
+            let userCompanyId = "";
+            if (isSuperAdmin) {
+                userCompanyId = selectedCompanyId;
+            } else {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session?.user) {
+                    const { data: currentProfile } = await supabase
+                        .from('profiles')
+                        .select('company_id')
+                        .eq('id', session.user.id)
+                        .single();
+                    if (currentProfile?.company_id) {
+                        userCompanyId = currentProfile.company_id;
+                    }
+                }
+            }
+
             const supabaseAdmin = createClient(
                 import.meta.env.VITE_SUPABASE_URL,
                 import.meta.env.VITE_SUPABASE_ANON_KEY,
@@ -109,6 +158,7 @@ export default function AdminUsers() {
                 options: {
                     data: {
                         full_name: newUserName,
+                        company_id: userCompanyId
                     }
                 }
             });
@@ -124,7 +174,8 @@ export default function AdminUsers() {
                         role: newUserRoles[0], // Compatibilidade
                         status: 'active',
                         full_name: newUserName,
-                        email: newUserEmail // Garantir email no perfil se a coluna existir
+                        email: newUserEmail, // Garantir email no perfil se a coluna existir
+                        company_id: userCompanyId
                     }])
                     .select();
 
@@ -136,7 +187,8 @@ export default function AdminUsers() {
             setNewUserEmail("");
             setNewUserPass("");
             setNewUserName("");
-            setNewUserRoles(["sales"]);
+            setNewUserRoles(["seller"]);
+            setSelectedCompanyId("");
             fetchUsers();
 
         } catch (error: any) {
@@ -152,6 +204,7 @@ export default function AdminUsers() {
         setEditingName(user.full_name || "");
         setEditingEmail(user.email || "");
         setEditingPassword("");
+        setEditingCompanyId(user.company_id || "");
         setIsEditRoleOpen(true);
     }
 
@@ -159,12 +212,16 @@ export default function AdminUsers() {
         if (!editingUser) return;
         setIsSaving(true);
         try {
-            // 1. Atualizar Roles e Nome no Perfil
+            // 1. Atualizar Roles, Nome e Empresa no Perfil
             const updates: any = {
                 roles: editingRoles,
                 role: editingRoles.length > 0 ? editingRoles[0] : null, // legacy compat
                 full_name: editingName
             };
+
+            if (isSuperAdmin) {
+                updates.company_id = editingCompanyId || null;
+            }
 
             const { error } = await supabase
                 .from('profiles')
@@ -251,6 +308,7 @@ export default function AdminUsers() {
                                 <TableHead>Nome</TableHead>
                                 <TableHead>Email</TableHead>
                                 <TableHead>ID (Ref)</TableHead>
+                                <TableHead>Empresa</TableHead>
                                 <TableHead>Funções (Roles)</TableHead>
                                 <TableHead>Status</TableHead>
                                 <TableHead className="text-right">Ações</TableHead>
@@ -258,7 +316,7 @@ export default function AdminUsers() {
                         </TableHeader>
                         <TableBody>
                             {loading ? (
-                                <TableRow><TableCell colSpan={6} className="text-center"><Loader2 className="animate-spin mx-auto" /></TableCell></TableRow>
+                                <TableRow><TableCell colSpan={7} className="text-center"><Loader2 className="animate-spin mx-auto" /></TableCell></TableRow>
                             ) : users.map(u => (
                                 <TableRow key={u.id}>
                                     <TableCell className="font-medium">
@@ -268,6 +326,7 @@ export default function AdminUsers() {
                                     </TableCell>
                                     <TableCell>{u.email || '-'}</TableCell>
                                     <TableCell className="font-mono text-xs text-muted-foreground">{u.id.substring(0, 8)}...</TableCell>
+                                    <TableCell>{u.companies?.name || 'Sem Empresa'}</TableCell>
                                     <TableCell>
                                         <div className="flex flex-wrap gap-1">
                                             {(u.roles || [])
@@ -311,6 +370,7 @@ export default function AdminUsers() {
                                     <div className="font-bold text-zinc-900">{u.full_name || 'Sem nome'}</div>
                                     <div className="text-xs text-zinc-500">{u.email || '-'}</div>
                                     <div className="text-[10px] text-zinc-400 font-mono mt-0.5">{u.id.substring(0, 8)}</div>
+                                    <div className="text-xs text-zinc-600 font-medium mt-1">Empresa: {u.companies?.name || 'Sem Empresa'}</div>
                                 </div>
                                 <div className="flex gap-1">
                                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditRoles(u)}>
@@ -359,6 +419,24 @@ export default function AdminUsers() {
                             <Label>Senha</Label>
                             <Input value={newUserPass} onChange={e => setNewUserPass(e.target.value)} type="password" />
                         </div>
+                        {isSuperAdmin && (
+                            <div className="grid gap-2">
+                                <Label htmlFor="new-company-select">Empresa</Label>
+                                <select
+                                    id="new-company-select"
+                                    value={selectedCompanyId}
+                                    onChange={e => setSelectedCompanyId(e.target.value)}
+                                    className="flex h-10 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:text-white"
+                                >
+                                    <option value="">Selecione uma empresa...</option>
+                                    {companies.map(c => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
                         <div className="grid gap-2">
                             <Label>Funções</Label>
                             <div className="flex flex-col gap-2 border p-3 rounded-md">
@@ -406,10 +484,24 @@ export default function AdminUsers() {
                             <Input value={editingEmail} onChange={e => setEditingEmail(e.target.value)} />
                         </div>
 
-                        <div className="grid gap-2">
-                            <Label>Email (Login)</Label>
-                            <Input value={editingEmail} onChange={e => setEditingEmail(e.target.value)} />
-                        </div>
+                        {isSuperAdmin && (
+                            <div className="grid gap-2">
+                                <Label htmlFor="edit-company-select">Empresa</Label>
+                                <select
+                                    id="edit-company-select"
+                                    value={editingCompanyId}
+                                    onChange={e => setEditingCompanyId(e.target.value)}
+                                    className="flex h-10 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:text-white"
+                                >
+                                    <option value="">Sem Empresa</option>
+                                    {companies.map(c => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
 
                         <div className="grid gap-2">
                             <Label>Alterar Senha (Opcional)</Label>
