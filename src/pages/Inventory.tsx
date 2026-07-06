@@ -178,91 +178,96 @@ export default function Inventory() {
 
     const [stockLocations, setStockLocations] = useState<{ id: string, name: string, slug: string }[]>([]);
 
-    async function fetchIngredients() {
+     async function fetchIngredients() {
         setLoading(true);
+        try {
+            // Fetch Locations
+            const { data: locData } = await supabase.from('stock_locations').select('id, name, slug').order('created_at');
+            if (locData) setStockLocations(locData);
 
-        // Fetch Locations
-        const { data: locData } = await supabase.from('stock_locations').select('id, name, slug').order('created_at');
-        if (locData) setStockLocations(locData);
+            const { data: ingData, error: ingError } = await supabase
+                .from('ingredients')
+                .select(`
+                    *,
+                    type,
+                    product_stocks (
+                        quantity,
+                        average_cost,
+                        location:stock_locations (id, name, slug)
+                    )
+                `)
+                .eq('is_active', true)
+                .neq('type', 'expense')
+                .order('name');
 
-        const { data: ingData, error: ingError } = await supabase
-            .from('ingredients')
-            .select(`
-                *,
-                type,
-                product_stocks (
-                    quantity,
-                    average_cost,
-                    location:stock_locations (id, name, slug)
-                )
-            `)
-            .eq('is_active', true)
-            .neq('type', 'expense')
-            .order('name');
+            const { data: prodData, error: prodError } = await supabase
+                .from('products')
+                .select(`
+                    *,
+                    product_stocks (
+                        quantity,
+                        average_cost,
+                        location:stock_locations (id, name, slug)
+                    )
+                `)
+                .order('name');
 
-        const { data: prodData, error: prodError } = await supabase
-            .from('products')
-            .select(`
-                *,
-                product_stocks (
-                    quantity,
-                    average_cost,
-                    location:stock_locations (id, name, slug)
-                )
-            `)
-            .order('name');
+            if (ingError) {
+                console.error(ingError);
+                toast({ variant: "destructive", title: "Erro ao carregar insumos", description: ingError.message });
+            }
 
-        if (ingError) {
-            console.error(ingError);
-            toast({ variant: "destructive", title: "Erro ao carregar insumos", description: ingError.message });
-        }
+            if (prodError) {
+                console.error(prodError);
+            }
 
-        if (prodError) {
-            console.error(prodError);
-        }
+            const mapStocks = (item: any, ignoreLegacy = false) => {
+                const stocks = item.product_stocks || [];
+                const stockDanilo = stocks.find((s: any) => s.location?.slug === 'stock-danilo');
+                const stockAdriel = stocks.find((s: any) => s.location?.slug === 'stock-adriel');
 
-        const mapStocks = (item: any, ignoreLegacy = false) => {
-            const stocks = item.product_stocks || [];
-            const stockDanilo = stocks.find((s: any) => s.location?.slug === 'stock-danilo');
-            const stockAdriel = stocks.find((s: any) => s.location?.slug === 'stock-adriel');
+                const sDanilo = stockDanilo ? stockDanilo.quantity : (ignoreLegacy ? 0 : (item.stock_danilo || 0));
+                const sAdriel = stockAdriel ? stockAdriel.quantity : (ignoreLegacy ? 0 : (item.stock_adriel || 0));
 
-            const sDanilo = stockDanilo ? stockDanilo.quantity : (ignoreLegacy ? 0 : (item.stock_danilo || 0));
-            const sAdriel = stockAdriel ? stockAdriel.quantity : (ignoreLegacy ? 0 : (item.stock_adriel || 0));
-
-            return {
-                ...item,
-                type: item.type || 'stock',
-                isProduct: ignoreLegacy, // Logic inferred: ignoreLegacy is true for Products
-                stocks: stocks.map((s: any) => ({
-                    location_id: s.location?.id,
-                    location_name: s.location?.name,
-                    location_slug: s.location?.slug,
-                    quantity: Number(s.quantity || 0),
-                    average_cost: Number(s.average_cost || 0)
-                })),
-                stock_danilo: Number(sDanilo || 0),
-                stock_adriel: Number(sAdriel || 0),
-                cost_danilo: Number((stockDanilo ? stockDanilo.average_cost : (ignoreLegacy ? 0 : (item.cost_danilo || 0))) || 0),
-                cost_adriel: Number((stockAdriel ? stockAdriel.average_cost : (ignoreLegacy ? 0 : (item.cost_adriel || 0))) || 0),
+                return {
+                    ...item,
+                    type: item.type || 'stock',
+                    isProduct: ignoreLegacy, // Logic inferred: ignoreLegacy is true for Products
+                    stocks: stocks.map((s: any) => ({
+                        location_id: s.location?.id,
+                        location_name: s.location?.name,
+                        location_slug: s.location?.slug,
+                        quantity: Number(s.quantity || 0),
+                        average_cost: Number(s.average_cost || 0)
+                    })),
+                    stock_danilo: Number(sDanilo || 0),
+                    stock_adriel: Number(sAdriel || 0),
+                    cost_danilo: Number((stockDanilo ? stockDanilo.average_cost : (ignoreLegacy ? 0 : (item.cost_danilo || 0))) || 0),
+                    cost_adriel: Number((stockAdriel ? stockAdriel.average_cost : (ignoreLegacy ? 0 : (item.cost_adriel || 0))) || 0),
+                };
             };
-        };
 
-        const mappedIngredients: InventoryItem[] = (ingData || []).map(mapStocks);
+            const mappedIngredients: InventoryItem[] = (ingData || []).map(mapStocks);
 
-        const mappedProducts: InventoryItem[] = (prodData || []).map((p: any) => ({
-            ...mapStocks(p, true),
-            id: p.id,
-            name: p.name,
-            category: p.category || 'Produtos',
-            unit: p.unit || 'un',
-            min_stock: 0,
-            type: 'product',
-            isProduct: true,
-            is_product_entity: true
-        }));
+            const mappedProducts: InventoryItem[] = (prodData || []).map((p: any) => ({
+                ...mapStocks(p, true),
+                id: p.id,
+                name: p.name,
+                category: p.category || 'Produtos',
+                unit: p.unit || 'un',
+                min_stock: 0,
+                type: 'product',
+                isProduct: true,
+                is_product_entity: true
+            }));
 
-        setIngredients([...mappedIngredients, ...mappedProducts]);
-        setLoading(false);
+            setIngredients([...mappedIngredients, ...mappedProducts]);
+        } catch (error: any) {
+            console.error("Error in fetchIngredients:", error);
+            toast({ variant: "destructive", title: "Erro no estoque", description: "Ocorreu um erro ao processar os dados de estoque." });
+        } finally {
+            setLoading(false);
+        }
     }
 
     const getItemStockAtLocation = (item: any, locationIdOrSlug: string) => {
@@ -935,7 +940,6 @@ export default function Inventory() {
                                     return (
                                         <motion.tr
                                             key={item.id}
-                                            layoutId={item.id}
                                             initial={{ opacity: 0 }}
                                             animate={{ opacity: 1 }}
                                             exit={{ opacity: 0 }}
