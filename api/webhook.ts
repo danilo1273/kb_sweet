@@ -30,6 +30,14 @@ const mainKeyboard = {
   resize_keyboard: true
 };
 
+const backKeyboard = {
+  keyboard: [
+    [{ text: '⬅️ Voltar ao Menu' }]
+  ],
+  resize_keyboard: true,
+  one_time_keyboard: true
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(200).send('Webhook ativo');
@@ -196,17 +204,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).send('OK');
     }
 
-    // Check menu button clicks
+    if (text === '⬅️ Voltar ao Menu') {
+      await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+      await sendMessage(chatId, 'Voltou ao menu principal. Selecione uma opção para começar:', mainKeyboard);
+      return res.status(200).send('OK');
+    }
+
     // Check menu button clicks
     if (text === '🛒 Vendas') {
       const { error: stateErr } = await supabase.from('profiles').update({ telegram_state: { action: 'awaiting_sale_details' } }).eq('id', profile.id);
       if (stateErr) throw stateErr;
 
-      // Fetch products and their stocks
+      // Fetch products and their stocks, including category
       let productsQuery = supabase
         .from('products')
         .select(`
           name,
+          category,
           product_stocks (
             quantity,
             location:stock_locations (name)
@@ -221,45 +235,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data: products } = await productsQuery;
 
-      // Format stock list
+      // Format stock list by category, displaying ONLY items with stock > 0
       let stockList = '';
       if (products && products.length > 0) {
-        stockList = '📋 *Produtos Disponíveis em Estoque:*\n';
+        const grouped: { [key: string]: any[] } = {};
+        
         products.forEach((p: any) => {
           const stocks = p.product_stocks || [];
-          const stockDetails = stocks
-            .filter((s: any) => s.quantity > 0)
-            .map((s: any) => `${s.quantity} un no ${s.location?.name || 'Estoque'}`)
-            .join(', ');
-          
-          if (stockDetails) {
-            stockList += `• *${p.name}*: ${stockDetails}\n`;
-          } else {
-            stockList += `• *${p.name}*: _Sem estoque_\n`;
+          const activeStocks = stocks.filter((s: any) => s.quantity > 0);
+          if (activeStocks.length > 0) {
+            const category = p.category || 'Geral';
+            if (!grouped[category]) grouped[category] = [];
+            grouped[category].push({
+              name: p.name,
+              stocks: activeStocks
+            });
           }
         });
-        stockList += '\n';
+
+        const categories = Object.keys(grouped).sort();
+        if (categories.length > 0) {
+          stockList = '📋 *Produtos Disponíveis em Estoque:*\n\n';
+          categories.forEach((cat: string) => {
+            stockList += `*${cat.toUpperCase()}*\n`;
+            grouped[cat].forEach((p: any) => {
+              const stockDetails = p.stocks
+                .map((s: any) => `${s.quantity} un no ${s.location?.name || 'Estoque'}`)
+                .join(', ');
+              stockList += `• *${p.name}*: ${stockDetails}\n`;
+            });
+            stockList += '\n';
+          });
+        } else {
+          stockList = '📋 *Produtos Disponíveis em Estoque:*\n_Nenhum produto com estoque disponível no momento._\n\n';
+        }
       }
 
-      await sendMessage(chatId, `✍️ *Registrar Venda*\n\n${stockList}Por favor, digite os detalhes da venda em linguagem natural.\n\n*Exemplo:*\n_vendi 2 bolos de pote por 15 reais cada no Pix para o cliente João_`, { remove_keyboard: true });
+      await sendMessage(chatId, `✍️ *Registrar Venda*\n\n${stockList}Por favor, digite os detalhes da venda em linguagem natural.\n\n*Exemplo:*\n_vendi 2 bolos de pote por 15 reais cada no Pix para o cliente João_`, backKeyboard);
       return res.status(200).send('OK');
     }
 
     if (text === '📦 Compras') {
       await supabase.from('profiles').update({ telegram_state: { action: 'awaiting_purchase_file' } }).eq('id', profile.id);
-      await sendMessage(chatId, '📸 *Registrar Compra via Nota Fiscal*\n\nPor favor, envie a foto ou o PDF da Nota Fiscal/Cupom de compra.', { remove_keyboard: true });
+      await sendMessage(chatId, '📸 *Registrar Compra via Nota Fiscal*\n\nPor favor, envie a foto ou o PDF da Nota Fiscal/Cupom de compra.', backKeyboard);
       return res.status(200).send('OK');
     }
 
     if (text === '💸 Pagamento') {
       await supabase.from('profiles').update({ telegram_state: { action: 'awaiting_payment_details' } }).eq('id', profile.id);
-      await sendMessage(chatId, '💸 *Registrar Saída (Pagamento Avulso)*\n\nDigite a descrição e o valor do pagamento.\n\n_Exemplo:_\n`pagamento de R$ 120 da conta de água`', { remove_keyboard: true });
+      await sendMessage(chatId, '💸 *Registrar Saída (Pagamento Avulso)*\n\nDigite a descrição e o valor do pagamento.\n\n_Exemplo:_\n`pagamento de R$ 120 da conta de água`', backKeyboard);
       return res.status(200).send('OK');
     }
 
     if (text === '📈 Recebimento') {
       await supabase.from('profiles').update({ telegram_state: { action: 'awaiting_income_details' } }).eq('id', profile.id);
-      await sendMessage(chatId, '📈 *Registrar Entrada (Recebimento Avulso)*\n\nDigite a descrição e o valor do recebimento.\n\n_Exemplo:_\n`recebi 50 reais de taxa de entrega`', { remove_keyboard: true });
+      await sendMessage(chatId, '📈 *Registrar Entrada (Recebimento Avulso)*\n\nDigite a descrição e o valor do recebimento.\n\n_Exemplo:_\n`recebi 50 reais de taxa de entrega`', backKeyboard);
       return res.status(200).send('OK');
     }
 
