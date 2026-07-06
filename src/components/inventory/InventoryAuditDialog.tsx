@@ -16,6 +16,7 @@ interface InventoryAuditDialogProps {
     onSuccess: () => void;
     ingredients: Ingredient[];
     categories: Category[];
+    locations: any[];
 }
 
 interface AuditItem {
@@ -30,13 +31,13 @@ interface AuditItem {
     reason: string;
 }
 
-export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, categories }: InventoryAuditDialogProps) {
+export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, categories, locations = [] }: InventoryAuditDialogProps) {
     const { toast } = useToast();
     const [loading, setLoading] = useState(false);
     const [auditItems, setAuditItems] = useState<AuditItem[]>([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [categoryFilter, setCategoryFilter] = useState("all");
-    const [stockOwner, setStockOwner] = useState<'danilo' | 'adriel' | null>(null);
+    const [stockOwner, setStockOwner] = useState<string | null>(null);
 
     // Filter Logic
     const filteredItems = auditItems.filter(item => {
@@ -56,24 +57,34 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
         }
     }, [isOpen]);
 
-    const startAudit = (owner: 'danilo' | 'adriel') => {
-        setStockOwner(owner);
+    const startAudit = (ownerSlug: string) => {
+        setStockOwner(ownerSlug);
         // Initialize audit items based on current stock
         // Allow BOTH ingredients (type 'stock' or undefined) and products (is_product_entity=true)
         // Only exclude 'expense' type if it exists
         const validIngredients = ingredients.filter(i => i.type !== 'expense');
         const items = validIngredients.map(ing => {
-            // Determine correct cost field based on owner
-            // Assuming ingredients have cost_danilo/cost_adriel, fallback to 'cost'
-            const currentCost = owner === 'danilo'
-                ? (ing.cost_danilo !== undefined ? ing.cost_danilo : ing.cost)
-                : (ing.cost_adriel !== undefined ? ing.cost_adriel : ing.cost);
+            const stockRecord = ing.stocks?.find((s: any) => s.location_slug === ownerSlug || s.location_id === ownerSlug);
+            
+            const currentCost = stockRecord ? stockRecord.average_cost : (
+                ownerSlug.includes('danilo') ? (ing.cost_danilo !== undefined ? ing.cost_danilo : ing.cost) :
+                ownerSlug.includes('adriel') ? (ing.cost_adriel !== undefined ? ing.cost_adriel : ing.cost) :
+                ing.cost
+            );
+
+            let systemStock = 0;
+            if (stockRecord) {
+                systemStock = stockRecord.quantity;
+            } else {
+                if (ownerSlug.includes('danilo')) systemStock = ing.stock_danilo || 0;
+                else if (ownerSlug.includes('adriel')) systemStock = ing.stock_adriel || 0;
+            }
 
             return {
                 id: ing.id,
                 name: ing.name,
                 unit: ing.unit,
-                systemStock: owner === 'danilo' ? (ing.stock_danilo || 0) : (ing.stock_adriel || 0),
+                systemStock: systemStock,
                 physicalStock: "",
                 diff: 0,
                 reason: "",
@@ -166,10 +177,9 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
                     const updatePayload: any = {
                         cost: newCostVal // Always update master cost
                     };
-
                     // Update specific legacy column
-                    if (stockOwner === 'danilo') updatePayload['cost_danilo'] = newCostVal;
-                    else if (stockOwner === 'adriel') updatePayload['cost_adriel'] = newCostVal;
+                    if (stockOwner === 'danilo' || stockOwner === 'stock-danilo') updatePayload['cost_danilo'] = newCostVal;
+                    else if (stockOwner === 'adriel' || stockOwner === 'stock-adriel') updatePayload['cost_adriel'] = newCostVal;
 
                     if (isProduct) {
                         const { error } = await supabase.from('products').update(updatePayload).eq('id', item.id);
@@ -181,7 +191,7 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
 
                     // 2.1 Update location-specific average_cost in product_stocks
                     const { data: locs } = await supabase.from('stock_locations').select('id, slug');
-                    const targetLoc = locs?.find(l => l.slug === `stock-${stockOwner}`);
+                    const targetLoc = locs?.find(l => l.slug === stockOwner || l.id === stockOwner || l.slug === `stock-${stockOwner}`);
 
                     if (targetLoc) {
                         const { data: existingStock } = await supabase.from('product_stocks')
@@ -223,22 +233,41 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients, 
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="max-w-6xl h-[95vh] flex flex-col p-0 gap-0">
                 <DialogHeader className="p-6 pb-2">
-                    <DialogTitle className="text-2xl">Realizar Inventário ({stockOwner === 'danilo' ? 'Danilo' : stockOwner === 'adriel' ? 'Adriel' : '...'})</DialogTitle>
+                    <DialogTitle className="text-2xl">
+                        Realizar Inventário ({(() => {
+                            const activeLoc = locations.find(l => l.slug === stockOwner || l.id === stockOwner);
+                            return activeLoc ? activeLoc.name : stockOwner || '...';
+                        })()})
+                    </DialogTitle>
                 </DialogHeader>
 
                 <div className="flex-1 overflow-hidden flex flex-col p-6 pt-2 gap-4">
                     {!stockOwner ? (
                         <div className="flex flex-col items-center justify-center h-full gap-8">
                             <h3 className="text-lg font-medium text-zinc-600">Selecione o estoque para auditar:</h3>
-                            <div className="flex gap-4">
-                                <Button size="lg" className="w-40 h-32 flex flex-col gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200" variant="outline" onClick={() => startAudit('danilo')}>
-                                    <span className="text-3xl font-bold">DANILO</span>
-                                    <span className="text-sm font-normal opacity-80">Estoque Pessoal</span>
-                                </Button>
-                                <Button size="lg" className="w-40 h-32 flex flex-col gap-2 bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200" variant="outline" onClick={() => startAudit('adriel')}>
-                                    <span className="text-3xl font-bold">ADRIEL</span>
-                                    <span className="text-sm font-normal opacity-80">Estoque Pessoal</span>
-                                </Button>
+                            <div className="flex flex-wrap gap-4 justify-center">
+                                {locations.map((loc: any) => {
+                                    const isDanilo = loc.slug?.includes('danilo');
+                                    const isAdriel = loc.slug?.includes('adriel');
+                                    const colorClass = isDanilo 
+                                        ? "bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200" 
+                                        : isAdriel 
+                                            ? "bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200"
+                                            : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200";
+
+                                    return (
+                                        <Button 
+                                            key={loc.id}
+                                            size="lg" 
+                                            className={cn("w-44 h-32 flex flex-col gap-2 shadow-sm border", colorClass)} 
+                                            variant="outline" 
+                                            onClick={() => startAudit(loc.slug)}
+                                        >
+                                            <span className="text-lg font-bold uppercase truncate max-w-full px-1">{loc.name}</span>
+                                            <span className="text-xs font-normal opacity-80">Estoque Geral</span>
+                                        </Button>
+                                    );
+                                })}
                             </div>
                         </div>
                     ) : (

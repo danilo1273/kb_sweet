@@ -671,6 +671,7 @@ export default function Inventory() {
                 onSuccess={() => { fetchIngredients(); }}
                 ingredients={ingredients}
                 categories={availableCategories}
+                locations={stockLocations}
             />
 
             <div className="flex flex-col gap-4 mb-4 bg-white p-3 rounded-lg border shadow-sm">

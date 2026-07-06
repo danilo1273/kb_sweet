@@ -54,13 +54,20 @@ async function generateContentWithRetry(ai: any, options: any, maxAttempts = 2, 
   throw lastError;
 }
 
-const mainKeyboard = {
-  keyboard: [
+function getMainKeyboard(profile?: any) {
+  const isAdmin = profile && (profile.role === 'admin' || (profile.roles && profile.roles.includes('admin')));
+  const keyboard = [
     [{ text: '🛒 Vendas' }, { text: '📦 Compras' }],
     [{ text: '💸 Pagamento' }, { text: '📈 Recebimento' }]
-  ],
-  resize_keyboard: true
-};
+  ];
+  if (isAdmin) {
+    keyboard.push([{ text: '🔧 Ajustar Estoque' }]);
+  }
+  return {
+    keyboard,
+    resize_keyboard: true
+  };
+}
 
 const backKeyboard = {
   keyboard: [
@@ -222,7 +229,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           throw new Error('Nenhum perfil atualizado. Verifique as permissões de RLS ou a chave SUPABASE_SERVICE_ROLE_KEY.');
         }
 
-        await sendMessage(chatId, `🎉 *Conta vinculada com sucesso!*\n\nOlá, *${targetProfile.full_name || 'Usuário'}*! Agora você pode usar os botões abaixo para gerenciar o sistema pelo Telegram.`, mainKeyboard);
+        await sendMessage(chatId, `🎉 *Conta vinculada com sucesso!*\n\nOlá, *${targetProfile.full_name || 'Usuário'}*! Agora você pode usar os botões abaixo para gerenciar o sistema pelo Telegram.`, getMainKeyboard(targetProfile));
         return res.status(200).send('OK');
       }
 
@@ -234,13 +241,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 3. User is authenticated. Handle system commands / buttons.
     if (text === '/start' || text === '/menu') {
       await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
-      await sendMessage(chatId, 'Selecione uma opção no menu abaixo para começar:', mainKeyboard);
+      await sendMessage(chatId, 'Selecione uma opção no menu abaixo para começar:', getMainKeyboard(profile));
       return res.status(200).send('OK');
     }
 
     if (text === '⬅️ Voltar ao Menu') {
       await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
-      await sendMessage(chatId, 'Voltou ao menu principal. Selecione uma opção para começar:', mainKeyboard);
+      await sendMessage(chatId, 'Voltou ao menu principal. Selecione uma opção para começar:', getMainKeyboard(profile));
       return res.status(200).send('OK');
     }
 
@@ -327,12 +334,153 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).send('OK');
     }
 
+    const isAdmin = profile && (profile.role === 'admin' || (profile.roles && profile.roles.includes('admin')));
+
+    if (text === '🔧 Ajustar Estoque' && isAdmin) {
+      const { error: stateErr } = await supabase.from('profiles').update({ telegram_state: { action: 'awaiting_stock_adjustment' } }).eq('id', profile.id);
+      if (stateErr) throw stateErr;
+
+      await sendMessage(chatId, '🔧 *Ajustar Estoque (Admin)*\n\nPor favor, digite o item, a quantidade e o armazém que deseja ajustar.\n\n*Exemplos:*\n• _adicionei 10 trufas de maracujá no estoque danilo_\n• _ajustar bolo de pote para 5 unidades no armazem 3_\n• _subir saldo de laco maxi m rosa em 20 unidades no estoque adriel_', backKeyboard);
+      return res.status(200).send('OK');
+    }
+
     // Process input based on state
     const state = profile.telegram_state as any;
     const action = state?.action;
 
     if (!action) {
-      await sendMessage(chatId, 'Por favor, escolha uma das opções do menu:', mainKeyboard);
+      await sendMessage(chatId, 'Por favor, escolha uma das opções do menu:', getMainKeyboard(profile));
+      return res.status(200).send('OK');
+    }
+
+    // Awaiting Stock Adjustment Flow
+    if (action === 'awaiting_stock_adjustment') {
+      if (!text) {
+        await sendMessage(chatId, 'Por favor, envie os detalhes em formato texto.');
+        return res.status(200).send('OK');
+      }
+
+      await sendMessage(chatId, '⏳ *Processando ajuste de estoque com inteligência artificial...*');
+
+      // Fetch products, ingredients, locations
+      let productsQuery = supabase.from('products').select(`
+        id, name, cost,
+        product_stocks (quantity, location_id)
+      `);
+      let ingredientsQuery = supabase.from('ingredients').select(`
+        id, name, cost,
+        product_stocks (quantity, location_id)
+      `);
+      let locationsQuery = supabase.from('stock_locations').select('id, name, slug');
+
+      if (profile.company_id) {
+        productsQuery = productsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+        ingredientsQuery = ingredientsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+        locationsQuery = locationsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+      } else {
+        productsQuery = productsQuery.is('company_id', null);
+        ingredientsQuery = ingredientsQuery.is('company_id', null);
+        locationsQuery = locationsQuery.is('company_id', null);
+      }
+
+      const [productsRes, ingredientsRes, locationsRes] = await Promise.all([
+        productsQuery,
+        ingredientsQuery,
+        locationsQuery
+      ]);
+
+      const products = productsRes.data || [];
+      const ingredients = ingredientsRes.data || [];
+      const locations = locationsRes.data || [];
+
+      const items = [
+        ...products.map(p => ({ ...p, is_product: true })),
+        ...ingredients.map(i => ({ ...i, is_product: false }))
+      ];
+
+      const prompt = `Você é o assistente inteligente do KB Sweet. Analise a mensagem de ajuste de estoque enviada pelo usuário (um administrador) e mapeie o item correto, o local de estoque (armazém) correto, a operação (definir valor exato "set", adicionar quantidade "add" ou subtrair quantidade "subtract") e a quantidade.
+
+Mensagem do usuário: "${text}"
+
+Produtos e Ingredientes disponíveis:
+${JSON.stringify(items.map(i => ({ id: i.id, name: i.name, is_product: i.is_product })))}
+
+Locais de estoque (Armazéns) disponíveis:
+${JSON.stringify(locations || [])}
+
+Retorne um JSON seguindo exatamente este formato:
+{
+  "item_id": "uuid-do-item-encontrado",
+  "is_product": true,
+  "location_id": "uuid-do-local-de-estoque-se-identificado-ou-null",
+  "operation": "set" | "add" | "subtract",
+  "amount": 10.0,
+  "reason": "motivo-curto-do-ajuste"
+}`;
+
+      const aiResponse = await generateContentWithRetry(ai, {
+        model: 'gemini-2.5-flash',
+        contents: [prompt],
+        config: { responseMimeType: 'application/json' }
+      });
+
+      const parsed = JSON.parse(aiResponse.text || '{}');
+
+      if (!parsed.item_id || parsed.amount === undefined) {
+        await sendMessage(chatId, '❌ Não consegui identificar o item ou a quantidade do ajuste na mensagem. Por favor, tente descrever de forma mais clara (ex: "adicionei 10 trufas de maracujá no estoque danilo").', getMainKeyboard(profile));
+        await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+        return res.status(200).send('OK');
+      }
+
+      const matchedItem = items.find(i => i.id === parsed.item_id);
+      if (!matchedItem) {
+        await sendMessage(chatId, '❌ Item não encontrado no banco de dados.', getMainKeyboard(profile));
+        await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+        return res.status(200).send('OK');
+      }
+
+      const locationId = parsed.location_id || locations?.[0]?.id;
+      const matchedLocation = locations?.find(l => l.id === locationId);
+      
+      if (!matchedLocation) {
+        await sendMessage(chatId, '❌ Local de estoque (armazém) não encontrado.', getMainKeyboard(profile));
+        await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+        return res.status(200).send('OK');
+      }
+
+      // Calculate current stock
+      const stockRecord = matchedItem.product_stocks?.find((s: any) => s.location_id === locationId);
+      const currentQty = stockRecord ? Number(stockRecord.quantity) : 0;
+
+      let newQty = currentQty;
+      if (parsed.operation === 'set') {
+        newQty = Number(parsed.amount);
+      } else if (parsed.operation === 'add') {
+        newQty = currentQty + Number(parsed.amount);
+      } else if (parsed.operation === 'subtract') {
+        newQty = currentQty - Number(parsed.amount);
+      }
+
+      // Apply adjustment via Supabase RPC
+      const rpcName = matchedItem.is_product ? 'apply_product_stock_adjustment' : 'apply_stock_adjustment';
+      const rpcParams: any = {
+        p_new_stock: newQty,
+        p_stock_owner: matchedLocation.slug,
+        p_reason: parsed.reason || 'Ajuste Telegram',
+        p_type: newQty >= currentQty ? 'found' : 'loss'
+      };
+
+      if (matchedItem.is_product) {
+        rpcParams.p_product_id = matchedItem.id;
+      } else {
+        rpcParams.p_ingredient_id = matchedItem.id;
+      }
+
+      const { error: rpcErr } = await supabase.rpc(rpcName, rpcParams);
+      if (rpcErr) throw rpcErr;
+
+      await sendMessage(chatId, `✅ *Ajuste de estoque concluído com sucesso!*\n\n*Item:* ${matchedItem.name}\n*Armazém:* ${matchedLocation.name}\n*Estoque anterior:* ${currentQty} un\n*Novo estoque:* ${newQty} un\n*Lançamento de ajuste gerado.*`, getMainKeyboard(profile));
+      await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
       return res.status(200).send('OK');
     }
 
@@ -401,7 +549,7 @@ Retorne um JSON seguindo exatamente este formato:
       const parsed = JSON.parse(aiResponse.text || '{}');
 
       if (!parsed.items || parsed.items.length === 0) {
-        await sendMessage(chatId, '❌ Não consegui identificar nenhum produto na mensagem. Por favor, tente descrever novamente de forma mais clara.', mainKeyboard);
+        await sendMessage(chatId, '❌ Não consegui identificar nenhum produto na mensagem. Por favor, tente descrever novamente de forma mais clara.', getMainKeyboard(profile));
         await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
         return res.status(200).send('OK');
       }
@@ -440,7 +588,7 @@ Retorne um JSON seguindo exatamente este formato:
         return `• ${item.quantity}x ${name} (R$ ${item.unit_price.toFixed(2)})`;
       }).join('\n');
 
-      await sendMessage(chatId, `✅ *Venda registrada com sucesso!*\n\n*Cliente:* ${clientName}\n*Itens:*\n${summaryItems}\n*Total:* R$ ${total.toFixed(2)}\n*Pagamento:* ${parsed.payment_method?.toUpperCase()}\n\nEstoque atualizado e lançamento financeiro gerado.`, mainKeyboard);
+      await sendMessage(chatId, `✅ *Venda registrada com sucesso!*\n\n*Cliente:* ${clientName}\n*Itens:*\n${summaryItems}\n*Total:* R$ ${total.toFixed(2)}\n*Pagamento:* ${parsed.payment_method?.toUpperCase()}\n\nEstoque atualizado e lançamento financeiro gerado.`, getMainKeyboard(profile));
       await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
       return res.status(200).send('OK');
     }
@@ -475,7 +623,7 @@ Retorne um JSON seguindo exatamente este formato:
       const parsed = JSON.parse(aiResponse.text || '{}');
 
       if (!parsed.amount || !parsed.description) {
-        await sendMessage(chatId, '❌ Não consegui extrair o valor ou a descrição. Digite novamente de forma simples (ex: R$ 50 taxa de entrega).', mainKeyboard);
+        await sendMessage(chatId, '❌ Não consegui extrair o valor ou a descrição. Digite novamente de forma simples (ex: R$ 50 taxa de entrega).', getMainKeyboard(profile));
         await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
         return res.status(200).send('OK');
       }
@@ -493,7 +641,7 @@ Retorne um JSON seguindo exatamente este formato:
 
       if (financialErr) throw financialErr;
 
-      await sendMessage(chatId, `✅ *Movimentação financeira lançada com sucesso!*\n\n*Tipo:* ${isPayment ? '🔴 Saída/Despesa' : '🟢 Entrada/Receita'}\n*Descrição:* ${parsed.description}\n*Valor:* R$ ${parsed.amount.toFixed(2)}`, mainKeyboard);
+      await sendMessage(chatId, `✅ *Movimentação financeira lançada com sucesso!*\n\n*Tipo:* ${isPayment ? '🔴 Saída/Despesa' : '🟢 Entrada/Receita'}\n*Descrição:* ${parsed.description}\n*Valor:* R$ ${parsed.amount.toFixed(2)}`, getMainKeyboard(profile));
       await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
       return res.status(200).send('OK');
     }
@@ -504,7 +652,7 @@ Retorne um JSON seguindo exatamente este formato:
       const document = message.document;
 
       if (!photo && !document) {
-        await sendMessage(chatId, '❌ Por favor, envie uma Foto ou um PDF do cupom fiscal / nota de compra.', mainKeyboard);
+        await sendMessage(chatId, '❌ Por favor, envie uma Foto ou um PDF do cupom fiscal / nota de compra.', getMainKeyboard(profile));
         await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
         return res.status(200).send('OK');
       }
@@ -519,7 +667,7 @@ Retorne um JSON seguindo exatamente este formato:
         fileId = photo[photo.length - 1].file_id;
       } else if (document) {
         if (document.file_size && document.file_size > 10 * 1024 * 1024) {
-          await sendMessage(chatId, '⚠️ *O arquivo enviado é muito grande (maior que 10MB).* Por favor, envie uma foto ou um arquivo PDF menor para garantir o processamento.', mainKeyboard);
+          await sendMessage(chatId, '⚠️ *O arquivo enviado é muito grande (maior que 10MB).* Por favor, envie uma foto ou um arquivo PDF menor para garantir o processamento.', getMainKeyboard(profile));
           await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
           return res.status(200).send('OK');
         }
@@ -605,7 +753,7 @@ Retorne um JSON seguindo exatamente este formato:
       const parsed = JSON.parse(aiResponse.text || '{}');
 
       if (!parsed.items || parsed.items.length === 0) {
-        await sendMessage(chatId, '❌ Não consegui extrair os itens desta nota fiscal. Por favor, tente enviar outra foto mais nítida.', mainKeyboard);
+        await sendMessage(chatId, '❌ Não consegui extrair os itens desta nota fiscal. Por favor, tente enviar outra foto mais nítida.', getMainKeyboard(profile));
         await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
         return res.status(200).send('OK');
       }
@@ -728,7 +876,7 @@ Retorne um JSON seguindo exatamente este formato:
     console.error('Webhook Error:', error);
     const chatId = req.body?.message?.chat?.id || req.body?.callback_query?.message?.chat?.id;
     if (chatId) {
-      await sendMessage(chatId, `❌ *Erro ao processar requisição:*\n_${error.message || error}_`, mainKeyboard);
+      await sendMessage(chatId, `❌ *Erro ao processar requisição:*\n_${error.message || error}_`, getMainKeyboard(profile));
     }
   }
 
