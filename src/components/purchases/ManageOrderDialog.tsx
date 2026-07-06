@@ -11,7 +11,6 @@ import { usePurchases } from "@/hooks/usePurchases";
 import { useToast } from "@/components/ui/use-toast";
 import { ItemDraft } from "@/types";
 import { StockConsultationDialog } from "@/components/pos/StockConsultationDialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface ManageOrderDialogProps {
     isOpen: boolean;
@@ -165,7 +164,7 @@ export function ManageOrderDialog({
                 </DialogHeader>
 
                 {order && (
-                    <ScrollArea className="flex-1 pr-4">
+                    <div className="flex-1 overflow-y-auto min-h-0 pr-2">
                         <div className="py-4 space-y-6">
                             {isReadOnly ? (
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border-b pb-4 bg-slate-50 p-3 rounded-lg">
@@ -473,7 +472,7 @@ export function ManageOrderDialog({
                                 </div>
                             )}
                         </div>
-                    </ScrollArea>
+                    </div>
                 )}
 
                 <DialogFooter className="sm:justify-between gap-2 flex-wrap border-t p-4">
