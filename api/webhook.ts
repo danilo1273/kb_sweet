@@ -69,6 +69,18 @@ function getMainKeyboard(profile?: any) {
   };
 }
 
+async function logStep(supabase: any, step: string, details?: any) {
+  try {
+    await supabase.from('audit_logs').insert({
+      table_name: 'telegram_debug',
+      action: step,
+      new_data: details || {}
+    });
+  } catch (err) {
+    console.error('Failed to log step:', err);
+  }
+}
+
 const backKeyboard = {
   keyboard: [
     [{ text: '⬅️ Voltar ao Menu' }]
@@ -361,6 +373,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       await sendMessage(chatId, '⏳ *Processando ajuste de estoque com inteligência artificial...*');
+      await logStep(supabase, 'start_adjustment', { text, profile_id: profile.id });
 
       // Fetch products, ingredients, locations
       let productsQuery = supabase.from('products').select(`
@@ -388,6 +401,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ingredientsQuery,
         locationsQuery
       ]);
+
+      await logStep(supabase, 'queries_fetched', { 
+        products_count: productsRes.data?.length || 0,
+        ingredients_count: ingredientsRes.data?.length || 0,
+        locations_count: locationsRes.data?.length || 0,
+        errors: { products: productsRes.error, ingredients: ingredientsRes.error, locations: locationsRes.error }
+      });
 
       const products = productsRes.data || [];
       const ingredients = ingredientsRes.data || [];
@@ -426,11 +446,15 @@ Retorne um JSON seguindo exatamente este formato:
   "reason": "motivo-curto-do-ajuste"
 }`;
 
+      await logStep(supabase, 'before_gemini_call', { has_prompt: !!prompt });
+
       const aiResponse = await generateContentWithRetry(ai, {
         model: 'gemini-2.5-flash',
         contents: [prompt],
         config: { responseMimeType: 'application/json' }
       });
+
+      await logStep(supabase, 'after_gemini_call', { response_text: aiResponse.text });
 
       const parsed = JSON.parse(aiResponse.text || '{}');
 
