@@ -94,6 +94,82 @@ async function generateContentWithRetry(prompt: string, fileData?: { mimeType: s
   throw lastError;
 }
 
+// ─── Local fallback parser (no AI needed) ──────────────────────────────────
+// Parses stock adjustment messages like:
+//   "subir 2 unidades pipoca mista estoque danilo custo 3,35"
+//   "ajustar bolo de pote para 5 unidades no armazem adriel"
+//   "adicionei 10 trufas de maracujá no estoque danilo"
+function parseStockAdjustmentLocally(
+  text: string,
+  items: Array<{ id: string; name: string; is_product: boolean }>,
+  locations: Array<{ id: string; name: string; slug: string }>
+): { item_id: string | null; is_product: boolean; location_id: string | null; operation: string; amount: number; cost: number | null; reason: string } {
+  const t = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  // Detect operation
+  let operation = 'add';
+  if (/\b(definir|ajustar para|setar|set|para\s+\d)\b/.test(t)) operation = 'set';
+  else if (/\b(remover|retirar|subtrair|baixar|saida|vendi|venda|perdi|consumo|consumido|usei)\b/.test(t)) operation = 'subtract';
+
+  // Extract quantity
+  const qtyMatch = t.match(/(\d+[.,]?\d*)\s*(unidades?|un\b|pcs?|kg|g\b)/);
+  const amount = qtyMatch ? parseFloat(qtyMatch[1].replace(',', '.')) : (() => {
+    const numMatch = t.match(/\b(\d+[.,]?\d*)\b/);
+    return numMatch ? parseFloat(numMatch[1].replace(',', '.')) : 0;
+  })();
+
+  // Extract cost
+  let cost: number | null = null;
+  const costMatch = t.match(/(?:custo|valor\s*de\s*custo|preco\s*de\s*custo)\s*[:\s]?\s*R?\$?\s*(\d+[.,]\d+|\d+)/i);
+  if (costMatch) cost = parseFloat(costMatch[1].replace(',', '.'));
+
+  // Find location by slug/name keywords
+  let location_id: string | null = null;
+  for (const loc of locations) {
+    const locSlug = loc.slug?.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') || '';
+    const locName = loc.name?.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') || '';
+    if (t.includes(locSlug) || t.includes(locName)) {
+      location_id = loc.id;
+      break;
+    }
+    // Try first word of name
+    const firstWord = locName.split(/\s/)[0];
+    if (firstWord && firstWord.length > 2 && t.includes(firstWord)) {
+      location_id = loc.id;
+      break;
+    }
+  }
+
+  // Score items by keyword overlap (skip stop words and number-like tokens)
+  const stopWords = new Set(['unidades', 'unidade', 'un', 'custo', 'cada', 'ajustar', 'estoque', 'armazem', 'subir', 'baixar', 'adicionar', 'remover', 'adicionei', 'de', 'para', 'com', 'no', 'na', 'um', 'uma']);
+  const textTokens = t.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length >= 3 && !stopWords.has(w) && isNaN(Number(w)));
+
+  let bestItem: { id: string; is_product: boolean } | null = null;
+  let bestScore = 0;
+
+  for (const item of items) {
+    const nameLower = item.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    let score = 0;
+    for (const token of textTokens) {
+      if (nameLower.includes(token)) score += token.length; // weight by length for specificity
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestItem = { id: item.id, is_product: item.is_product };
+    }
+  }
+
+  return {
+    item_id: bestItem?.id || null,
+    is_product: bestItem?.is_product ?? true,
+    location_id,
+    operation,
+    amount,
+    cost,
+    reason: 'Ajuste via Telegram (parser local)'
+  };
+}
+
 function getMainKeyboard(profile?: any) {
   const isAdmin = profile && (profile.role === 'admin' || (profile.roles && profile.roles.includes('admin')));
   const keyboard = [
@@ -522,11 +598,34 @@ Retorne um JSON seguindo exatamente este formato:
 
       await logStep(supabase, 'before_gemini_call', { has_prompt: !!prompt });
 
-      const aiResponse = await generateContentWithRetry(prompt);
+      let parsed: any = {};
+      let usedLocalParser = false;
 
-      await logStep(supabase, 'after_gemini_call', { response_text: aiResponse.text });
+      try {
+        const aiResponse = await generateContentWithRetry(prompt);
+        await logStep(supabase, 'after_gemini_call', { response_text: aiResponse.text });
 
-      const parsed = JSON.parse(aiResponse.text || '{}');
+        // Strip markdown code fences if present
+        const rawText = (aiResponse.text || '').replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+        parsed = JSON.parse(rawText || '{}');
+      } catch (aiErr: any) {
+        const isQuotaErr = aiErr?.message?.includes('429') || aiErr?.message?.includes('quota') || aiErr?.message?.includes('RESOURCE_EXHAUSTED');
+        console.warn('Gemini failed, falling back to local parser:', aiErr?.message);
+        await logStep(supabase, 'gemini_fallback', { error: aiErr?.message, is_quota: isQuotaErr });
+
+        // Use local parser as fallback
+        parsed = parseStockAdjustmentLocally(text, items, locations);
+        usedLocalParser = true;
+
+        if (!parsed.item_id || !parsed.amount) {
+          const errMsg = isQuotaErr
+            ? '⚠️ *Cota da IA esgotada.* Tente com um formato mais direto:\n`subir 2 unidades [nome do produto] estoque [danilo/adriel]`'
+            : '❌ Não consegui identificar o item. Tente: `subir 2 unidades [nome] estoque [local]`';
+          await sendMessage(chatId, errMsg, getMainKeyboard(profile));
+          await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+          return res.status(200).send('OK');
+        }
+      }
 
       if (!parsed.item_id || parsed.amount === undefined) {
         await sendMessage(chatId, '❌ Não consegui identificar o item ou a quantidade do ajuste na mensagem. Por favor, tente descrever de forma mais clara (ex: "adicionei 10 trufas de maracujá no estoque danilo").', getMainKeyboard(profile));
@@ -627,8 +726,10 @@ Retorne um JSON seguindo exatamente este formato:
         costFeedback = `\n*Custo unitário atualizado:* R$ ${newCostVal.toFixed(2)}`;
       }
 
-      await sendMessage(chatId, `✅ *Ajuste de estoque concluído com sucesso!*\n\n*Item:* ${matchedItem.name}\n*Armazém:* ${matchedLocation.name}\n*Estoque anterior:* ${currentQty} un\n*Novo estoque:* ${newQty} un${costFeedback}\n*Lançamento de ajuste gerado.*`, getMainKeyboard(profile));
+      const localParserNote = usedLocalParser ? '\n⚠️ _IA indisponível — ajuste processado pelo modo local._' : '';
+      await sendMessage(chatId, `✅ *Ajuste de estoque concluído com sucesso!*\n\n*Item:* ${matchedItem.name}\n*Armazém:* ${matchedLocation.name}\n*Estoque anterior:* ${currentQty} un\n*Novo estoque:* ${newQty} un${costFeedback}\n*Lançamento de ajuste gerado.*${localParserNote}`, getMainKeyboard(profile));
       await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+
       return res.status(200).send('OK');
     }
 
