@@ -408,13 +408,21 @@ ${JSON.stringify(items.map(i => ({ id: i.id, name: i.name, is_product: i.is_prod
 Locais de estoque (Armazéns) disponíveis:
 ${JSON.stringify(locations || [])}
 
+Instruções importantes de correspondência:
+1. Faça correspondência semântica/aproximada. Por exemplo:
+   - "pipoca mista" ou "pipoca meio a meio" deve corresponder a "Pipoca Gourmet 150g Meio a Meio".
+   - "pipoca cacau" deve corresponder a "Pipoca Gourmet Cacau 450g".
+   - Abreviações ou sinônimos devem ser resolvidos para os itens cadastrados acima.
+2. Identifique se o usuário especificou um custo unitário (ex: "custo 3,35" ou "valor de custo 3.35"). Se sim, extraia o número em "cost", caso contrário retorne null.
+
 Retorne um JSON seguindo exatamente este formato:
 {
-  "item_id": "uuid-do-item-encontrado",
+  "item_id": "uuid-do-item-encontrado-ou-null",
   "is_product": true,
   "location_id": "uuid-do-local-de-estoque-se-identificado-ou-null",
   "operation": "set" | "add" | "subtract",
   "amount": 10.0,
+  "cost": 3.35,
   "reason": "motivo-curto-do-ajuste"
 }`;
 
@@ -479,7 +487,53 @@ Retorne um JSON seguindo exatamente este formato:
       const { error: rpcErr } = await supabase.rpc(rpcName, rpcParams);
       if (rpcErr) throw rpcErr;
 
-      await sendMessage(chatId, `✅ *Ajuste de estoque concluído com sucesso!*\n\n*Item:* ${matchedItem.name}\n*Armazém:* ${matchedLocation.name}\n*Estoque anterior:* ${currentQty} un\n*Novo estoque:* ${newQty} un\n*Lançamento de ajuste gerado.*`, getMainKeyboard(profile));
+      // Handle cost update if specified
+      let costFeedback = '';
+      if (parsed.cost !== undefined && parsed.cost !== null) {
+        const newCostVal = Number(parsed.cost);
+        const updatePayload: any = {
+          cost: newCostVal
+        };
+
+        if (matchedLocation.slug === 'stock-danilo' || matchedLocation.slug === 'danilo') {
+          updatePayload['cost_danilo'] = newCostVal;
+        } else if (matchedLocation.slug === 'stock-adriel' || matchedLocation.slug === 'adriel') {
+          updatePayload['cost_adriel'] = newCostVal;
+        }
+
+        const table = matchedItem.is_product ? 'products' : 'ingredients';
+        const { error: costErr } = await supabase.from(table).update(updatePayload).eq('id', matchedItem.id);
+        if (costErr) throw costErr;
+
+        // Update location-specific cost
+        const { data: existingStock } = await supabase.from('product_stocks')
+          .select('id')
+          .eq('location_id', matchedLocation.id)
+          .eq(matchedItem.is_product ? 'product_id' : 'ingredient_id', matchedItem.id)
+          .maybeSingle();
+
+        if (existingStock) {
+          const { error: stockCostErr } = await supabase.from('product_stocks')
+            .update({ average_cost: newCostVal, last_updated: new Date().toISOString() })
+            .eq('id', existingStock.id);
+          if (stockCostErr) throw stockCostErr;
+        } else {
+          const insertData: any = {
+            location_id: matchedLocation.id,
+            average_cost: newCostVal,
+            quantity: newQty,
+            last_updated: new Date().toISOString()
+          };
+          if (matchedItem.is_product) insertData.product_id = matchedItem.id;
+          else insertData.ingredient_id = matchedItem.id;
+
+          const { error: insertErr } = await supabase.from('product_stocks').insert(insertData);
+          if (insertErr) throw insertErr;
+        }
+        costFeedback = `\n*Custo unitário atualizado:* R$ ${newCostVal.toFixed(2)}`;
+      }
+
+      await sendMessage(chatId, `✅ *Ajuste de estoque concluído com sucesso!*\n\n*Item:* ${matchedItem.name}\n*Armazém:* ${matchedLocation.name}\n*Estoque anterior:* ${currentQty} un\n*Novo estoque:* ${newQty} un${costFeedback}\n*Lançamento de ajuste gerado.*`, getMainKeyboard(profile));
       await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
       return res.status(200).send('OK');
     }
