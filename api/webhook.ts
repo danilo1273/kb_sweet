@@ -163,12 +163,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         // Bind chat_id and clear code
-        const { error: updateErr } = await supabase
+        const { data: updatedData, error: updateErr } = await supabase
           .from('profiles')
           .update({ telegram_chat_id: chatId.toString(), telegram_link_code: null, telegram_state: null })
-          .eq('id', targetProfile.id);
+          .eq('id', targetProfile.id)
+          .select();
 
         if (updateErr) throw updateErr;
+        if (!updatedData || updatedData.length === 0) {
+          throw new Error('Nenhum perfil atualizado. Verifique as permissões de RLS ou a chave SUPABASE_SERVICE_ROLE_KEY.');
+        }
 
         await sendMessage(chatId, `🎉 *Conta vinculada com sucesso!*\n\nOlá, *${targetProfile.full_name || 'Usuário'}*! Agora você pode usar os botões abaixo para gerenciar o sistema pelo Telegram.`, mainKeyboard);
         return res.status(200).send('OK');
