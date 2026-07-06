@@ -1,6 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenAI } from '@google/genai';
+
 
 async function sendTelegram(method: string, payload: any) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -22,14 +22,54 @@ async function sendMessage(chatId: string | number, text: string, replyMarkup?: 
   });
 }
 
-async function generateContentWithRetry(ai: any, options: any) {
+async function generateContentREST(prompt: string, model: string = 'gemini-2.5-flash', fileData?: { mimeType: string, data: string }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY environment variable is not defined.');
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  
+  const parts: any[] = [];
+  if (fileData) {
+    parts.push({
+      inlineData: {
+        mimeType: fileData.mimeType,
+        data: fileData.data
+      }
+    });
+  }
+  parts.push({ text: prompt });
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: { responseMimeType: 'application/json' }
+    })
+  });
+  
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini REST API failed with status ${response.status}: ${errText}`);
+  }
+  
+  const data = await response.json();
+  const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!textResponse) {
+    throw new Error('Empty response from Gemini API');
+  }
+  return textResponse;
+}
+
+async function generateContentWithRetry(prompt: string, fileData?: { mimeType: string, data: string }) {
   let lastError: any;
   const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
   
   for (const model of models) {
     try {
-      const response = await ai.models.generateContent({ ...options, model });
-      return response;
+      const text = await generateContentREST(prompt, model, fileData);
+      return { text };
     } catch (error: any) {
       lastError = error;
       console.warn(`Gemini model ${model} failed: ${error.message || error}`);
@@ -93,7 +133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     auth: { persistSession: false, autoRefreshToken: false }
   });
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+
 
   try {
     const { message, callback_query } = req.body;
@@ -432,11 +472,7 @@ Retorne um JSON seguindo exatamente este formato:
 
       await logStep(supabase, 'before_gemini_call', { has_prompt: !!prompt });
 
-      const aiResponse = await generateContentWithRetry(ai, {
-        model: 'gemini-2.5-flash',
-        contents: [prompt],
-        config: { responseMimeType: 'application/json' }
-      });
+      const aiResponse = await generateContentWithRetry(prompt);
 
       await logStep(supabase, 'after_gemini_call', { response_text: aiResponse.text });
 
@@ -602,11 +638,7 @@ Retorne um JSON seguindo exatamente este formato:
   ]
 }`;
 
-      const aiResponse = await generateContentWithRetry(ai, {
-        model: 'gemini-2.5-flash',
-        contents: [prompt],
-        config: { responseMimeType: 'application/json' }
-      });
+      const aiResponse = await generateContentWithRetry(prompt);
 
       const parsed = JSON.parse(aiResponse.text || '{}');
 
@@ -676,11 +708,7 @@ Retorne um JSON seguindo exatamente este formato:
   "amount": 150.0
 }`;
 
-      const aiResponse = await generateContentWithRetry(ai, {
-        model: 'gemini-2.5-flash',
-        contents: [prompt],
-        config: { responseMimeType: 'application/json' }
-      });
+      const aiResponse = await generateContentWithRetry(prompt);
 
       const parsed = JSON.parse(aiResponse.text || '{}');
 
@@ -798,18 +826,9 @@ Retorne um JSON seguindo exatamente este formato:
   ]
 }`;
 
-      const aiResponse = await generateContentWithRetry(ai, {
-        model: 'gemini-2.5-flash',
-        contents: [
-          {
-            inlineData: {
-              data: base64Data,
-              mimeType: mimeType
-            }
-          },
-          prompt
-        ],
-        config: { responseMimeType: 'application/json' }
+      const aiResponse = await generateContentWithRetry(prompt, {
+        mimeType: mimeType,
+        data: base64Data
       });
 
       const parsed = JSON.parse(aiResponse.text || '{}');
