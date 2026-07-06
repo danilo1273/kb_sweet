@@ -22,6 +22,28 @@ async function sendMessage(chatId: string | number, text: string, replyMarkup?: 
   });
 }
 
+async function generateContentWithRetry(ai: any, options: any, maxAttempts = 3, delayMs = 1500) {
+  let lastError: any;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await ai.models.generateContent(options);
+      return response;
+    } catch (error: any) {
+      lastError = error;
+      const errMsg = error.message || '';
+      const isUnavailable = error.status === 'UNAVAILABLE' || errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('temporary');
+      
+      if (attempt < maxAttempts && isUnavailable) {
+        console.warn(`Gemini call failed with 503 (attempt ${attempt}/${maxAttempts}). Retrying in ${delayMs * attempt}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
+
 const mainKeyboard = {
   keyboard: [
     [{ text: '🛒 Vendas' }, { text: '📦 Compras' }],
@@ -360,7 +382,7 @@ Retorne um JSON seguindo exatamente este formato:
   ]
 }`;
 
-      const aiResponse = await ai.models.generateContent({
+      const aiResponse = await generateContentWithRetry(ai, {
         model: 'gemini-2.5-flash',
         contents: [prompt],
         config: { responseMimeType: 'application/json' }
@@ -434,7 +456,7 @@ Retorne um JSON seguindo exatamente este formato:
   "amount": 150.0
 }`;
 
-      const aiResponse = await ai.models.generateContent({
+      const aiResponse = await generateContentWithRetry(ai, {
         model: 'gemini-2.5-flash',
         contents: [prompt],
         config: { responseMimeType: 'application/json' }
@@ -556,7 +578,7 @@ Retorne um JSON seguindo exatamente este formato:
   ]
 }`;
 
-      const aiResponse = await ai.models.generateContent({
+      const aiResponse = await generateContentWithRetry(ai, {
         model: 'gemini-2.5-flash',
         contents: [
           {
