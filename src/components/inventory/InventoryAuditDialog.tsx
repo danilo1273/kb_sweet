@@ -9,6 +9,7 @@ import { Loader2, Search, Save, AlertTriangle } from "lucide-react";
 import { supabase } from "@/supabaseClient";
 import { useToast } from "@/components/ui/use-toast";
 import { Ingredient, Category } from "@/types";
+import { cn } from "@/lib/utils";
 
 interface InventoryAuditDialogProps {
     isOpen: boolean;
