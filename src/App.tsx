@@ -78,7 +78,11 @@ function App() {
                     <Route path="/clients" element={<Clients />} />
                     <Route path="/sales" element={<Sales />} />
                     <Route path="/pos" element={<POS />} />
-                    <Route path="/inventory" element={<Inventory />} />
+                    <Route path="/inventory" element={
+                        <ErrorBoundary>
+                            <Inventory />
+                        </ErrorBoundary>
+                    } />
                     <Route path="/stock-history" element={<StockHistory />} />
                     <Route path="/recipes" element={<Recipes />} />
                     <Route path="/financial" element={<Financial />} />
