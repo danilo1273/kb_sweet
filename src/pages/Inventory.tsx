@@ -928,8 +928,7 @@ export default function Inventory() {
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            <AnimatePresence>
-                                {filteredIngredients.map((item) => {
+                            filteredIngredients.map((item) => {
                                     // Calculate Totals considering all locations and fallbacks
                                     let totalQtd = 0;
                                     let totalVal = 0;
@@ -946,12 +945,8 @@ export default function Inventory() {
                                     }
 
                                     return (
-                                        <motion.tr
+                                        <TableRow
                                             key={item.id}
-                                            initial={{ opacity: 0 }}
-                                            animate={{ opacity: 1 }}
-                                            exit={{ opacity: 0 }}
-                                            transition={{ duration: 0.2 }}
                                             className={cn("border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted", item.type === 'expense' ? 'bg-gray-50/50' : '')}
                                         >
                                             <TableCell className="font-medium max-w-[200px] truncate" title={item.name}>
@@ -1051,11 +1046,9 @@ export default function Inventory() {
                                                     </Button>
                                                 )}
                                             </TableCell>
-                                        </motion.tr>
+                                        </TableRow>
                                     );
-                                })}
-                            </AnimatePresence>
-                        )}
+                                }))}
                     </TableBody>
                 </Table>
             </div>
