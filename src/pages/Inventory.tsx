@@ -1003,12 +1003,10 @@ export default function Inventory() {
                                                         </TableCell>
                                                         <TableCell className={cn("text-right text-xs", isSelected ? "bg-blue-50/30 border-r border-blue-100" : "bg-zinc-50/30")}>
                                                             {item.type === 'expense' ? '-' : (
-                                                                qty <= 0 ? <div className="text-zinc-300">-</div> : (
-                                                                    <>
-                                                                        <div>R$ {(Number(cost) || 0).toFixed(2)}</div>
-                                                                        <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
-                                                                    </>
-                                                                )
+                                                                <>
+                                                                    <div>R$ {(Number(cost) || 0).toFixed(2)}</div>
+                                                                    <div className="text-[9px] text-zinc-500 font-normal">p/ {item.unit}</div>
+                                                                </>
                                                             )}
                                                         </TableCell>
                                                         <TableCell className={cn("text-right text-xs font-bold border-r border-zinc-100", isSelected ? "bg-blue-50/30 border-r border-blue-100 text-blue-900" : "text-zinc-700 bg-zinc-50/30")}>
