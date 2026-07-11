@@ -405,6 +405,196 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
 
         await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+      } else if (callbackData.startsWith('sd_amb:')) {
+        const parts = callbackData.split(':');
+        const itemIndex = parseInt(parts[1], 10);
+        const productId = parts[2];
+
+        const state = profile.telegram_state as any;
+        if (state?.action !== 'awaiting_sale_ambiguity_decision' || !state.sale_data) {
+          await sendTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId, text: 'Decisão de produto expirada ou inválida.' });
+          return res.status(200).send('OK');
+        }
+
+        await sendTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId, text: 'Produto selecionado.' });
+
+        const saleData = state.sale_data;
+        
+        // Resolve the ambiguous product in the items list
+        if (saleData.items && saleData.items[itemIndex]) {
+          saleData.items[itemIndex].product_id = productId;
+          saleData.items[itemIndex].is_ambiguous = false;
+          saleData.items[itemIndex].possible_product_ids = [];
+        }
+
+        // Recalculate totals
+        // Get products costs/details
+        let productsQuery = supabase.from('products').select('id, name, cost');
+        if (profile.company_id) {
+          productsQuery = productsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+        } else {
+          productsQuery = productsQuery.is('company_id', null);
+        }
+        const { data: products } = await productsQuery;
+        
+        // Check if there are other ambiguous items remaining
+        const remainingAmbiguous = (saleData.items || []).filter((item: any) => item.is_ambiguous === true);
+        
+        if (remainingAmbiguous.length > 0) {
+          // Process next ambiguous item
+          const nextAmbItem = remainingAmbiguous[0];
+          const nextIndex = saleData.items.indexOf(nextAmbItem);
+          const possibleIds = nextAmbItem.possible_product_ids || [];
+          const candidates = (products || []).filter(p => possibleIds.includes(p.id));
+
+          if (candidates.length > 0) {
+            // Update state with new index
+            state.ambiguity_data = {
+              item_index: nextIndex,
+              typed_name: nextAmbItem.product_name_typed || 'Produto'
+            };
+            
+            const { error: stateErr } = await supabase
+              .from('profiles')
+              .update({ telegram_state: state })
+              .eq('id', profile.id);
+
+            if (stateErr) throw stateErr;
+
+            const inlineKeyboard = {
+              inline_keyboard: [
+                ...candidates.map(p => [
+                  { text: `🍿 ${p.name}`, callback_data: `sd_amb:${nextIndex}:${p.id}` }
+                ]),
+                [
+                  { text: '❌ Cancelar venda', callback_data: 'sd_dec:cancel' }
+                ]
+              ]
+            };
+
+            await sendTelegram('editMessageText', {
+              chat_id: chatId,
+              message_id: messageId,
+              text: `🔍 Identifiquei múltiplos produtos para o termo *"${nextAmbItem.product_name_typed}"*.\n\nQual deles você vendeu?`,
+              parse_mode: 'Markdown',
+              reply_markup: inlineKeyboard
+            });
+            return res.status(200).send('OK');
+          }
+        }
+
+        // No more ambiguity! Map items payload and check stock locations
+        const itemsPayload = saleData.items.map((item: any) => {
+          const originalProd = products?.find(p => p.id === item.product_id);
+          return {
+            product_id: item.product_id,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            cost: originalProd?.cost || 0
+          };
+        });
+
+        const total = itemsPayload.reduce((acc: number, item: any) => acc + (item.quantity * item.unit_price), 0) - (saleData.discount || 0);
+
+        // Verify stock before sale
+        const insufficientStockItems = [];
+        for (const item of itemsPayload) {
+          const { data: stockData } = await supabase
+            .from('product_stocks')
+            .select('quantity')
+            .eq('product_id', item.product_id)
+            .eq('location_id', saleData.location_id)
+            .maybeSingle();
+
+          const currentQty = stockData ? Number(stockData.quantity || 0) : 0;
+          if (currentQty < item.quantity) {
+            const prodName = products?.find(p => p.id === item.product_id)?.name || 'Produto';
+            insufficientStockItems.push({
+              product_id: item.product_id,
+              name: prodName,
+              required: item.quantity,
+              current: currentQty,
+              missing: item.quantity - currentQty
+            });
+          }
+        }
+
+        if (insufficientStockItems.length > 0) {
+          // Save pending sale details to profile state for decision
+          const pendingSale = {
+            action: 'awaiting_sale_stock_decision',
+            sale_data: {
+              items: itemsPayload,
+              total,
+              discount: saleData.discount || 0,
+              payment_method: saleData.payment_method || 'outro',
+              client_id: saleData.client_id,
+              location_id: saleData.location_id,
+              insufficient_items: insufficientStockItems
+            }
+          };
+
+          const { error: stateErr } = await supabase
+            .from('profiles')
+            .update({ telegram_state: pendingSale })
+            .eq('id', profile.id);
+
+          if (stateErr) throw stateErr;
+
+          const missingText = insufficientStockItems
+            .map(item => `• *${item.name}*: Precisa de ${item.required} un, mas só tem ${item.current} un (Falta: *${item.missing} un*)`)
+            .join('\n');
+
+          const inlineKeyboard = {
+            inline_keyboard: [
+              [
+                { text: '📈 Ajustar estoque e vender', callback_data: 'sd_dec:adjust' },
+                { text: '⚠️ Vender sem saldo', callback_data: 'sd_dec:force' }
+              ],
+              [
+                { text: '❌ Cancelar venda', callback_data: 'sd_dec:cancel' }
+              ]
+            ]
+          };
+
+          await sendTelegram('editMessageText', {
+            chat_id: chatId,
+            message_id: messageId,
+            text: `⚠️ *Aviso de Estoque Insuficiente!*\n\nNão há saldo suficiente no estoque selecionado para finalizar a venda:\n\n${missingText}\n\nO que deseja fazer?`,
+            parse_mode: 'Markdown',
+            reply_markup: inlineKeyboard
+          });
+          return res.status(200).send('OK');
+        }
+
+        // Stock is sufficient! Process sale immediately
+        const { data: saleId, error: saleErr } = await supabase.rpc('process_sale', {
+          p_items: itemsPayload,
+          p_total: total,
+          p_discount: saleData.discount || 0,
+          p_payment_method: saleData.payment_method || 'outro',
+          p_client_id: saleData.client_id,
+          p_location_id: saleData.location_id
+        });
+
+        if (saleErr) throw saleErr;
+
+        // Build summary receipt
+        const { data: clients } = await supabase.from('clients').select('id, name');
+        const clientName = clients?.find((c: any) => c.id === saleData.client_id)?.name || 'Cliente Avulso';
+        const summaryItems = itemsPayload.map((item: any) => {
+          const name = products?.find((p: any) => p.id === item.product_id)?.name || 'Produto';
+          return `• ${item.quantity}x ${name} (R$ ${item.unit_price.toFixed(2)})`;
+        }).join('\n');
+
+        await sendTelegram('editMessageText', {
+          chat_id: chatId,
+          message_id: messageId,
+          text: `✅ *Venda registrada com sucesso!*\n\n*Cliente:* ${clientName}\n*Itens:*\n${summaryItems}\n*Total:* R$ ${total.toFixed(2)}\n*Pagamento:* ${saleData.payment_method?.toUpperCase()}\n\nEstoque atualizado e lançamento financeiro gerado.`,
+          parse_mode: 'Markdown'
+        });
+
+        await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
       }
 
       return res.status(200).send('OK');
@@ -913,6 +1103,15 @@ ${JSON.stringify(clients || [])}
 Locais de estoque disponíveis:
 ${JSON.stringify(locations || [])}
 
+IMPORTANTE SOBRE AMBIGUIDADE DE PRODUTOS:
+Se o nome de produto escrito pelo usuário for muito genérico e corresponder a mais de um produto disponível na lista (por exemplo, o usuário digita "pipoca" mas existem "Pipoca Gourmet Cacau" e "Pipoca Gourmet Leite Ninho"), você deve:
+1. Retornar "product_id": null.
+2. Definir "is_ambiguous": true.
+3. Colocar o termo digitado em "product_name_typed" (ex: "pipoca").
+4. Listar TODOS os IDs dos produtos correspondentes/candidatos em "possible_product_ids" (ex: ["uuid-da-pipoca-cacau", "uuid-da-pipoca-ninho"]).
+
+Se o nome de produto não for ambíguo (ou seja, corresponder claramente a apenas um produto da lista), retorne "is_ambiguous": false, "possible_product_ids": [] e preencha "product_id" normalmente.
+
 Retorne um JSON seguindo exatamente este formato:
 {
   "client_id": "uuid-do-cliente-ou-null",
@@ -921,7 +1120,10 @@ Retorne um JSON seguindo exatamente este formato:
   "discount": 0,
   "items": [
     {
-      "product_id": "uuid-do-produto",
+      "product_id": "uuid-do-produto-ou-null-se-ambiguo",
+      "product_name_typed": "termo-do-produto-digitado-ou-null",
+      "is_ambiguous": false,
+      "possible_product_ids": [],
       "quantity": 2,
       "unit_price": 15.0
     }
@@ -938,6 +1140,63 @@ Retorne um JSON seguindo exatamente este formato:
         return res.status(200).send('OK');
       }
 
+      // Default location if missing
+      const locationId = parsed.location_id || locations?.[0]?.id;
+
+      // Check for ambiguity before proceeding
+      const ambiguousItems = (parsed.items || []).filter((item: any) => item.is_ambiguous === true);
+      if (ambiguousItems.length > 0) {
+        // Encontrar os nomes completos de cada possível produto para renderizar em botões inline
+        const firstAmbiguousItem = ambiguousItems[0];
+        const itemIndex = parsed.items.indexOf(firstAmbiguousItem);
+        
+        // Find possible products details
+        const possibleIds = firstAmbiguousItem.possible_product_ids || [];
+        const candidates = productsList.filter(p => possibleIds.includes(p.id));
+
+        if (candidates.length > 0) {
+          // Salvar venda pendente no profiles.telegram_state
+          const pendingSale = {
+            action: 'awaiting_sale_ambiguity_decision',
+            sale_data: {
+              items: parsed.items,
+              total: parsed.items.reduce((acc: number, item: any) => acc + ((item.quantity || 0) * (item.unit_price || 0)), 0) - (parsed.discount || 0),
+              discount: parsed.discount || 0,
+              payment_method: parsed.payment_method || 'outro',
+              client_id: parsed.client_id,
+              location_id: locationId
+            },
+            ambiguity_data: {
+              item_index: itemIndex,
+              typed_name: firstAmbiguousItem.product_name_typed || 'Produto'
+            }
+          };
+
+          const { error: stateErr } = await supabase
+            .from('profiles')
+            .update({ telegram_state: pendingSale })
+            .eq('id', profile.id);
+
+          if (stateErr) throw stateErr;
+
+          // Build inline buttons for each candidate product
+          // Format callback: sd_amb:[itemIndex]:[productId]
+          const inlineKeyboard = {
+            inline_keyboard: [
+              ...candidates.map(p => [
+                { text: `🍿 ${p.name}`, callback_data: `sd_amb:${itemIndex}:${p.id}` }
+              ]),
+              [
+                { text: '❌ Cancelar venda', callback_data: 'sd_dec:cancel' }
+              ]
+            ]
+          };
+
+          await sendMessage(chatId, `🔍 Identifiquei múltiplos produtos para o termo *"${firstAmbiguousItem.product_name_typed}"*.\n\nQual deles você vendeu?`, inlineKeyboard);
+          return res.status(200).send('OK');
+        }
+      }
+
       // Record Sale via RPC
       const itemsPayload = parsed.items.map((item: any) => {
         const originalProd = products?.find(p => p.id === item.product_id);
@@ -950,9 +1209,6 @@ Retorne um JSON seguindo exatamente este formato:
       });
 
       const total = itemsPayload.reduce((acc: number, item: any) => acc + (item.quantity * item.unit_price), 0) - (parsed.discount || 0);
-
-      // Default location if missing
-      const locationId = parsed.location_id || locations?.[0]?.id;
 
       // Verify stock before sale
       const insufficientStockItems = [];
