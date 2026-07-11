@@ -206,15 +206,14 @@ export default function Recipes() {
                             const weightedCost = iTotalQty > 0 ? iTotalVal / iTotalQty : (ing.cost || 0);
 
                             const unitBaseCost = weightedCost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0); // Fallback to legacy if 0
-                            if (ing.unit_weight && unitBaseCost) {
+                            const isSameUnit = item.unit === ing.unit;
+                            if (isSameUnit && unitBaseCost) {
+                                totalCost += unitBaseCost * item.quantity;
+                            } else if (ing.unit_weight && unitBaseCost) {
                                 let qty = item.quantity;
                                 if (['kg', 'l'].includes(item.unit)) qty *= 1000;
                                 totalCost += (unitBaseCost / ing.unit_weight) * qty;
                             } else if (unitBaseCost) {
-                                // Fallback (unsafe but better than 0 if units match?)
-                                // Let's stick to safe: if no weight, 0 unless we are sure.
-                                // Actually let's replicate logic:
-                                // If item.unit == 'un' and ing.unit == 'un', multiply cost.
                                 if (item.unit === 'un' && ing.unit === 'un') {
                                     totalCost += unitBaseCost * item.quantity;
                                 }
@@ -1206,7 +1205,10 @@ export default function Recipes() {
                                                                         const ing = item.ingredients;
                                                                         const unitBaseCost = ing.cost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0);
 
-                                                                        if (ing.unit_weight && unitBaseCost) {
+                                                                        const isSameUnit = item.unit === ing.unit;
+                                                                        if (isSameUnit && unitBaseCost) {
+                                                                            cost = unitBaseCost * item.quantity;
+                                                                        } else if (ing.unit_weight && unitBaseCost) {
                                                                             // Simple Calc
                                                                             let qty = item.quantity;
                                                                             if (['kg', 'l'].includes(item.unit)) qty *= 1000;
