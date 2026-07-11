@@ -1622,8 +1622,8 @@ export default function Inventory() {
                                                         className="h-auto p-0 ml-2 text-[10px] text-blue-500 underline decoration-blue-200"
                                                         onClick={() => {
                                                             setIsHistoryOpen(false);
-                                                            if (h.type === 'purchase') navigate(`/ purchases ? openOrder = ${h.link_id}`);
-                                                            if (h.type === 'usage') navigate(`/ production ? openOrder = ${h.link_id}`);
+                                                            if (h.type === 'purchase') navigate(`/purchases?openOrder=${h.link_id}`);
+                                                            if (h.type === 'usage') navigate(`/production?openOrder=${h.link_id}`);
                                                         }}
                                                     >
                                                         #{h.link_id.slice(0, 6)}...
