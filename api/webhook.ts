@@ -178,7 +178,7 @@ function getMainKeyboard(profile?: any) {
     [{ text: '💸 Pagamento' }, { text: '📈 Recebimento' }]
   ];
   if (isAdmin) {
-    keyboard.push([{ text: '🔧 Ajustar Estoque' }]);
+    keyboard.push([{ text: '🔧 Ajustar Estoque' }, { text: '📖 Gravar Receita' }]);
   }
   return {
     keyboard,
@@ -765,6 +765,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).send('OK');
     }
 
+    if (text === '📖 Gravar Receita' && isAdmin) {
+      const { error: stateErr } = await supabase.from('profiles').update({ telegram_state: { action: 'awaiting_recipe_details' } }).eq('id', profile.id);
+      if (stateErr) throw stateErr;
+
+      await sendMessage(chatId, '📖 *Gravar Nova Receita*\n\nEnvie o texto descrevendo a receita (nome e ingredientes com suas quantidades) ou uma **Foto/Imagem** da folha de receitas manuscrita!\n\n_Exemplo de envio de texto:_\n`Receita de Brigadeiro Tradicional: 1 leite condensado de 395g, 40g de cacau em pó, 15g de manteiga e 150g de granulado chocolate.`', backKeyboard);
+      return res.status(200).send('OK');
+    }
+
     // Process input based on state
     const state = profile.telegram_state as any;
     const action = state?.action;
@@ -1017,8 +1025,252 @@ Retorne um JSON seguindo exatamente este formato:
         costFeedback = `\n*Custo unitário atualizado:* R$ ${newCostVal.toFixed(2)}`;
       }
 
-      const localParserNote = usedLocalParser ? '\n⚠️ _IA indisponível — ajuste processado pelo modo local._' : '';
-      await sendMessage(chatId, `✅ *Ajuste de estoque concluído com sucesso!*\n\n*Item:* ${matchedItem.name}\n*Armazém:* ${matchedLocation.name}\n*Estoque anterior:* ${currentQty} un\n*Novo estoque:* ${newQty} un${costFeedback}\n*Lançamento de ajuste gerado.*${localParserNote}`, getMainKeyboard(profile));
+      return res.status(200).send('OK');
+    }
+
+    // Awaiting Recipe Details Flow
+    if (action === 'awaiting_recipe_details') {
+      const photo = message.photo;
+      const document = message.document;
+
+      if (!text && !photo && !document) {
+        await sendMessage(chatId, '❌ Por favor, envie a descrição por escrito ou uma Foto/Imagem da receita manuscrita.', getMainKeyboard(profile));
+        await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+        return res.status(200).send('OK');
+      }
+
+      await sendMessage(chatId, '⏳ *Processando receita com inteligência artificial...*');
+
+      // Download file if photo/document is sent
+      let base64Data = '';
+      let mimeType = 'image/jpeg';
+
+      if (photo || document) {
+        let fileId = '';
+        if (photo) {
+          fileId = photo[photo.length - 1].file_id;
+        } else if (document) {
+          fileId = document.file_id;
+          mimeType = document.mime_type || 'application/pdf';
+        }
+
+        const fileInfo = await sendTelegram('getFile', { file_id: fileId });
+        if (fileInfo.ok && fileInfo.result?.file_path) {
+          const filePath = fileInfo.result.file_path;
+          const token = process.env.TELEGRAM_BOT_TOKEN;
+          const downloadUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
+          const fileBuffer = await fetch(downloadUrl).then(res => res.arrayBuffer());
+          base64Data = Buffer.from(fileBuffer).toString('base64');
+        }
+      }
+
+      // Fetch existing ingredients & subproducts (intermediates) for mapping
+      let ingredientsQuery = supabase.from('ingredients').select('id, name, unit');
+      let productsQuery = supabase.from('products').select('id, name, type').eq('type', 'intermediate');
+
+      if (profile.company_id) {
+        ingredientsQuery = ingredientsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+        productsQuery = productsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+      } else {
+        ingredientsQuery = ingredientsQuery.is('company_id', null);
+        productsQuery = productsQuery.is('company_id', null);
+      }
+
+      const [ingredientsRes, productsRes] = await Promise.all([ingredientsQuery, productsQuery]);
+      const ingredientsList = ingredientsRes.data || [];
+      const intermediatesList = productsRes.data || [];
+
+      const prompt = `Você é o assistente inteligente do KB Sweet. Analise a descrição ou imagem da receita enviada pelo usuário e extraia:
+1. O nome da receita (que será o nome do produto no sistema).
+2. Se ela descreve um produto intermediário (ex: recheios, brigadeiros base, caldas, massas, produtos que servem de insumo para outros) ou acabado (ex: trufas prontas, cones prontos, pipocas gourmet ensacadas, bolos decorados prontos para venda).
+3. O rendimento da receita (batch_size) em quantidade numérica e unidade de rendimento (ex: se rende 1 bolo de 1.5kg, batch_size=1.5, unit="kg". Se rende 1 receita base, batch_size=1, unit="un". Se rende 50 trufas, batch_size=50, unit="un").
+4. A lista de ingredientes/componentes da receita com suas quantidades e unidades.
+
+IMPORTANTE SOBRE O MAPEAMENTO:
+Mapeie os ingredientes da receita para os insumos e subprodutos existentes fornecidos nas listas abaixo. Se o ingrediente da receita corresponder semanticamente a um insumo ou subproduto existente (ex: "leite moça" correspondendo a "Leite Condensado", ou "brigadeiro tradicional" correspondendo ao subproduto "Brigadeiro Gourmet"), retorne o correspondente "id" em "matched_id" e defina "is_intermediate_product" como true (se mapeado para subproduto) ou false (se mapeado para insumo). Só defina "matched_id" como null se o ingrediente/insumo realmente não existir na lista.
+
+Insumos existentes:
+${JSON.stringify(ingredientsList)}
+
+Subprodutos intermediários existentes:
+${JSON.stringify(intermediatesList)}
+
+Mensagem/receita do usuário: "${text || 'Foto/Documento enviado'}"
+
+Retorne um JSON seguindo exatamente este formato:
+{
+  "recipe_name": "Nome do produto da receita (ex: Brigadeiro Tradicional)",
+  "product_type": "finished" | "intermediate",
+  "batch_size": 1.0,
+  "unit": "un" | "g" | "kg",
+  "items": [
+    {
+      "name_in_recipe": "nome do ingrediente na receita",
+      "is_intermediate_product": false,
+      "matched_id": "uuid-do-ingrediente-ou-subproduto-se-encontrado-ou-null",
+      "quantity": 100.0,
+      "unit": "g"
+    }
+  ]
+}`;
+
+      let aiResponse;
+      try {
+        if (base64Data) {
+          aiResponse = await generateContentWithRetry(prompt, {
+            mimeType: mimeType,
+            data: base64Data
+          });
+        } else {
+          aiResponse = await generateContentWithRetry(prompt);
+        }
+      } catch (err: any) {
+        await sendMessage(chatId, '❌ Ocorreu um erro ao processar a receita com IA. Por favor, tente descrever de forma mais legível ou use texto comum.', getMainKeyboard(profile));
+        await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+        return res.status(200).send('OK');
+      }
+
+      // Parse JSON from IA response
+      let parsed: any = {};
+      try {
+        const rawText = (aiResponse.text || '').replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+        parsed = JSON.parse(rawText || '{}');
+      } catch (jsonErr) {
+        await sendMessage(chatId, '❌ Não consegui interpretar os dados extraídos da receita. Tente enviar novamente.', getMainKeyboard(profile));
+        await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+        return res.status(200).send('OK');
+      }
+
+      if (!parsed.recipe_name || !parsed.items || parsed.items.length === 0) {
+        await sendMessage(chatId, '❌ Não consegui extrair o nome ou itens da receita. Certifique-se de que a foto/texto descreve claramente os ingredientes.', getMainKeyboard(profile));
+        await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+        return res.status(200).send('OK');
+      }
+
+      await sendMessage(chatId, `⏳ *Salvando receita "${parsed.recipe_name}" no sistema...*`);
+
+      // 1. Create or Update Product in products table
+      const { data: existingProd } = await supabase
+        .from('products')
+        .select('id')
+        .eq('name', parsed.recipe_name)
+        .eq('company_id', profile.company_id)
+        .maybeSingle();
+
+      let productId = existingProd?.id;
+
+      if (productId) {
+        // Update product metadata
+        const { error: updErr } = await supabase
+          .from('products')
+          .update({
+            type: parsed.product_type || 'finished',
+            batch_size: Number(parsed.batch_size || 1),
+            unit: parsed.unit || 'un'
+          })
+          .eq('id', productId);
+        if (updErr) throw updErr;
+      } else {
+        // Create new product
+        const { data: newProd, error: createErr } = await supabase
+          .from('products')
+          .insert({
+            name: parsed.recipe_name,
+            type: parsed.product_type || 'finished',
+            batch_size: Number(parsed.batch_size || 1),
+            unit: parsed.unit || 'un',
+            price: 0,
+            cost: 0,
+            company_id: profile.company_id
+          })
+          .select()
+          .single();
+        if (createErr) throw createErr;
+        productId = newProd.id;
+      }
+
+      // 2. Clean old BOM for this product
+      const { error: delErr } = await supabase
+        .from('product_bom')
+        .delete()
+        .eq('product_id', productId);
+      if (delErr) throw delErr;
+
+      // 3. Process ingredients and insert new BOM items
+      const bomItemsToInsert = [];
+      const summaryLines = [];
+
+      for (const item of parsed.items) {
+        let matchedId = item.matched_id;
+        let isIntermediate = item.is_intermediate_product === true;
+        let finalName = item.name_in_recipe;
+
+        if (!matchedId) {
+          // Check if there is an ingredient with the exact same name case-insensitive
+          const exactMatchIng = ingredientsList.find(i => i.name.toLowerCase().trim() === item.name_in_recipe.toLowerCase().trim());
+          if (exactMatchIng) {
+            matchedId = exactMatchIng.id;
+            isIntermediate = false;
+            finalName = exactMatchIng.name;
+          } else {
+            // Auto-create new ingredient in ingredients table
+            const { data: newIng, error: ingErr } = await supabase
+              .from('ingredients')
+              .insert({
+                name: item.name_in_recipe,
+                unit: item.unit || 'g',
+                category: 'Ingredientes',
+                type: 'stock',
+                stock_danilo: 0,
+                stock_adriel: 0,
+                cost: 0,
+                cost_danilo: 0,
+                cost_adriel: 0,
+                is_active: true,
+                company_id: profile.company_id
+              })
+              .select()
+              .single();
+
+            if (!ingErr && newIng) {
+              matchedId = newIng.id;
+              isIntermediate = false;
+              finalName = newIng.name;
+            }
+          }
+        } else {
+          // Resolve matched name for display
+          if (isIntermediate) {
+            finalName = intermediatesList.find(p => p.id === matchedId)?.name || finalName;
+          } else {
+            finalName = ingredientsList.find(i => i.id === matchedId)?.name || finalName;
+          }
+        }
+
+        if (matchedId) {
+          const bomRow: any = {
+            product_id: productId,
+            quantity: Number(item.quantity),
+            unit: item.unit || 'g',
+            company_id: profile.company_id
+          };
+          if (isIntermediate) {
+            bomRow.child_product_id = matchedId;
+          } else {
+            bomRow.ingredient_id = matchedId;
+          }
+          bomItemsToInsert.push(bomRow);
+          summaryLines.push(`• ${item.quantity} ${item.unit} - *${finalName}* ${isIntermediate ? '_(Subproduto)_' : ''}`);
+        }
+      }
+
+      if (bomItemsToInsert.length > 0) {
+        const { error: insErr } = await supabase.from('product_bom').insert(bomItemsToInsert);
+        if (insErr) throw insErr;
+      }
+
+      const typeLabel = parsed.product_type === 'intermediate' ? '🟠 Subproduto Intermediário' : '🟢 Produto Acabado';
+      await sendMessage(chatId, `🎉 *Receita gravada com sucesso!*\n\n*Produto:* ${parsed.recipe_name}\n*Tipo:* ${typeLabel}\n*Rendimento:* ${parsed.batch_size} ${parsed.unit}\n\n*Ingredientes/Ficha Técnica:*\n${summaryLines.join('\n')}\n\n_Ficha técnica atualizada no painel web!_`, getMainKeyboard(profile));
       await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
 
       return res.status(200).send('OK');
