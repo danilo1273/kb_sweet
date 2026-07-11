@@ -762,10 +762,10 @@ export default function Inventory() {
                 </div>
             </div >
 
-            {/* Mobile View: Cards */}
+                  {/* Mobile View: Cards */}
             <div className="md:hidden space-y-3 mb-4">
                 {loading ? (
-                    <div className="text-center py-8"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>
+                    <div className="text-center py-8"><Loader2 className="h-6 w-6 animate-spin mx-auto text-blue-600" /></div>
                 ) : filteredIngredients.length === 0 ? (
                     <EmptyState
                         icon={Package}
@@ -774,99 +774,132 @@ export default function Inventory() {
                         className="py-8"
                     />
                 ) : (
-
                     filteredIngredients.map((item) => {
                         const totalQtd = item.stocks?.reduce((acc, s) => acc + (s.quantity || 0), 0) || 0;
+                        const totalVal = item.stocks?.reduce((acc, s) => acc + ((s.quantity || 0) * (s.average_cost || 0)), 0) || 0;
+                        const isFilteredLoc = warehouseFilter !== 'all';
+
                         return (
-                            <div key={item.id} className={cn("bg-white p-4 rounded-lg border shadow-sm flex flex-col gap-3", item.type === 'expense' ? 'bg-purple-50/30' : '')}>
-                                <div className="flex justify-between items-start">
-                                    <div className="w-[70%]">
-                                        <div className="font-bold text-zinc-900 truncate" title={item.name}>{item.name}</div>
-                                        <div className="text-xs text-zinc-500 flex items-center gap-2">
-                                            {item.category}
-                                            {item.type === 'expense' && <span className="text-[9px] bg-purple-100 text-purple-700 px-1 rounded">Despesa</span>}
+                            <div key={item.id} className={cn("bg-white p-4 rounded-xl border border-zinc-200 shadow-sm flex flex-col gap-3 hover:border-zinc-300 transition-all duration-200", item.type === 'expense' ? 'bg-purple-50/20 border-purple-100' : '')}>
+                                {/* Header: Nome, Categoria e Ações */}
+                                <div className="flex justify-between items-start gap-2">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="font-bold text-zinc-900 text-sm leading-tight break-words" title={item.name}>{item.name}</div>
+                                        <div className="flex flex-wrap gap-1.5 mt-1 items-center">
+                                            <span className="text-[9px] font-semibold text-zinc-500 bg-zinc-100 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                                                {item.category || 'Geral'}
+                                            </span>
+                                            {item.type === 'expense' && (
+                                                <span className="text-[9px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                                                    Despesa
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
-                                    <div className="w-[30%] flex justify-end gap-1">
-                                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(item as any)}>
-                                            <Edit className="h-4 w-4 text-zinc-400" />
+                                    {/* Action Buttons */}
+                                    <div className="flex items-center gap-0.5 shrink-0 bg-zinc-50 p-0.5 rounded-lg border border-zinc-200">
+                                        {item.type !== 'expense' && (
+                                            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-white" onClick={() => openHistory(item as any)} title="Histórico">
+                                                <History className="h-3.5 w-3.5 text-blue-500" />
+                                            </Button>
+                                        )}
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-white" onClick={() => openEdit(item as any)} title="Editar">
+                                            <Edit className="h-3.5 w-3.5 text-zinc-500" />
                                         </Button>
-                                    </div>
-                                </div>
-                                {item.type !== 'expense' && (
-                                    <div className="grid grid-cols-2 gap-2 text-sm border-t pt-2">
-                                        {stockLocations.map(loc => {
-                                            const stock = item.stocks?.find(s => s.location_id === loc.id);
-                                            let qty = stock ? Number(stock.quantity || 0) : undefined;
-
-                                            if (qty === undefined) {
-                                                if (loc.slug === 'stock-danilo') qty = item.stock_danilo || 0;
-                                                else if (loc.slug === 'stock-adriel') qty = item.stock_adriel || 0;
-                                                else qty = 0;
-                                            }
-                                            const isSelected = warehouseFilter === loc.slug || warehouseFilter === loc.id;
-                                            const hasStock = qty > 0;
-
-                                            return (
-                                                <div 
-                                                    key={loc.id} 
-                                                    className={cn(
-                                                        "p-2.5 rounded border flex flex-col justify-between transition-all duration-200",
-                                                        hasStock 
-                                                            ? isSelected 
-                                                                ? "bg-indigo-50/20 border-indigo-400 border-l-4 border-l-indigo-600 shadow-sm" 
-                                                                : "bg-white border-zinc-200 border-l-4 border-l-emerald-500 shadow-sm"
-                                                            : isSelected
-                                                                ? "bg-indigo-50/10 border-indigo-300 opacity-80"
-                                                                : "bg-zinc-50/60 border-zinc-150 text-zinc-400 opacity-55"
-                                                    )}
-                                                >
-                                                    <div>
-                                                        <div className={cn(
-                                                            "text-[9px] font-bold uppercase truncate flex items-center gap-1",
-                                                            hasStock ? "text-zinc-600" : "text-zinc-400"
-                                                        )} title={loc.name}>
-                                                            {hasStock ? "📍" : "⚪"} {loc.name}
-                                                        </div>
-                                                        <div className={cn("font-bold text-sm mt-0.5",
-                                                            qty <= 0 ? "text-zinc-400 font-normal" :
-                                                                qty <= (item.min_stock || 0) ? "text-amber-600" : "text-zinc-800"
-                                                        )}>
-                                                            {qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} <span className="text-[10px] font-normal">{item.unit}</span>
-                                                        </div>
-                                                    </div>
-                                                    {canViewCosts && (
-                                                        <div className={cn(
-                                                            "mt-1.5 pt-1 border-t",
-                                                            hasStock ? "border-zinc-150" : "border-zinc-200/40"
-                                                        )}>
-                                                            <div className="text-[8px] text-zinc-400">Total</div>
-                                                            <div className={cn(
-                                                                "text-xs font-semibold",
-                                                                hasStock ? "text-zinc-700" : "text-zinc-400 font-normal"
-                                                            )}>
-                                                                {((qty || 0) * (stock?.average_cost || item.cost || 0)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                                <div className="flex justify-between items-center text-xs text-zinc-400 pt-1 border-t mt-2">
-                                    <div className="flex flex-col">
-                                        <span>Qtd Total: {item.type === 'expense' ? '-' : `${totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${item.unit}`}</span>
-                                        {canViewCosts && item.type !== 'expense' && (
-                                            <span className="text-zinc-600 font-bold">
-                                                Valor Total: {(item.stocks?.reduce((acc, s) => acc + (s.quantity * s.average_cost), 0) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                            </span>
+                                        {isAdmin && (
+                                            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-white text-red-500 hover:text-red-600" onClick={() => handleDelete(item.id)} title="Excluir">
+                                                <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                                            </Button>
                                         )}
                                     </div>
-                                    <Button variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => openHistory(item as any)}>
-                                        <History className="h-3 w-3 mr-1" /> Histórico
-                                    </Button>
                                 </div>
+
+                                {/* Body: Stock Levels */}
+                                {item.type !== 'expense' && (
+                                    <div className={cn("grid gap-2 border-t pt-3", isFilteredLoc ? "grid-cols-1" : "grid-cols-2")}>
+                                        {stockLocations
+                                            .filter(loc => !isFilteredLoc || warehouseFilter === loc.slug || warehouseFilter === loc.id)
+                                            .map(loc => {
+                                                const stock = item.stocks?.find(s => s.location_id === loc.id);
+                                                let qty = stock ? Number(stock.quantity || 0) : undefined;
+
+                                                if (qty === undefined) {
+                                                    if (loc.slug === 'stock-danilo') qty = item.stock_danilo || 0;
+                                                    else if (loc.slug === 'stock-adriel') qty = item.stock_adriel || 0;
+                                                    else qty = 0;
+                                                }
+                                                const isSelected = warehouseFilter === loc.slug || warehouseFilter === loc.id;
+                                                const hasStock = qty > 0;
+
+                                                return (
+                                                    <div 
+                                                        key={loc.id} 
+                                                        className={cn(
+                                                            "p-3 rounded-lg border flex flex-col justify-between transition-all duration-200",
+                                                            hasStock 
+                                                                ? isSelected 
+                                                                    ? "bg-blue-50/20 border-blue-400 border-l-4 border-l-blue-600 shadow-sm" 
+                                                                    : "bg-white border-zinc-200 border-l-4 border-l-emerald-500 shadow-sm"
+                                                                : isSelected
+                                                                    ? "bg-blue-50/10 border-blue-200 opacity-80"
+                                                                    : "bg-zinc-50/60 border-zinc-200 text-zinc-400 opacity-55"
+                                                        )}
+                                                    >
+                                                        <div>
+                                                            <div className={cn(
+                                                                "text-[9px] font-bold uppercase truncate flex items-center gap-1",
+                                                                hasStock ? "text-zinc-600 font-extrabold" : "text-zinc-400"
+                                                            )} title={loc.name}>
+                                                                {hasStock ? "📍" : "⚪"} {loc.name}
+                                                            </div>
+                                                            <div className={cn("font-bold text-sm mt-0.5 flex items-baseline gap-1",
+                                                                qty <= 0 ? "text-zinc-400 font-normal" :
+                                                                    qty <= (item.min_stock || 0) ? "text-amber-600" : "text-zinc-800"
+                                                            )}>
+                                                                <span>{qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</span>
+                                                                <span className="text-[10px] font-normal uppercase text-zinc-500">{item.unit}</span>
+                                                            </div>
+                                                        </div>
+                                                        {canViewCosts && (
+                                                            <div className={cn(
+                                                                "mt-2 pt-1.5 border-t flex flex-col gap-0.5",
+                                                                hasStock ? "border-zinc-100" : "border-zinc-200/40"
+                                                            )}>
+                                                                <div className="flex justify-between text-[9px] text-zinc-400">
+                                                                    <span>Custo Médio:</span>
+                                                                    <span className="font-medium text-zinc-600">R$ {(stock?.average_cost || item.cost || 0).toFixed(2)}</span>
+                                                                </div>
+                                                                <div className="flex justify-between text-[10px] font-semibold text-zinc-700">
+                                                                    <span>Total:</span>
+                                                                    <span>{((qty || 0) * (stock?.average_cost || item.cost || 0)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                    </div>
+                                )}
+
+                                {/* Footer: Total Geral Summary */}
+                                {item.type !== 'expense' && (
+                                    <div className="flex justify-between items-center text-[10px] text-zinc-500 pt-2.5 border-t border-dashed mt-1 bg-zinc-50/50 p-2 rounded-lg border border-zinc-150">
+                                        <div className="flex flex-col">
+                                            <span className="font-semibold text-zinc-700">Total Geral:</span>
+                                            <span className="text-zinc-800 font-extrabold text-xs mt-0.5">
+                                                {totalQtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} {item.unit}
+                                            </span>
+                                        </div>
+                                        {canViewCosts && (
+                                            <div className="flex flex-col items-end text-right">
+                                                <span className="font-semibold text-zinc-700">Valor Geral:</span>
+                                                <span className="text-emerald-700 font-extrabold text-xs mt-0.5">
+                                                    {totalVal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         );
                     })
@@ -879,31 +912,35 @@ export default function Inventory() {
                         <TableRow>
                             <TableHead rowSpan={2} className="align-bottom w-[200px] max-w-[200px]">Nome</TableHead>
                             <TableHead rowSpan={2} className="w-[60px] align-bottom">Un.</TableHead>
-                            {stockLocations.map(loc => {
-                                const isSelected = warehouseFilter === loc.slug || warehouseFilter === loc.id;
-                                return (
-                                    <TableHead key={loc.id} colSpan={3} className={cn("text-center text-zinc-700 border-b border-zinc-200 font-semibold h-8 py-1 truncate max-w-[150px]", 
-                                        isSelected ? "bg-blue-100 text-blue-900 border-x border-blue-200" : "bg-zinc-50/80"
-                                    )} title={loc.name}>
-                                        {loc.name}
-                                    </TableHead>
-                                );
-                            })}
+                            {stockLocations
+                                .filter(loc => warehouseFilter === 'all' || warehouseFilter === loc.slug || warehouseFilter === loc.id)
+                                .map(loc => {
+                                    const isSelected = warehouseFilter === loc.slug || warehouseFilter === loc.id;
+                                    return (
+                                        <TableHead key={loc.id} colSpan={3} className={cn("text-center text-zinc-700 border-b border-zinc-200 font-semibold h-8 py-1 truncate max-w-[150px]", 
+                                            isSelected ? "bg-blue-100 text-blue-900 border-x border-blue-200" : "bg-zinc-50/80"
+                                        )} title={loc.name}>
+                                            {loc.name}
+                                        </TableHead>
+                                    );
+                                })}
                             <TableHead colSpan={2} className="text-center bg-zinc-100 text-zinc-700 border-b border-zinc-200 font-semibold h-8 py-1">Total Geral</TableHead>
                             <TableHead rowSpan={2} className="text-right w-[80px] align-bottom">Ações</TableHead>
                         </TableRow>
                         <TableRow>
                             {/* Dynamic Sub-headers */}
-                            {stockLocations.map(loc => {
-                                const isSelected = warehouseFilter === loc.slug || warehouseFilter === loc.id;
-                                return (
-                                    <Fragment key={loc.id}>
-                                        <TableHead className={cn("text-right h-8 py-1 text-xs", isSelected ? "bg-blue-50/80 border-l border-blue-200 font-bold" : "bg-zinc-50/30")}>Qtd</TableHead>
-                                        <TableHead className={cn("text-right h-8 py-1 text-xs", isSelected ? "bg-blue-50/80" : "bg-zinc-50/30")}>Médio</TableHead>
-                                        <TableHead className={cn("text-right h-8 py-1 text-xs font-bold", isSelected ? "bg-blue-50/80 border-r border-blue-200" : "bg-zinc-50/30")}>Total</TableHead>
-                                    </Fragment>
-                                );
-                            })}
+                            {stockLocations
+                                .filter(loc => warehouseFilter === 'all' || warehouseFilter === loc.slug || warehouseFilter === loc.id)
+                                .map(loc => {
+                                    const isSelected = warehouseFilter === loc.slug || warehouseFilter === loc.id;
+                                    return (
+                                        <Fragment key={loc.id}>
+                                            <TableHead className={cn("text-right h-8 py-1 text-xs", isSelected ? "bg-blue-50/80 border-l border-blue-200 font-bold" : "bg-zinc-50/30")}>Qtd</TableHead>
+                                            <TableHead className={cn("text-right h-8 py-1 text-xs", isSelected ? "bg-blue-50/80" : "bg-zinc-50/30")}>Médio</TableHead>
+                                            <TableHead className={cn("text-right h-8 py-1 text-xs font-bold", isSelected ? "bg-blue-50/80 border-r border-blue-200" : "bg-zinc-50/30")}>Total</TableHead>
+                                        </Fragment>
+                                    );
+                                })}
                             {/* Total Geral Sub-headers */}
                             <TableHead className="text-right bg-zinc-50 h-8 py-1 text-xs font-bold">Qtd</TableHead>
                             <TableHead className="text-right bg-zinc-50 h-8 py-1 text-xs font-bold">Total</TableHead>
@@ -961,8 +998,10 @@ export default function Inventory() {
                                             <TableCell>{item.unit}</TableCell>
 
                                             {/* Dynamic Location Columns */}
-                                            {stockLocations.map(loc => {
-                                                let stock = item.stocks?.find(s => s.location_id === loc.id);
+                                            {stockLocations
+                                                .filter(loc => warehouseFilter === 'all' || warehouseFilter === loc.slug || warehouseFilter === loc.id)
+                                                .map(loc => {
+                                                    let stock = item.stocks?.find(s => s.location_id === loc.id);
                                                 let qty = stock ? Number(stock.quantity || 0) : undefined;
                                                 let cost = stock ? Number(stock.average_cost || 0) : 0;
 
