@@ -330,40 +330,67 @@ export default function Inventory() {
         setIsSaving(true);
         try {
             if (currentIngredient.is_product_entity) {
-                toast({ variant: 'destructive', title: "Ação Inválida", description: "Produtos Acabados devem ser editados na tela de Receitas." });
-                return;
+                // Edit product basic details from inventory view
+                const payload = {
+                    name: currentIngredient.name,
+                    category: currentIngredient.category || 'Produtos',
+                    unit: currentIngredient.unit,
+                    price: Number(currentIngredient.price || 0),
+                    cost: Number(currentIngredient.cost || 0),
+                    batch_size: Number(currentIngredient.batch_size || 1)
+                };
+                const { error } = await supabase.from('products').update(payload).eq('id', currentIngredient.id);
+                if (error) throw error;
+                toast({ title: "Produto atualizado com sucesso" });
+            } else {
+                // Ingredient entity
+                const payload = {
+                    min_stock: Number(currentIngredient.min_stock || 0),
+                    name: currentIngredient.name,
+                    category: currentIngredient.category || 'Outros',
+                    unit: currentIngredient.unit,
+                    unit_weight: Number(currentIngredient.unit_weight || 1), // Conversion factor
+                    unit_type: currentIngredient.unit_type || '', // Secondary unit
+                    type: currentIngredient.type || 'stock',
+                    cost: Number(currentIngredient.cost || 0)
+                };
+
+                if (currentIngredient.id) {
+                    // Update
+                    const { error } = await supabase.from('ingredients').update(payload).eq('id', currentIngredient.id);
+                    if (error) throw error;
+                    toast({ title: "Insumo atualizado com sucesso" });
+                } else {
+                    // Insert new ingredient
+                    const { data: { user } } = await supabase.auth.getUser();
+                    let userCompanyId = null;
+                    if (user) {
+                        const { data: prof } = await supabase.from('profiles').select('company_id').eq('id', user.id).single();
+                        if (prof) userCompanyId = prof.company_id;
+                    }
+                    const { error } = await supabase.from('ingredients').insert({
+                        ...payload,
+                        company_id: userCompanyId,
+                        stock_danilo: 0,
+                        stock_adriel: 0,
+                        cost_danilo: 0,
+                        cost_adriel: 0,
+                        is_active: true
+                    });
+                    if (error) throw error;
+                    toast({ title: "Novo insumo cadastrado com sucesso" });
+                }
             }
-
-            // Apenas edição do Min Stock é permitida agora (e custo tecnicamente, mas vou travar)
-            if (!currentIngredient.id) return; // Não cria mais aqui
-
-            const payload = {
-                min_stock: Number(currentIngredient.min_stock || 0),
-                name: currentIngredient.name,
-                category: currentIngredient.category,
-                unit: currentIngredient.unit,
-                unit_weight: Number(currentIngredient.unit_weight || 1), // Fator de Conversão
-                unit_type: currentIngredient.unit_type, // Nome da Unidade Secundária
-                type: currentIngredient.type,
-                cost: currentIngredient.cost,
-                // Legacy fields cleanup (optional, or keep generic)
-                purchase_unit: null,
-                purchase_unit_factor: 1
-            };
-
-            const { error } = await supabase.from('ingredients').update(payload).eq('id', currentIngredient.id);
-            if (error) throw error;
-
-            toast({ title: "Estoque Mínimo atualizado!" });
 
             setIsDialogOpen(false);
             fetchIngredients();
         } catch (error: any) {
+            console.error(error);
             toast({ variant: "destructive", title: "Erro ao salvar", description: error.message });
         } finally {
             setIsSaving(false);
         }
-    }
+    };
 
     async function handleDelete(id: string) {
         if (!confirm("Escolha uma opção:\n\n1. Desativar (Remove da lista mas mantém histórico)\n2. EXCLUIR PERMANENTEMENTE (Cuidado: pode falhar se houver pedidos)")) return;
@@ -673,9 +700,27 @@ export default function Inventory() {
                         <History className="mr-2 h-4 w-4" /> Histórico Global
                     </Button>
                     {isAdmin && (
-                        <Button variant="outline" onClick={() => setIsAuditOpen(true)} className="text-blue-700 bg-blue-50 border-blue-200 w-full md:w-auto">
-                            <ClipboardCheck className="mr-2 h-4 w-4" /> Realizar Inventário
-                        </Button>
+                        <>
+                            <Button onClick={() => {
+                                const firstCat = availableCategories.find(c => c.type === 'stock')?.name || 'Ingredientes';
+                                setCurrentIngredient({
+                                    name: '',
+                                    type: 'stock',
+                                    category: firstCat,
+                                    unit: 'g',
+                                    unit_weight: 1,
+                                    unit_type: '',
+                                    min_stock: 0,
+                                    cost: 0
+                                });
+                                setIsDialogOpen(true);
+                            }} className="bg-zinc-900 text-white hover:bg-zinc-800 w-full md:w-auto">
+                                <Plus className="mr-2 h-4 w-4" /> Novo Insumo
+                            </Button>
+                            <Button variant="outline" onClick={() => setIsAuditOpen(true)} className="text-blue-700 bg-blue-50 border-blue-200 w-full md:w-auto">
+                                <ClipboardCheck className="mr-2 h-4 w-4" /> Realizar Inventário
+                            </Button>
+                        </>
                     )}
                 </div>
             </div>
@@ -1092,60 +1137,85 @@ export default function Inventory() {
 
             {/* Dialog de Edição Flexível */}
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogContent className="sm:max-w-[425px] overflow-visible">
+                <DialogContent className="sm:max-w-[450px] overflow-visible">
                     <DialogHeader>
-                        <DialogTitle>Editar Produto</DialogTitle>
+                        <div className="flex items-center gap-2">
+                            <DialogTitle>
+                                {currentIngredient.id 
+                                    ? currentIngredient.is_product_entity 
+                                        ? "Editar Produto Acabado" 
+                                        : "Editar Insumo / Ingrediente"
+                                    : "Cadastrar Novo Insumo"
+                                }
+                            </DialogTitle>
+                            {currentIngredient.is_product_entity ? (
+                                <Badge className="bg-amber-100 text-amber-800 border-amber-200">Acabado</Badge>
+                            ) : (
+                                <Badge className="bg-blue-100 text-blue-800 border-blue-200">Insumo</Badge>
+                            )}
+                        </div>
                     </DialogHeader>
+
+                    {currentIngredient.is_product_entity && (
+                        <div className="text-xs bg-zinc-50 border rounded-md p-3 text-zinc-600 italic">
+                            ⚠️ Este é um produto final à venda. Você pode ajustar seus dados básicos aqui. O custo é calculado via Ficha Técnica (Receitas), mas pode ser definido manualmente abaixo caso não possua receita.
+                        </div>
+                    )}
+
                     <div className="space-y-4 py-2">
                         {/* Nome */}
-                        <div className="space-y-2">
-                            <Label htmlFor="name">Nome do Produto</Label>
+                        <div className="space-y-1">
+                            <Label htmlFor="name">Nome do Item</Label>
                             <Input
                                 id="name"
                                 value={currentIngredient.name || ''}
                                 onChange={(e) => setCurrentIngredient({ ...currentIngredient, name: e.target.value })}
                                 disabled={!isAdmin}
-                                placeholder="Ex: Leite Condensado"
+                                placeholder={currentIngredient.is_product_entity ? "Ex: Bolo de Pote Morango" : "Ex: Leite Ninho Pó"}
                             />
                         </div>
 
-                        {/* Tipo de Produto */}
-                        <div className="space-y-2">
-                            <Label>Tipo de Produto</Label>
-                            <div className="flex gap-4">
-                                <label className="flex items-center space-x-2 border p-3 rounded-md w-full cursor-pointer hover:bg-zinc-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-200">
-                                    <input
-                                        type="radio"
-                                        name="editProductType"
-                                        value="stock"
-                                        checked={currentIngredient.type === 'stock' || !currentIngredient.type}
-                                        onChange={() => setCurrentIngredient({ ...currentIngredient, type: 'stock' })}
-                                        disabled={!isAdmin}
-                                        className="text-blue-600"
-                                    />
-                                    <div className="flex flex-col">
-                                        <span className="font-medium text-sm">Estoque</span>
-                                    </div>
-                                </label>
-                                <label className="flex items-center space-x-2 border p-3 rounded-md w-full cursor-pointer hover:bg-zinc-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-200">
-                                    <input
-                                        type="radio"
-                                        name="editProductType"
-                                        value="expense"
-                                        checked={currentIngredient.type === 'expense'}
-                                        onChange={() => setCurrentIngredient({ ...currentIngredient, type: 'expense', min_stock: 0 })}
-                                        disabled={!isAdmin}
-                                        className="text-blue-600"
-                                    />
-                                    <div className="flex flex-col">
-                                        <span className="font-medium text-sm">Despesa</span>
-                                    </div>
-                                </label>
+                        {/* Tipo (Somente para Insumos) */}
+                        {!currentIngredient.is_product_entity && (
+                            <div className="space-y-2">
+                                <Label>Tipo de Item</Label>
+                                <div className="flex gap-4">
+                                    <label className="flex items-center space-x-2 border p-3 rounded-md w-full cursor-pointer hover:bg-zinc-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-200">
+                                        <input
+                                            type="radio"
+                                            name="editProductType"
+                                            value="stock"
+                                            checked={currentIngredient.type === 'stock' || !currentIngredient.type}
+                                            onChange={() => setCurrentIngredient({ ...currentIngredient, type: 'stock' })}
+                                            disabled={!isAdmin || !!currentIngredient.id}
+                                            className="text-blue-600"
+                                        />
+                                        <div className="flex flex-col">
+                                            <span className="font-medium text-sm">Estoque</span>
+                                            <span className="text-[10px] text-zinc-400 font-normal">Insumo físico/controle</span>
+                                        </div>
+                                    </label>
+                                    <label className="flex items-center space-x-2 border p-3 rounded-md w-full cursor-pointer hover:bg-zinc-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-200">
+                                        <input
+                                            type="radio"
+                                            name="editProductType"
+                                            value="expense"
+                                            checked={currentIngredient.type === 'expense'}
+                                            onChange={() => setCurrentIngredient({ ...currentIngredient, type: 'expense', min_stock: 0 })}
+                                            disabled={!isAdmin || !!currentIngredient.id}
+                                            className="text-blue-600"
+                                        />
+                                        <div className="flex flex-col">
+                                            <span className="font-medium text-sm">Despesa</span>
+                                            <span className="text-[10px] text-zinc-400 font-normal">Uso imediato/sem saldo</span>
+                                        </div>
+                                    </label>
+                                </div>
                             </div>
-                        </div>
+                        )}
 
-                        {/* Categoria (Híbrido) */}
-                        <div className="space-y-2">
+                        {/* Categoria */}
+                        <div className="space-y-1">
                             <Label>Categoria</Label>
                             <div className="flex gap-2">
                                 <Select
@@ -1158,30 +1228,33 @@ export default function Inventory() {
                                     </SelectTrigger>
                                     <SelectContent>
                                         {availableCategories
-                                            .filter(c => c.type === (currentIngredient.type || 'stock'))
+                                            .filter(c => currentIngredient.is_product_entity || c.type === (currentIngredient.type || 'stock'))
                                             .map(c => <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>)
                                         }
+                                        {currentIngredient.category && !availableCategories.some(c => c.name === currentIngredient.category) && (
+                                            <SelectItem value={currentIngredient.category}>{currentIngredient.category}</SelectItem>
+                                        )}
                                     </SelectContent>
                                 </Select>
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => setIsManageCategoriesOpen(true)}
-                                    title="Gerenciar Categorias"
-                                    disabled={!isAdmin}
-                                >
-                                    <Settings className="h-4 w-4" />
-                                </Button>
+                                {!currentIngredient.is_product_entity && (
+                                    <Button
+                                        variant="outline"
+                                        size="icon"
+                                        onClick={() => setIsManageCategoriesOpen(true)}
+                                        title="Gerenciar Categorias"
+                                        disabled={!isAdmin}
+                                    >
+                                        <Settings className="h-4 w-4" />
+                                    </Button>
+                                )}
                             </div>
                         </div>
 
-                    </div>
-
-                    {(!currentIngredient.type || currentIngredient.type === 'stock') && (
+                        {/* Unidade Principal e Preço / Custo */}
                         <div className="grid grid-cols-2 gap-4">
-                            {/* Unidade Principal */}
-                            <div className="space-y-2">
-                                <Label>Unidade Principal (Estoque)</Label>
+                            {/* Unidade */}
+                            <div className="space-y-1">
+                                <Label>Unidade</Label>
                                 <div className="flex gap-2">
                                     <Select
                                         value={currentIngredient.unit}
@@ -1193,115 +1266,166 @@ export default function Inventory() {
                                         </SelectTrigger>
                                         <SelectContent>
                                             {availableUnits.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                                            {currentIngredient.unit && !availableUnits.includes(currentIngredient.unit.toLowerCase()) && (
+                                                <SelectItem value={currentIngredient.unit}>{currentIngredient.unit}</SelectItem>
+                                            )}
                                         </SelectContent>
                                     </Select>
-                                    <Button
-                                        variant="outline"
-                                        size="icon"
-                                        onClick={() => setIsManageUnitsOpen(true)}
-                                        title="Gerenciar Lista de Unidades"
-                                        disabled={!isAdmin}
-                                    >
-                                        <Settings className="h-4 w-4" />
-                                    </Button>
+                                    {!currentIngredient.is_product_entity && (
+                                        <Button
+                                            variant="outline"
+                                            size="icon"
+                                            onClick={() => setIsManageUnitsOpen(true)}
+                                            title="Gerenciar Unidades"
+                                            disabled={!isAdmin}
+                                        >
+                                            <Settings className="h-4 w-4" />
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
 
-                            {/* Estoque Mínimo */}
-                            <div className="space-y-2">
+                            {/* Custo Médio / Manual */}
+                            <div className="space-y-1">
+                                <Label htmlFor="cost">
+                                    {currentIngredient.is_product_entity ? "Custo Manual" : "Custo Médio (R$)"}
+                                </Label>
+                                <Input
+                                    id="cost"
+                                    type="number"
+                                    value={currentIngredient.cost !== undefined ? currentIngredient.cost : ''}
+                                    onChange={(e) => setCurrentIngredient({ ...currentIngredient, cost: Number(e.target.value) })}
+                                    disabled={!isAdmin || (!currentIngredient.is_product_entity && !!currentIngredient.id)}
+                                    placeholder="R$ 0.00"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Campos específicos do Produto Acabado */}
+                        {currentIngredient.is_product_entity && (
+                            <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2">
+                                <div className="space-y-1">
+                                    <Label htmlFor="price">Preço de Venda (R$)</Label>
+                                    <Input
+                                        id="price"
+                                        type="number"
+                                        value={currentIngredient.price !== undefined ? currentIngredient.price : ''}
+                                        onChange={(e) => setCurrentIngredient({ ...currentIngredient, price: Number(e.target.value) })}
+                                        disabled={!isAdmin}
+                                        placeholder="R$ 0.00"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="batch_size">Rendimento Lote</Label>
+                                    <Input
+                                        id="batch_size"
+                                        type="number"
+                                        value={currentIngredient.batch_size !== undefined ? currentIngredient.batch_size : 1}
+                                        onChange={(e) => setCurrentIngredient({ ...currentIngredient, batch_size: Number(e.target.value) })}
+                                        disabled={!isAdmin}
+                                        placeholder="Ex: 1"
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Estoque Mínimo (Apenas Insumos) */}
+                        {!currentIngredient.is_product_entity && (currentIngredient.type === 'stock' || !currentIngredient.type) && (
+                            <div className="space-y-1">
                                 <Label htmlFor="min_stock">Estoque Mínimo</Label>
                                 <Input
                                     id="min_stock"
                                     type="number"
-                                    value={currentIngredient.min_stock || 0}
+                                    value={currentIngredient.min_stock !== undefined ? currentIngredient.min_stock : 0}
                                     onChange={(e) => setCurrentIngredient({ ...currentIngredient, min_stock: Number(e.target.value) })}
+                                    disabled={!isAdmin && !!currentIngredient.id}
                                 />
                             </div>
+                        )}
 
+                        {/* Conversão Opcional (Apenas Insumos de Estoque) */}
+                        {!currentIngredient.is_product_entity && (currentIngredient.type === 'stock' || !currentIngredient.type) && (
+                            <div className="border rounded-md p-3 bg-zinc-50 space-y-3">
+                                <div className="flex items-center space-x-2">
+                                    <input
+                                        type="checkbox"
+                                        id="has-conversion"
+                                        className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                                        checked={!!currentIngredient.unit_type}
+                                        onChange={(e) => {
+                                            if (e.target.checked) {
+                                                setCurrentIngredient({ ...currentIngredient, unit_weight: 0, unit_type: 'g' });
+                                            } else {
+                                                setCurrentIngredient({ ...currentIngredient, unit_weight: 1, unit_type: '' });
+                                            }
+                                        }}
+                                        disabled={!isAdmin}
+                                    />
+                                    <Label htmlFor="has-conversion" className="text-sm font-medium cursor-pointer">
+                                        Habilitar conversão secundária (Receita)
+                                    </Label>
+                                </div>
 
-                        </div>
-                    )}
-
-                    {/* Conversão Opcional */}
-                    {(!currentIngredient.type || currentIngredient.type === 'stock') && (
-                        <div className="border rounded-md p-3 bg-zinc-50 space-y-3">
-                            <div className="flex items-center space-x-2">
-                                <input
-                                    type="checkbox"
-                                    id="has-conversion"
-                                    className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                                    checked={!!currentIngredient.unit_type}
-                                    onChange={(e) => {
-                                        if (e.target.checked) {
-                                            setCurrentIngredient({ ...currentIngredient, unit_weight: 0, unit_type: 'g' });
-                                        } else {
-                                            setCurrentIngredient({ ...currentIngredient, unit_weight: 1, unit_type: '' });
-                                        }
-                                    }}
-                                    disabled={!isAdmin}
-                                />
-                                <Label htmlFor="has-conversion" className="text-sm font-medium cursor-pointer">
-                                    Habilitar conversão secundária (Receita)
-                                </Label>
-                            </div>
-
-                            {(!!currentIngredient.unit_type) && (
-                                <div className="grid grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2">
-                                    <div className="col-span-1 space-y-1">
-                                        <Label className="text-[10px]">Unid. Secundária</Label>
-                                        <div className="flex gap-2">
-                                            <Select
-                                                value={currentIngredient.unit_type}
-                                                onValueChange={(val) => setCurrentIngredient({ ...currentIngredient, unit_type: val })}
+                                {(!!currentIngredient.unit_type) && (
+                                    <div className="grid grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2">
+                                        <div className="col-span-1 space-y-1">
+                                            <Label className="text-[10px]">Unid. Secundária</Label>
+                                            <div className="flex gap-2">
+                                                <Select
+                                                    value={currentIngredient.unit_type}
+                                                    onValueChange={(val) => setCurrentIngredient({ ...currentIngredient, unit_type: val })}
+                                                    disabled={!isAdmin}
+                                                >
+                                                    <SelectTrigger className="w-full h-8 text-xs">
+                                                        <SelectValue placeholder="Selecione..." />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {availableUnits.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>
+                                                <Button
+                                                    variant="outline"
+                                                    size="icon"
+                                                    className="h-8 w-8"
+                                                    onClick={() => setIsManageUnitsOpen(true)}
+                                                    title="Gerenciar Unidades"
+                                                    disabled={!isAdmin}
+                                                >
+                                                    <Settings className="h-3 w-3" />
+                                                </Button>
+                                            </div>
+                                        </div>
+                                        <div className="col-span-2 space-y-1">
+                                            <Label className="text-[10px]">Fator de Conversão</Label>
+                                            <Input
+                                                type="number"
+                                                value={currentIngredient.unit_weight || ''}
+                                                onChange={(e) => setCurrentIngredient({ ...currentIngredient, unit_weight: Number(e.target.value) })}
+                                                className="h-8 text-xs"
+                                                placeholder="Ex: 395"
                                                 disabled={!isAdmin}
-                                            >
-                                                <SelectTrigger className="w-full h-8 text-xs">
-                                                    <SelectValue placeholder="Selecione..." />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {availableUnits.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-                                                </SelectContent>
-                                            </Select>
-                                            <Button
-                                                variant="outline"
-                                                size="icon"
-                                                className="h-8 w-8"
-                                                onClick={() => setIsManageUnitsOpen(true)}
-                                                title="Gerenciar Lista de Unidades"
-                                                disabled={!isAdmin}
-                                            >
-                                                <Settings className="h-3 w-3" />
-                                            </Button>
+                                            />
+                                        </div>
+                                        <div className="col-span-3">
+                                            <p className="text-[11px] text-zinc-500 bg-white p-2 border rounded text-center italic">
+                                                "1 <strong>{currentIngredient.unit || '...'}</strong> equivale a <strong>{currentIngredient.unit_weight || '?'} {currentIngredient.unit_type || '...'}</strong>"
+                                            </p>
                                         </div>
                                     </div>
-                                    <div className="col-span-2 space-y-1">
-                                        <Label className="text-[10px]">Fator de Conversão</Label>
-                                        <Input
-                                            type="number"
-                                            value={currentIngredient.unit_weight || ''}
-                                            onChange={(e) => setCurrentIngredient({ ...currentIngredient, unit_weight: Number(e.target.value) })}
-                                            className="h-8 text-xs"
-                                            placeholder="Ex: 395"
-                                            disabled={!isAdmin}
-                                        />
-                                    </div>
-                                    <div className="col-span-3">
-                                        <p className="text-[11px] text-zinc-500 bg-white p-2 border rounded text-center italic">
-                                            "1 <strong>{currentIngredient.unit || '...'}</strong> equivale a <strong>{currentIngredient.unit_weight || '?'} {currentIngredient.unit_type || '...'}</strong>"
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
+                                )}
+                            </div>
+                        )}
+                    </div>
 
                     <DialogFooter>
-                        {!isAdmin && <span className="text-xs text-amber-600 flex items-center mr-auto">Apenas: Estoque Mínimo.</span>}
+                        {!isAdmin && <span className="text-xs text-amber-600 flex items-center mr-auto">Apenas visualização habilitada.</span>}
                         <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
-                        <Button type="submit" onClick={handleSave} disabled={isSaving}>
-                            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Salvar Alterações
-                        </Button>
+                        {isAdmin && (
+                            <Button type="submit" onClick={handleSave} disabled={isSaving}>
+                                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Salvar Alterações
+                            </Button>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
