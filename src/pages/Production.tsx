@@ -334,20 +334,14 @@ export default function Production() {
                     // Let's reuse the logic from `useMemo`:
 
                     // Let's reuse the logic from `useMemo`:
-                    // let computedUnitCost = baseCost;
-                    // if (itemWeight > 0) computedUnitCost = baseCost / itemWeight;
-
-                    // However, we don't know the BOM item UNIT here (it's not in the simple interface?)
-                    // DB `product_bom` table has `unit` column? Yes per Step 885.
-                    // We can use bomItem.quantity directly if we assume it aligns with cost.
-
-                    // Safest fallback -> Use simple multiplication if weight is 1, else divide?
-
-                    // Let's assume the safest path:
-                    // Cost = Qty * (BaseCost / UnitWeight)
-                    itemCost = bomItem.quantity * (baseCost / (itemWeight || 1));
-
-                    // Correction: If UnitWeight is 1 or null, we just multiply.
+                    const isSameUnit = bomItem.unit?.toLowerCase() === ing.unit?.toLowerCase();
+                    if (isSameUnit) {
+                        itemCost = bomItem.quantity * baseCost;
+                    } else if (itemWeight > 0) {
+                        itemCost = bomItem.quantity * (baseCost / itemWeight);
+                    } else {
+                        itemCost = bomItem.quantity * baseCost;
+                    }
                 }
             }
             // Handle Sub-Product
@@ -387,8 +381,14 @@ export default function Production() {
                         ? stockEntry.average_cost
                         : (ing.cost || Math.max(ing.cost_danilo || 0, ing.cost_adriel || 0));
 
-                    if (unitWeight > 0) cost = baseCost / unitWeight;
-                    else cost = baseCost;
+                    const isSameUnit = item.unit?.toLowerCase() === ing.unit?.toLowerCase();
+                    if (isSameUnit) {
+                        cost = baseCost;
+                    } else if (unitWeight > 0) {
+                        cost = baseCost / unitWeight;
+                    } else {
+                        cost = baseCost;
+                    }
                 }
             } else {
                 const prod = products.find(p => p.id === item.item_id);
