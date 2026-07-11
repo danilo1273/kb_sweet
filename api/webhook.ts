@@ -307,6 +307,104 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           text: '❌ *Lançamento de compra cancelado.*',
           parse_mode: 'Markdown'
         });
+      } else if (callbackData.startsWith('sd_dec:')) {
+        const decision = callbackData.split(':')[1];
+        
+        const state = profile.telegram_state as any;
+        if (state?.action !== 'awaiting_sale_stock_decision' || !state.sale_data) {
+          await sendTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId, text: 'Decisão expirada ou inválida.' });
+          return res.status(200).send('OK');
+        }
+
+        const saleData = state.sale_data;
+
+        if (decision === 'cancel') {
+          await sendTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId, text: 'Venda cancelada.' });
+          await sendTelegram('editMessageText', {
+            chat_id: chatId,
+            message_id: messageId,
+            text: '❌ *Venda cancelada por falta de estoque.*',
+            parse_mode: 'Markdown'
+          });
+          await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
+          return res.status(200).send('OK');
+        }
+
+        await sendTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId, text: 'Registrando venda...' });
+
+        if (decision === 'adjust') {
+          // Adjust stock to match the required quantity for each insufficient item
+          for (const missingItem of saleData.insufficient_items) {
+            // Get location slug with multi-tenant company RLS check
+            let locQuery = supabase
+              .from('stock_locations')
+              .select('slug')
+              .eq('id', saleData.location_id);
+              
+            if (profile.company_id) {
+              locQuery = locQuery.eq('company_id', profile.company_id);
+            }
+
+            const { data: locationData } = await locQuery.single();
+            const locationSlug = locationData?.slug || 'estoque-principal';
+
+            // Apply adjustment using apply_product_stock_adjustment RPC
+            const { error: adjustErr } = await supabase.rpc('apply_product_stock_adjustment', {
+              p_product_id: missingItem.product_id,
+              p_new_stock: Number(missingItem.required),
+              p_stock_owner: locationSlug,
+              p_reason: 'Ajuste automático para suprir venda via Telegram',
+              p_type: 'found'
+            });
+
+            if (adjustErr) throw adjustErr;
+          }
+        }
+
+        // Process the sale using process_sale RPC
+        const { data: saleId, error: saleErr } = await supabase.rpc('process_sale', {
+          p_items: saleData.items,
+          p_total: saleData.total,
+          p_discount: saleData.discount,
+          p_payment_method: saleData.payment_method,
+          p_client_id: saleData.client_id,
+          p_location_id: saleData.location_id
+        });
+
+        if (saleErr) throw saleErr;
+
+        // Fetch products and clients for summary
+        let productsQuery = supabase.from('products').select('id, name');
+        let clientsQuery = supabase.from('clients').select('id, name');
+
+        if (profile.company_id) {
+          productsQuery = productsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+          clientsQuery = clientsQuery.or(`company_id.eq.${profile.company_id},company_id.is.null`);
+        } else {
+          productsQuery = productsQuery.is('company_id', null);
+          clientsQuery = clientsQuery.is('company_id', null);
+        }
+
+        const [productsRes, clientsRes] = await Promise.all([productsQuery, clientsQuery]);
+        const products = productsRes.data || [];
+        const clients = clientsRes.data || [];
+
+        const clientName = clients?.find((c: any) => c.id === saleData.client_id)?.name || 'Cliente Avulso';
+        const summaryItems = saleData.items.map((item: any) => {
+          const name = products?.find((p: any) => p.id === item.product_id)?.name || 'Produto';
+          return `• ${item.quantity}x ${name} (R$ ${item.unit_price.toFixed(2)})`;
+        }).join('\n');
+
+        const adjustmentMsg = decision === 'adjust' ? '\n⚠️ _Estoque ajustado automaticamente para suprir a venda._' : '\n⚠️ _Venda registrada forçadamente com estoque negativo._';
+
+        await sendTelegram('editMessageText', {
+          chat_id: chatId,
+          message_id: messageId,
+          text: `✅ *Venda registrada com sucesso!*${adjustmentMsg}\n\n*Cliente:* ${clientName}\n*Itens:*\n${summaryItems}\n*Total:* R$ ${saleData.total.toFixed(2)}\n*Pagamento:* ${saleData.payment_method?.toUpperCase()}\n\nEstoque atualizado e lançamento financeiro gerado.`,
+          parse_mode: 'Markdown'
+        });
+
+        await supabase.from('profiles').update({ telegram_state: null }).eq('id', profile.id);
       }
 
       return res.status(200).send('OK');
@@ -855,6 +953,72 @@ Retorne um JSON seguindo exatamente este formato:
 
       // Default location if missing
       const locationId = parsed.location_id || locations?.[0]?.id;
+
+      // Verify stock before sale
+      const insufficientStockItems = [];
+      for (const item of itemsPayload) {
+        const { data: stockData } = await supabase
+          .from('product_stocks')
+          .select('quantity')
+          .eq('product_id', item.product_id)
+          .eq('location_id', locationId)
+          .maybeSingle();
+
+        const currentQty = stockData ? Number(stockData.quantity || 0) : 0;
+        if (currentQty < item.quantity) {
+          const prodName = products?.find(p => p.id === item.product_id)?.name || 'Produto';
+          insufficientStockItems.push({
+            product_id: item.product_id,
+            name: prodName,
+            required: item.quantity,
+            current: currentQty,
+            missing: item.quantity - currentQty
+          });
+        }
+      }
+
+      if (insufficientStockItems.length > 0) {
+        // Save pending sale details to profile state
+        const pendingSale = {
+          action: 'awaiting_sale_stock_decision',
+          sale_data: {
+            items: itemsPayload,
+            total,
+            discount: parsed.discount || 0,
+            payment_method: parsed.payment_method || 'outro',
+            client_id: parsed.client_id,
+            location_id: locationId,
+            insufficient_items: insufficientStockItems
+          }
+        };
+
+        const { error: stateErr } = await supabase
+          .from('profiles')
+          .update({ telegram_state: pendingSale })
+          .eq('id', profile.id);
+
+        if (stateErr) throw stateErr;
+
+        // Build message and inline keyboard options
+        const missingText = insufficientStockItems
+          .map(item => `• *${item.name}*: Precisa de ${item.required} un, mas só tem ${item.current} un (Falta: *${item.missing} un*)`)
+          .join('\n');
+
+        const inlineKeyboard = {
+          inline_keyboard: [
+            [
+              { text: '📈 Ajustar estoque e vender', callback_data: 'sd_dec:adjust' },
+              { text: '⚠️ Vender sem saldo', callback_data: 'sd_dec:force' }
+            ],
+            [
+              { text: '❌ Cancelar venda', callback_data: 'sd_dec:cancel' }
+            ]
+          ]
+        };
+
+        await sendMessage(chatId, `⚠️ *Aviso de Estoque Insuficiente!*\n\nNão há saldo suficiente no estoque selecionado para finalizar a venda:\n\n${missingText}\n\nO que deseja fazer?`, inlineKeyboard);
+        return res.status(200).send('OK');
+      }
 
       const { data: saleId, error: saleErr } = await supabase.rpc('process_sale', {
         p_items: itemsPayload,
