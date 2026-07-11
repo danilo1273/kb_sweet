@@ -1300,23 +1300,47 @@ export default function Production() {
                         </div>
                     )}
 
-                    {/* Cost Projection Block */}
+                    {/* Cost & Efficiency Projection Block */}
                     {selectedOrder?.status !== 'closed' && (
-                        <div className="grid grid-cols-2 gap-4 p-4 border rounded-md bg-white mx-4 mt-2 shadow-sm">
-                            <div>
-                                <p className="text-xs text-zinc-500 uppercase font-bold">Custo Total Projetado</p>
-                                <p className="text-xl font-bold text-zinc-900">R$ {totalProjectedCost.toFixed(2)}</p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-xs text-zinc-500 uppercase font-bold">Custo Unitário Projetado</p>
-                                <p className="text-xl font-bold text-green-600">
-                                    R$ {unitProjectedCost.toFixed(2)}
-                                    <span className="text-xs text-zinc-400 font-normal ml-1">
-                                        / {selectedOrder?.products?.unit || 'un'}
-                                    </span>
-                                </p>
-                            </div>
-                        </div>
+                        (() => {
+                            const plannedQty = selectedOrder?.quantity || 1;
+                            const efficiency = actualOutputQuantity > 0 ? (actualOutputQuantity / plannedQty) * 100 : 0;
+                            return (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 border rounded-md bg-white mx-4 mt-2 shadow-sm">
+                                    <div>
+                                        <p className="text-xs text-zinc-500 uppercase font-bold">Custo Total Projetado</p>
+                                        <p className="text-xl font-bold text-zinc-900">R$ {totalProjectedCost.toFixed(2)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-zinc-500 uppercase font-bold">Custo Unitário Projetado</p>
+                                        <p className="text-xl font-bold text-green-600">
+                                            R$ {unitProjectedCost.toFixed(2)}
+                                            <span className="text-xs text-zinc-400 font-normal ml-1">
+                                                / {selectedOrder?.products?.unit || 'un'}
+                                            </span>
+                                        </p>
+                                    </div>
+                                    <div className="border-t md:border-t-0 md:border-l pt-2 md:pt-0 md:pl-4">
+                                        <p className="text-xs text-zinc-500 uppercase font-bold">Eficiência de Rendimento</p>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <span className={`text-xl font-extrabold ${efficiency === 0 ? 'text-zinc-400' : efficiency >= 100 ? 'text-emerald-600' : efficiency >= 90 ? 'text-amber-600' : 'text-rose-600'}`}>
+                                                {efficiency > 0 ? `${efficiency.toFixed(1)}%` : '-'}
+                                            </span>
+                                            {efficiency > 0 && efficiency < 100 && (
+                                                <span className="text-[10px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded-full font-bold">
+                                                    Perda: -{(100 - efficiency).toFixed(1)}%
+                                                </span>
+                                            )}
+                                            {efficiency > 100 && (
+                                                <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full font-bold">
+                                                    Ganho: +{(efficiency - 100).toFixed(1)}%
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })()
                     )}
 
                     <div className="flex items-center gap-4 p-4 border rounded-md bg-zinc-50 mx-4 my-6">

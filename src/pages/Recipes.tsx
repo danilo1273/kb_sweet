@@ -100,6 +100,7 @@ export default function Recipes() {
 
     // Image Upload State
     const [uploading, setUploading] = useState(false);
+    const [markupValue, setMarkupValue] = useState<number>(3);
 
     // Admin: Users List for "Created By" assignment
     const [allUsers, setAllUsers] = useState<any[]>([]);
@@ -814,9 +815,10 @@ export default function Recipes() {
                         <DialogTitle>{currentProduct.id ? 'Editar' : 'Novo'} Produto / Receita</DialogTitle>
                     </DialogHeader>
                     <Tabs defaultValue="basic" className="w-full">
-                        <TabsList className="grid w-full grid-cols-2">
+                        <TabsList className="grid w-full grid-cols-3">
                             <TabsTrigger value="basic">Dados Básicos</TabsTrigger>
                             <TabsTrigger value="bom">Ficha Técnica</TabsTrigger>
+                            <TabsTrigger value="pricing">Precificação / Lucro</TabsTrigger>
                         </TabsList>
 
                         <TabsContent value="basic">
@@ -1316,6 +1318,97 @@ export default function Recipes() {
                                         </div>
                                     </>
                                 )}
+                            </div>
+                        </TabsContent>
+
+                        <TabsContent value="pricing">
+                            <div className="space-y-4 py-4">
+                                <div className="p-4 bg-zinc-50 rounded border space-y-4">
+                                    <h4 className="font-semibold text-zinc-700">Calculadora de Markup e Margem</h4>
+                                    
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <Label className="text-xs">Custo Unitário Atual</Label>
+                                            <div className="text-lg font-bold text-blue-600">
+                                                R$ {((calculatedCost > 0 ? (calculatedCost / (Number(currentProduct.batch_size) || 1)) : Number(currentProduct.cost || 0))).toFixed(2)}
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-xs">Preço de Venda Cadastrado</Label>
+                                            <div className="text-lg font-bold text-zinc-800">
+                                                R$ {(currentProduct.price || 0).toFixed(2)}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4 border-t pt-4">
+                                        <div className="space-y-1">
+                                            <Label htmlFor="markup_calc" className="text-xs">Markup Multiplicador (ex: 2.5 ou 3)</Label>
+                                            <Input
+                                                id="markup_calc"
+                                                type="number"
+                                                step="0.1"
+                                                min="1"
+                                                value={markupValue}
+                                                onChange={(e) => setMarkupValue(Number(e.target.value))}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-xs">Preço Sugerido (Markup)</Label>
+                                            <div className="text-lg font-extrabold text-green-600">
+                                                R$ {(((calculatedCost > 0 ? (calculatedCost / (Number(currentProduct.batch_size) || 1)) : Number(currentProduct.cost || 0))) * markupValue).toFixed(2)}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-end pt-2">
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            onClick={() => {
+                                                const unitCost = calculatedCost > 0 ? (calculatedCost / (Number(currentProduct.batch_size) || 1)) : Number(currentProduct.cost || 0);
+                                                const suggested = Number((unitCost * markupValue).toFixed(2));
+                                                setCurrentProduct(prev => ({ ...prev, price: suggested }));
+                                                toast({ title: "Preço atualizado!", description: `Preço de venda definido para R$ ${suggested.toFixed(2)}` });
+                                            }}
+                                            className="bg-green-600 hover:bg-green-700 text-white text-xs"
+                                        >
+                                            Aplicar Preço Sugerido
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                <div className="p-4 bg-zinc-50 rounded border space-y-3">
+                                    <h4 className="font-semibold text-zinc-700">Análise de Rentabilidade Real</h4>
+                                    
+                                    {currentProduct.price && currentProduct.price > 0 ? (
+                                        (() => {
+                                            const unitCost = calculatedCost > 0 ? (calculatedCost / (Number(currentProduct.batch_size) || 1)) : Number(currentProduct.cost || 0);
+                                            const profit = currentProduct.price - unitCost;
+                                            const margin = (profit / currentProduct.price) * 100;
+                                            const marginColor = margin >= 50 ? 'text-green-600' : margin >= 30 ? 'text-amber-600' : 'text-rose-600';
+                                            return (
+                                                <div className="space-y-2">
+                                                    <div className="flex justify-between items-center text-sm">
+                                                        <span>Lucro Bruto por Unidade:</span>
+                                                        <span className="font-bold text-zinc-800">R$ {profit.toFixed(2)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center text-sm">
+                                                        <span>Margem de Lucro Real:</span>
+                                                        <span className={`font-bold ${marginColor}`}>{margin.toFixed(1)}%</span>
+                                                    </div>
+                                                    <div className="text-[10px] text-zinc-400 mt-2">
+                                                        {margin >= 50 ? '🎉 Excelente margem de contribuição!' : margin >= 30 ? '🟡 Margem saudável para operação.' : '⚠️ Margem baixa. Considere reavaliar custos ou preço.'}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()
+                                    ) : (
+                                        <div className="text-xs text-muted-foreground text-center py-2">
+                                            Defina um preço de venda na aba Dados Básicos para analisar a rentabilidade.
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </TabsContent>
                     </Tabs>
