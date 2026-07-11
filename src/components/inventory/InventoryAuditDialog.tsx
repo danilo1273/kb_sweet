@@ -337,76 +337,47 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients =
                                                         {item.systemStock.toLocaleString('pt-BR')}
                                                     </TableCell>
                                                     <TableCell className="bg-blue-50/30 p-2 align-top">
-                                                        <div className="flex flex-col gap-1">
+                                                        <div className="flex flex-col gap-1 items-center justify-center">
                                                             {/* Primary Stock */}
-                                                            <div className="relative">
+                                                            <div className="relative w-full">
                                                                 <Input
                                                                     type="number"
-                                                                    className="text-center font-bold h-7 text-xs pr-8"
+                                                                    className="text-center font-bold h-8 text-xs pr-8"
                                                                     value={item.physicalStock}
                                                                     onChange={(e) => handleStockChange(item.id, e.target.value)}
                                                                     placeholder={String(item.systemStock)}
                                                                 />
-                                                                <span className="absolute right-2 top-1.5 text-[10px] text-zinc-400 pointer-events-none">
+                                                                <span className="absolute right-2 top-2 text-[10px] text-zinc-400 pointer-events-none">
                                                                     {item.unit}
                                                                 </span>
                                                             </div>
-
-                                                            {/* Secondary Stock (if applicable) */}
+ 
+                                                            {/* Secondary Stock Display in Text */}
                                                             {(() => {
                                                                 const original = ingredients.find(i => i.id === item.id);
-
                                                                 let factor = 1;
                                                                 let secUnit = null;
                                                                 let isRecipeUnit = false;
-
-                                                                // Priority 1: Purchase Unit (Base / Factor = Sec)
+ 
                                                                 if (original?.purchase_unit && (original.purchase_unit || "").toLowerCase() !== (item.unit || "").toLowerCase()) {
                                                                     secUnit = original.purchase_unit;
                                                                     factor = original.purchase_unit_factor || 1;
                                                                     isRecipeUnit = false;
                                                                 }
-                                                                // Priority 2: Recipe/Secondary Unit (Base * Factor = Sec)
                                                                 else if (original?.unit_type && (original.unit_type || "").toLowerCase() !== (item.unit || "").toLowerCase()) {
                                                                     secUnit = original.unit_type;
                                                                     factor = original.unit_weight || 1;
                                                                     isRecipeUnit = true;
                                                                 }
-
+ 
                                                                 const showSecondary = !!secUnit && factor !== 1;
-
-                                                                if (showSecondary) {
-                                                                    const valNum = Number(item.physicalStock);
-                                                                    const secVal = item.physicalStock === "" ? "" : (isRecipeUnit ? valNum * factor : valNum / factor);
-                                                                    // Format to max 3 decimals for display to avoid ugly floats, but keep precision in calculation
-                                                                    const displaySecVal = secVal === "" ? "" : Number(secVal).toLocaleString('en-US', { maximumFractionDigits: 3, useGrouping: false });
-
+                                                                if (showSecondary && item.physicalStock !== "") {
+                                                                    const valNum = Number(item.physicalStock) || 0;
+                                                                    const secVal = isRecipeUnit ? valNum * factor : valNum / factor;
                                                                     return (
-                                                                        <div className="relative">
-                                                                            <Input
-                                                                                type="number"
-                                                                                className="text-center h-7 text-xs bg-blue-100/50 pr-8 text-blue-700"
-                                                                                // We use text type or handle number specially to avoid floating point inputs locking up?
-                                                                                // Let's rely on standard type="number" but realize it might fight with rounding.
-                                                                                // Better: Controlled input.
-                                                                                defaultValue={displaySecVal}
-                                                                                onBlur={(e) => {
-                                                                                    const val = parseFloat(e.target.value);
-                                                                                    if (!isNaN(val)) {
-                                                                                        // Reverse Logic
-                                                                                        const baseVal = isRecipeUnit ? val / factor : val * factor;
-                                                                                        handleStockChange(item.id, baseVal.toString());
-                                                                                    } else if (e.target.value === "") {
-                                                                                        handleStockChange(item.id, "");
-                                                                                    }
-                                                                                }}
-                                                                                key={`${item.id}-sec-stock-${item.physicalStock}`} // Force re-render on base change to update defaultValue?
-                                                                            // Actually, controlled value is better.
-                                                                            />
-                                                                            <span className="absolute right-2 top-1.5 text-[10px] text-blue-400 pointer-events-none">
-                                                                                {secUnit}
-                                                                            </span>
-                                                                        </div>
+                                                                        <span className="text-[10px] text-zinc-500 font-semibold mt-1">
+                                                                            = {secVal.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} {secUnit}
+                                                                        </span>
                                                                     );
                                                                 }
                                                                 return null;
@@ -417,29 +388,29 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients =
                                                         {item.diff > 0 ? `+${item.diff.toLocaleString('pt-BR')}` : item.diff.toLocaleString('pt-BR')}
                                                     </TableCell>
                                                     <TableCell className="bg-amber-50/30 p-2 align-top">
-                                                        <div className="flex flex-col gap-1">
+                                                        <div className="flex flex-col gap-1 items-center justify-center">
                                                             {/* Primary Cost */}
-                                                            <div className="relative">
+                                                            <div className="relative w-full">
                                                                 <Input
                                                                     type="number"
                                                                     step="0.0001"
-                                                                    className="text-center h-7 text-xs pr-8"
+                                                                    className="text-center h-8 text-xs pr-8"
                                                                     value={item.newCost}
                                                                     onChange={(e) => handleCostChange(item.id, e.target.value)}
+                                                                    placeholder={String(item.systemCost)}
                                                                 />
-                                                                <span className="absolute right-2 top-1.5 text-[10px] text-zinc-400 pointer-events-none">
+                                                                <span className="absolute right-2 top-2 text-[10px] text-zinc-400 pointer-events-none">
                                                                     /{item.unit}
                                                                 </span>
                                                             </div>
-
-                                                            {/* Secondary Cost (if applicable) OR Total Value */}
+ 
+                                                            {/* Secondary Cost & Total Value Display in Text */}
                                                             {(() => {
                                                                 const original = ingredients.find(i => i.id === item.id);
-
                                                                 let factor = 1;
                                                                 let secUnit = null;
                                                                 let isRecipeUnit = false;
-
+ 
                                                                 if (original?.purchase_unit && original.purchase_unit.toLowerCase() !== item.unit.toLowerCase()) {
                                                                     secUnit = original.purchase_unit;
                                                                     factor = original.purchase_unit_factor || 1;
@@ -450,68 +421,24 @@ export function InventoryAuditDialog({ isOpen, onClose, onSuccess, ingredients =
                                                                     factor = original.unit_weight || 1;
                                                                     isRecipeUnit = true;
                                                                 }
-
+ 
                                                                 const showSecondary = !!secUnit && factor !== 1;
-
+                                                                const baseCost = item.newCost !== "" ? Number(item.newCost) : (Number(item.systemCost) || 0);
+                                                                const qty = item.physicalStock !== "" ? (Number(item.physicalStock) || 0) : item.systemStock;
+ 
                                                                 if (showSecondary) {
-                                                                    // COST Logic (Inverse of Stock)
-                                                                    const baseCost = Number(item.newCost) || 0;
                                                                     const secCost = isRecipeUnit ? baseCost / factor : baseCost * factor;
-
-                                                                    const displaySecCost = secCost === 0 && item.newCost === "" ? "" : secCost.toLocaleString('en-US', { maximumFractionDigits: 4, useGrouping: false });
-
                                                                     return (
-                                                                        <div className="relative">
-                                                                            <Input
-                                                                                type="number"
-                                                                                step="0.01"
-                                                                                className="text-center h-7 text-xs bg-amber-100/50 pr-8 text-amber-700"
-                                                                                defaultValue={displaySecCost}
-                                                                                onBlur={(e) => {
-                                                                                    const val = parseFloat(e.target.value);
-                                                                                    if (!isNaN(val)) {
-                                                                                        // Reverse Logic
-                                                                                        const baseVal = isRecipeUnit ? val * factor : val / factor;
-                                                                                        handleCostChange(item.id, baseVal.toString());
-                                                                                    }
-                                                                                }}
-                                                                                key={`${item.id}-sec-cost-${item.newCost}`}
-                                                                            />
-                                                                            <span className="absolute right-2 top-1.5 text-[10px] text-amber-600 pointer-events-none">
-                                                                                /{secUnit}
-                                                                            </span>
+                                                                        <div className="flex flex-col items-center text-[10px] text-zinc-500 font-semibold mt-1">
+                                                                            <span>= R$ {secCost.toLocaleString('pt-BR', { maximumFractionDigits: 4 })} /{secUnit}</span>
+                                                                            <span className="text-[9px] text-zinc-400 font-normal mt-0.5">Total: R$ {(qty * baseCost).toFixed(2)}</span>
                                                                         </div>
                                                                     );
                                                                 } else {
-                                                                    // Show Total Value Option if no secondary unit
-                                                                    // logic: Total = Qty * Cost.
-                                                                    // If Qty is 0, we can't really set Unit Cost via Total.
-                                                                    const qty = Number(item.physicalStock) || 0;
-                                                                    const baseCost = Number(item.newCost) || 0;
-                                                                    const totalVal = qty * baseCost;
-                                                                    const displayTotal = totalVal === 0 && item.newCost === "" ? "" : totalVal.toLocaleString('en-US', { maximumFractionDigits: 2, useGrouping: false });
-
                                                                     return (
-                                                                        <div className="relative" title="Valor Total (Estoque)">
-                                                                            <Input
-                                                                                type="number"
-                                                                                step="0.01"
-                                                                                className="text-center h-7 text-xs bg-emerald-50 pr-8 text-emerald-700 border-emerald-200"
-                                                                                placeholder="Total"
-                                                                                disabled={qty === 0}
-                                                                                defaultValue={displayTotal}
-                                                                                onBlur={(e) => {
-                                                                                    const val = parseFloat(e.target.value);
-                                                                                    if (!isNaN(val) && qty > 0) {
-                                                                                        handleCostChange(item.id, (val / qty).toString());
-                                                                                    }
-                                                                                }}
-                                                                                key={`${item.id}-total-cost-${item.newCost}-${item.physicalStock}`}
-                                                                            />
-                                                                            <span className="absolute right-2 top-1.5 text-[10px] text-emerald-600 pointer-events-none">
-                                                                                Total
-                                                                            </span>
-                                                                        </div>
+                                                                        <span className="text-[10px] text-zinc-400 font-normal mt-1">
+                                                                            Total: R$ {(qty * baseCost).toFixed(2)}
+                                                                        </span>
                                                                     );
                                                                 }
                                                             })()}

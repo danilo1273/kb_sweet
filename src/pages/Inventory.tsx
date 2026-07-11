@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { Search, Loader2, Edit, Trash2, History, Settings, Plus, Package, ClipboardCheck } from "lucide-react";
+import { Search, Loader2, Edit, Trash2, History, Settings, Plus, Package, ClipboardCheck, Sliders } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InventoryAuditDialog } from "@/components/inventory/InventoryAuditDialog";
@@ -55,6 +55,15 @@ export default function Inventory() {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [currentIngredient, setCurrentIngredient] = useState<Partial<InventoryItem>>({});
     const [isSaving, setIsSaving] = useState(false);
+
+    // Quick Adjustment State
+    const [isQuickAdjustmentOpen, setIsQuickAdjustmentOpen] = useState(false);
+    const [quickAdjustmentItem, setQuickAdjustmentItem] = useState<any>(null);
+    const [adjustmentType, setAdjustmentType] = useState<'set' | 'add' | 'sub'>('set');
+    const [adjustmentQty, setAdjustmentQty] = useState<string>('');
+    const [adjustmentCost, setAdjustmentCost] = useState<string>('');
+    const [adjustmentReason, setAdjustmentReason] = useState<string>('Ajuste rápido');
+    const [quickAdjustmentLocation, setQuickAdjustmentLocation] = useState<string>('');
 
     // History Modal State
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -428,6 +437,123 @@ export default function Inventory() {
         setCurrentIngredient(ingredient);
         setIsDialogOpen(true);
     };
+
+    const openQuickAdjustment = (item: any) => {
+        setQuickAdjustmentItem(item);
+        const defaultLoc = warehouseFilter !== 'all' ? warehouseFilter : (stockLocations.find(l => l.is_default)?.slug || stockLocations[0]?.slug || '');
+        
+        let currentCostVal = item.cost || 0;
+        const locObj = stockLocations.find(l => l.slug === defaultLoc || l.id === defaultLoc);
+        if (locObj) {
+            const stockEntry = item.stocks?.find((s: any) => s.location_id === locObj.id);
+            if (stockEntry) currentCostVal = stockEntry.average_cost || item.cost || 0;
+        }
+
+        setQuickAdjustmentLocation(defaultLoc);
+        setAdjustmentType('set');
+        setAdjustmentQty('');
+        setAdjustmentCost(currentCostVal.toString());
+        setAdjustmentReason('Ajuste rápido');
+        setIsQuickAdjustmentOpen(true);
+    };
+
+    async function handleSaveQuickAdjustment() {
+        if (!quickAdjustmentItem) return;
+        setIsSaving(true);
+        try {
+            const locObj = stockLocations.find(l => l.slug === quickAdjustmentLocation || l.id === quickAdjustmentLocation);
+            if (!locObj) throw new Error("Selecione um local de estoque válido.");
+
+            const stockEntry = quickAdjustmentItem.stocks?.find((s: any) => s.location_id === locObj.id);
+            const currentQty = stockEntry ? Number(stockEntry.quantity || 0) : 0;
+
+            let newQty = currentQty;
+            const inputQty = Number(adjustmentQty);
+
+            if (adjustmentQty !== '') {
+                if (adjustmentType === 'set') {
+                    newQty = inputQty;
+                } else if (adjustmentType === 'add') {
+                    newQty = currentQty + inputQty;
+                } else if (adjustmentType === 'sub') {
+                    newQty = currentQty - inputQty;
+                }
+            }
+
+            const isProduct = !!quickAdjustmentItem.is_product_entity;
+
+            // 1. Quantidade
+            if (adjustmentQty !== '' && newQty !== currentQty) {
+                if (isProduct) {
+                    const { error } = await supabase.rpc('apply_product_stock_adjustment', {
+                        p_product_id: quickAdjustmentItem.id,
+                        p_new_stock: newQty,
+                        p_stock_owner: locObj.slug,
+                        p_reason: adjustmentReason || 'Ajuste rápido',
+                        p_type: newQty > currentQty ? 'found' : 'loss'
+                    });
+                    if (error) throw error;
+                } else {
+                    const { error } = await supabase.rpc('apply_stock_adjustment', {
+                        p_ingredient_id: quickAdjustmentItem.id,
+                        p_new_stock: newQty,
+                        p_stock_owner: locObj.slug,
+                        p_reason: adjustmentReason || 'Ajuste rápido',
+                        p_type: newQty > currentQty ? 'found' : 'loss'
+                    });
+                    if (error) throw error;
+                }
+            }
+
+            // 2. Custo
+            if (adjustmentCost !== '') {
+                const newCostVal = Number(adjustmentCost);
+                const updatePayload: any = { cost: newCostVal };
+                if (locObj.slug === 'stock-danilo') updatePayload['cost_danilo'] = newCostVal;
+                else if (locObj.slug === 'stock-adriel') updatePayload['cost_adriel'] = newCostVal;
+
+                if (isProduct) {
+                    const { error } = await supabase.from('products').update(updatePayload).eq('id', quickAdjustmentItem.id);
+                    if (error) throw error;
+                } else {
+                    const { error } = await supabase.from('ingredients').update(updatePayload).eq('id', quickAdjustmentItem.id);
+                    if (error) throw error;
+                }
+
+                const { data: existingStock } = await supabase.from('product_stocks')
+                    .select('id')
+                    .eq('location_id', locObj.id)
+                    .eq(isProduct ? 'product_id' : 'ingredient_id', quickAdjustmentItem.id)
+                    .maybeSingle();
+
+                if (existingStock) {
+                    await supabase.from('product_stocks')
+                        .update({ average_cost: newCostVal, last_updated: new Date().toISOString() })
+                        .eq('id', existingStock.id);
+                } else {
+                    const insertData: any = {
+                        location_id: locObj.id,
+                        average_cost: newCostVal,
+                        quantity: newQty,
+                        last_updated: new Date().toISOString()
+                    };
+                    if (isProduct) insertData.product_id = quickAdjustmentItem.id;
+                    else insertData.ingredient_id = quickAdjustmentItem.id;
+
+                    await supabase.from('product_stocks').insert(insertData);
+                }
+            }
+
+            toast({ title: "Estoque ajustado com sucesso!" });
+            setIsQuickAdjustmentOpen(false);
+            fetchIngredients();
+        } catch (error: any) {
+            console.error(error);
+            toast({ variant: 'destructive', title: 'Erro ao ajustar estoque', description: error.message });
+        } finally {
+            setIsSaving(false);
+        }
+    }
 
     const openHistory = async (ingredient: Ingredient) => {
         setIsHistoryOpen(true);
@@ -845,9 +971,16 @@ export default function Inventory() {
                                     {/* Action Buttons */}
                                     <div className="flex items-center gap-0.5 shrink-0 bg-zinc-50 p-0.5 rounded-lg border border-zinc-200">
                                         {item.type !== 'expense' && (
-                                            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-white" onClick={() => openHistory(item as any)} title="Histórico">
-                                                <History className="h-3.5 w-3.5 text-blue-500" />
-                                            </Button>
+                                            <>
+                                                <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-white" onClick={() => openHistory(item as any)} title="Histórico">
+                                                    <History className="h-3.5 w-3.5 text-blue-500" />
+                                                </Button>
+                                                {isAdmin && (
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-white text-emerald-600" onClick={() => openQuickAdjustment(item as any)} title="Ajuste Rápido">
+                                                        <Sliders className="h-3.5 w-3.5 text-emerald-600" />
+                                                    </Button>
+                                                )}
+                                            </>
                                         )}
                                         <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-white" onClick={() => openEdit(item as any)} title="Editar">
                                             <Edit className="h-3.5 w-3.5 text-zinc-500" />
@@ -1117,9 +1250,16 @@ export default function Inventory() {
                                             <TableCell className="text-right font-bold text-green-700 bg-zinc-50">{item.type === 'expense' ? '-' : `R$ ${(Number(totalVal) || 0).toFixed(2)}`}</TableCell>
 
                                             <TableCell className="text-right space-x-1">
-                                                <Button variant="ghost" size="icon" onClick={() => openHistory(item)} title="Histórico de Compras">
-                                                    <History className="h-4 w-4 text-blue-500" />
-                                                </Button>
+                                                {item.type !== 'expense' && (
+                                                    <Button variant="ghost" size="icon" onClick={() => openHistory(item)} title="Histórico de Compras">
+                                                        <History className="h-4 w-4 text-blue-500" />
+                                                    </Button>
+                                                )}
+                                                {isAdmin && item.type !== 'expense' && (
+                                                    <Button variant="ghost" size="icon" onClick={() => openQuickAdjustment(item)} title="Ajuste Rápido de Estoque/Custo">
+                                                        <Sliders className="h-4 w-4 text-emerald-600" />
+                                                    </Button>
+                                                )}
                                                 <Button variant="ghost" size="icon" onClick={() => openEdit(item)} title="Editar">
                                                     <Edit className="h-4 w-4 text-zinc-500" />
                                                 </Button>
@@ -1581,6 +1721,145 @@ export default function Inventory() {
                     </div>
                 </DialogContent>
             </Dialog>
-        </div >
+
+            {/* Dialog de Ajuste Rápido */}
+            <Dialog open={isQuickAdjustmentOpen} onOpenChange={setIsQuickAdjustmentOpen}>
+                <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Sliders className="h-5 w-5 text-emerald-600" />
+                            Ajuste Rápido de Estoque
+                        </DialogTitle>
+                    </DialogHeader>
+ 
+                    {quickAdjustmentItem && (
+                        <div className="space-y-4 py-2">
+                            {/* Nome do Item */}
+                            <div>
+                                <h3 className="font-bold text-zinc-900">{quickAdjustmentItem.name}</h3>
+                                <p className="text-xs text-zinc-500 uppercase mt-0.5">
+                                    {quickAdjustmentItem.is_product_entity ? "Produto Acabado" : "Insumo"} • {quickAdjustmentItem.unit}
+                                </p>
+                            </div>
+ 
+                            {/* Local de Estoque */}
+                            <div className="space-y-1">
+                                <Label>Estoque/Armazém</Label>
+                                <Select
+                                    value={quickAdjustmentLocation}
+                                    onValueChange={(val) => {
+                                        setQuickAdjustmentLocation(val);
+                                        const locObj = stockLocations.find(l => l.slug === val || l.id === val);
+                                        if (locObj) {
+                                            const stockEntry = quickAdjustmentItem.stocks?.find((s: any) => s.location_id === locObj.id);
+                                            setAdjustmentCost((stockEntry?.average_cost || quickAdjustmentItem.cost || 0).toString());
+                                        }
+                                    }}
+                                >
+                                    <SelectTrigger className="w-full">
+                                        <SelectValue placeholder="Selecione o estoque..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {stockLocations.map(loc => (
+                                            <SelectItem key={loc.id} value={loc.slug}>{loc.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+ 
+                            {/* Informações Atuais */}
+                            <div className="grid grid-cols-2 gap-2 bg-zinc-50 p-2.5 rounded-lg border text-xs text-zinc-600">
+                                <div>
+                                    <span className="block font-normal text-[10px] text-zinc-400 uppercase">Qtd Atual no Local</span>
+                                    <span className="font-bold text-zinc-800 text-sm">
+                                        {(() => {
+                                            const locObj = stockLocations.find(l => l.slug === quickAdjustmentLocation || l.id === quickAdjustmentLocation);
+                                            const stockEntry = quickAdjustmentItem.stocks?.find((s: any) => s.location_id === locObj?.id);
+                                            const qty = stockEntry ? Number(stockEntry.quantity || 0) : 0;
+                                            return `${qty.toLocaleString('pt-BR')} ${quickAdjustmentItem.unit}`;
+                                        })()}
+                                    </span>
+                                </div>
+                                <div>
+                                    <span className="block font-normal text-[10px] text-zinc-400 uppercase">Custo Médio Atual</span>
+                                    <span className="font-bold text-zinc-800 text-sm">
+                                        {(() => {
+                                            const locObj = stockLocations.find(l => l.slug === quickAdjustmentLocation || l.id === quickAdjustmentLocation);
+                                            const stockEntry = quickAdjustmentItem.stocks?.find((s: any) => s.location_id === locObj?.id);
+                                            const cost = stockEntry?.average_cost || quickAdjustmentItem.cost || 0;
+                                            return `R$ ${Number(cost).toFixed(2)}`;
+                                        })()}
+                                    </span>
+                                </div>
+                            </div>
+ 
+                            {/* Tipo de Ajuste e Valor */}
+                            <div className="space-y-2">
+                                <Label>Alterar Quantidade</Label>
+                                <div className="flex gap-2">
+                                    <Select
+                                        value={adjustmentType}
+                                        onValueChange={(val: any) => setAdjustmentType(val)}
+                                    >
+                                        <SelectTrigger className="w-[140px]">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="set">Definir para</SelectItem>
+                                            <SelectItem value="add">Somar (+)</SelectItem>
+                                            <SelectItem value="sub">Subtrair (-)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <div className="relative flex-1">
+                                        <Input
+                                            type="number"
+                                            value={adjustmentQty}
+                                            onChange={(e) => setAdjustmentQty(e.target.value)}
+                                            placeholder="Ex: 5"
+                                            className="pr-12"
+                                        />
+                                        <span className="absolute right-3 top-2.5 text-xs text-zinc-400 pointer-events-none">
+                                            {quickAdjustmentItem.unit}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+ 
+                            {/* Custo Médio Novo */}
+                            <div className="space-y-1">
+                                <Label htmlFor="quick-cost">Novo Custo Médio (R$)</Label>
+                                <Input
+                                    id="quick-cost"
+                                    type="number"
+                                    step="0.01"
+                                    value={adjustmentCost}
+                                    onChange={(e) => setAdjustmentCost(e.target.value)}
+                                    placeholder="R$ 0.00"
+                                />
+                            </div>
+ 
+                            {/* Justificativa */}
+                            <div className="space-y-1">
+                                <Label htmlFor="quick-reason">Motivo / Justificativa</Label>
+                                <Input
+                                    id="quick-reason"
+                                    value={adjustmentReason}
+                                    onChange={(e) => setAdjustmentReason(e.target.value)}
+                                    placeholder="Ex: Quebra de estoque, correção de contagem"
+                                />
+                            </div>
+                        </div>
+                    )}
+ 
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsQuickAdjustmentOpen(false)}>Cancelar</Button>
+                        <Button onClick={handleSaveQuickAdjustment} disabled={isSaving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Confirmar Ajuste
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </div>
     );
 }
