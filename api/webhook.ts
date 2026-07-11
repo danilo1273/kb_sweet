@@ -43,8 +43,9 @@ async function generateContentREST(prompt: string, model: string = 'gemini-2.5-f
   }
   parts.push({ text: prompt });
 
+  const timeoutMs = 15000;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 seconds timeout
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs); // 15 seconds timeout
 
   try {
     const response = await fetch(url, {
@@ -72,7 +73,7 @@ async function generateContentREST(prompt: string, model: string = 'gemini-2.5-f
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
-      throw new Error(`Tempo limite de 5s excedido para o modelo ${model}`);
+      throw new Error(`Tempo limite de ${timeoutMs / 1000}s excedido para o modelo ${model}`);
     }
     throw err;
   }
